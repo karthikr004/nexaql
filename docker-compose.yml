@@ -1,0 +1,26 @@
+services:
+  postgres:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: nexaql
+      POSTGRES_PASSWORD: nexaql
+      POSTGRES_DB: nexaql
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+  nexaql:
+    build: .
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./nexaql.yaml:/app/nexaql.yaml
+      - ./ontologies:/app/ontologies
+    environment:
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY}
+    depends_on:
+      - postgres
+
+volumes:
+  pgdata:

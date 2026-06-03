@@ -1,0 +1,31 @@
+# NexaQL configuration
+# See https://github.com/karthikr004/nexaql for documentation.
+
+ontology:
+  path: ./ontologies/sample_ecommerce.yaml
+
+datasources:
+  # Quick start: in-memory DuckDB with sample e-commerce data.
+  # No external database needed — just run `nexaql serve` and start querying.
+  default:
+    type: duckdb
+    path: ":memory:"
+    seed_file: ./ontologies/sample_ecommerce_seed.sql
+
+  # To use your own PostgreSQL database instead, uncomment below:
+  # default:
+  #   type: postgresql
+  #   url: postgresql://user:pass@localhost:5432/mydb
+
+llm:
+  provider: anthropic
+  api_key: ${ANTHROPIC_API_KEY}
+  model: claude-sonnet-4-20250514
+  max_tokens: 4096
+  summary_max_tokens: 1024
+
+server:
+  host: 0.0.0.0
+  port: 3717
+  cors_origins:
+    - "*"

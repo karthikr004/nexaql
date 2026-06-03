@@ -1,0 +1,57 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# NexaQL configuration — nexaql.yaml
+# Copy this file to nexaql.yaml and fill in your values.
+# Strings of the form ${ENV_VAR} are replaced with environment variable values.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Path to the ontology YAML file that describes your data model.
+ontology:
+  path: ./ontologies/sample_ecommerce.yaml
+
+# Named datasource connections. Each node in the ontology can reference one
+# of these by name via its `datasource` field.
+datasources:
+  # Quick start: in-memory DuckDB with sample e-commerce data.
+  # No external database needed — just run `nexaql serve` and start querying.
+  default:
+    type: duckdb
+    path: ":memory:"
+    seed_file: ./ontologies/sample_ecommerce_seed.sql  # auto-creates tables + sample data
+
+  # To use your own PostgreSQL database instead:
+  # default:
+  #   type: postgresql
+  #   url: ${DATABASE_URL}
+  #   ssl: true
+
+  # analytics_duckdb:
+  #   type: duckdb
+  #   path: ./data/analytics.duckdb
+
+  # warehouse:
+  #   type: snowflake
+  #   url: ${SNOWFLAKE_URL}
+  #   account: my_account
+  #   warehouse: compute_wh
+  #   database: analytics
+  #   schema: public
+
+  # rest_api:
+  #   type: rest
+  #   base_url: https://api.example.com/v1
+
+# LLM provider settings. The api_key should be set via an environment variable.
+llm:
+  provider: anthropic
+  api_key: ${ANTHROPIC_API_KEY}
+  model: claude-sonnet-4-20250514
+  max_tokens: 4096
+  summary_max_tokens: 1024
+
+# HTTP server settings.
+server:
+  host: 0.0.0.0
+  port: 3717
+  cors_origins:
+    - http://localhost:3000
+    - http://localhost:5173

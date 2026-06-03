@@ -1,0 +1,282 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Sample E-Commerce Ontology with Tiered Access Control
+# Ships with NexaQL — works out of the box with the sample DuckDB seed data.
+#
+# Access tiers:
+#   admin    — full access to all nodes, fields, and rows
+#   manager  — all nodes, but only their region's data; no PII masking
+#   analyst  — all nodes, but no PII fields (email, phone) and no financial amounts
+#   anonymous — can see products/categories only; orders without amounts; no customer data
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: "1"
+domain: ecommerce
+description: >
+  E-commerce platform with customers, orders, products, and categories.
+  Use the Role switcher to test access control across admin, manager, analyst, and anonymous roles.
+
+nodes:
+  # ── customer ─────────────────────────────────────────────────────
+  customer:
+    table: customers
+    description: Registered customers on the platform.
+    primary_key: id
+    visible_to: [analyst, manager, admin]         # anonymous cannot access
+    row_policies:
+      - condition: "region = '{user.region}'"
+        roles: [manager]
+        except_roles: [admin]
+    fields:
+      id:
+        type: integer
+        description: Unique customer identifier.
+        filterable: true
+      name:
+        type: string
+        description: Full name of the customer.
+        filterable: true
+      email:
+        type: string
+        description: Email address.
+        filterable: true
+        visible_to: [manager, admin]               # analysts can't see emails
+        pii: true
+        mask_with: email                           # admin sees masked email
+      phone:
+        type: string
+        description: Phone number.
+        visible_to: [manager, admin]
+        pii: true
+        mask_with: phone
+      region:
+        type: string
+        description: Geographic region (US-EAST, US-WEST, EU, APAC).
+        filterable: true
+      status:
+        type: enum
+        description: Account status.
+        filterable: true
+        values: [ACTIVE, INACTIVE, SUSPENDED]
+      created_at:
+        type: date
+        description: Date the account was created.
+        filterable: true
+      lifetime_value:
+        type: numeric
+        description: Total amount spent across all orders.
+        filterable: true
+        visible_to: [manager, admin]               # analysts can't see spend data
+    edges:
+      orders:
+        node: order
+        description: Orders placed by this customer.
+        join_type: LEFT
+        join_steps:
+          - table: orders
+            alias_key: order
+            condition: "{order}.customer_id = {customer}.id"
+    special_filters:
+      high_value:
+        description: Customers whose lifetime_value exceeds a given amount.
+        type: integer
+        sql: "{customer}.lifetime_value > {value}"
+      active:
+        description: Only active customers.
+        sql: "{customer}.status = 'ACTIVE'"
+
+  # ── order ────────────────────────────────────────────────────────
+  order:
+    table: orders
+    description: Customer orders.
+    primary_key: id
+    # all roles can access orders (including anonymous)
+    row_policies:
+      - condition: "customer_id IN (SELECT id FROM customers WHERE region = '{user.region}')"
+        roles: [manager]
+        except_roles: [admin]
+    fields:
+      id:
+        type: integer
+        description: Unique order identifier.
+        filterable: true
+      customer_id:
+        type: integer
+        description: FK to customers.
+        filterable: true
+        visible_to: [analyst, manager, admin]      # anonymous can't see customer_id
+      status:
+        type: enum
+        description: Current order status.
+        filterable: true
+        values: [PENDING, CONFIRMED, SHIPPED, DELIVERED, CANCELLED]
+      ordered_at:
+        type: date
+        description: Date the order was placed.
+        filterable: true
+      shipped_at:
+        type: date
+        description: Date the order was shipped.
+        filterable: true
+      total_amount:
+        type: numeric
+        description: Total order value.
+        filterable: true
+        visible_to: [manager, admin]               # analysts and anonymous can't see amounts
+    edges:
+      customer:
+        node: customer
+        description: The customer who placed this order.
+        join_steps:
+          - table: customers
+            alias_key: customer
+            condition: "{customer}.id = {order}.customer_id"
+      items:
+        node: order_item
+        description: Line items in this order.
+        join_type: LEFT
+        join_steps:
+          - table: order_items
+            alias_key: order_item
+            condition: "{order_item}.order_id = {order}.id"
+    special_filters:
+      large_order:
+        description: Orders with total_amount exceeding a given value.
+        type: integer
+        sql: "{order}.total_amount > {value}"
+
+  # ── order_item ───────────────────────────────────────────────────
+  order_item:
+    table: order_items
+    description: Individual line items within an order.
+    primary_key: id
+    # all roles can access
+    fields:
+      id:
+        type: integer
+        description: Unique line-item identifier.
+        filterable: true
+      order_id:
+        type: integer
+        description: FK to orders.
+        filterable: true
+      product_id:
+        type: integer
+        description: FK to products.
+        filterable: true
+      quantity:
+        type: integer
+        description: Number of units ordered.
+        filterable: true
+      unit_price:
+        type: numeric
+        description: Price per unit at the time of purchase.
+        filterable: true
+        visible_to: [manager, admin]               # analysts and anonymous can't see prices
+      line_total:
+        type: numeric
+        description: Line total (quantity * unit_price).
+        filterable: true
+        visible_to: [manager, admin]               # analysts and anonymous can't see amounts
+    edges:
+      order:
+        node: order
+        description: The parent order.
+        join_steps:
+          - table: orders
+            alias_key: order
+            condition: "{order}.id = {order_item}.order_id"
+      product:
+        node: product
+        description: The product purchased.
+        join_steps:
+          - table: products
+            alias_key: product
+            condition: "{product}.id = {order_item}.product_id"
+
+  # ── product ──────────────────────────────────────────────────────
+  product:
+    table: products
+    description: Products available for sale.
+    primary_key: id
+    # all roles can access — no restrictions
+    fields:
+      id:
+        type: integer
+        description: Unique product identifier.
+        filterable: true
+      name:
+        type: string
+        description: Product name.
+        filterable: true
+      sku:
+        type: string
+        description: Stock keeping unit code.
+        filterable: true
+      price:
+        type: numeric
+        description: Current retail price.
+        filterable: true
+        visible_to: [analyst, manager, admin]      # anonymous can't see prices
+      category_id:
+        type: integer
+        description: FK to categories.
+        filterable: true
+      is_active:
+        type: boolean
+        description: Whether the product is currently listed.
+        filterable: true
+      created_at:
+        type: date
+        description: Date the product was added.
+        filterable: true
+    edges:
+      category:
+        node: category
+        description: The category this product belongs to.
+        join_steps:
+          - table: categories
+            alias_key: category
+            condition: "{category}.id = {product}.category_id"
+      order_items:
+        node: order_item
+        description: Line items that reference this product.
+        join_type: LEFT
+        join_steps:
+          - table: order_items
+            alias_key: order_item
+            condition: "{order_item}.product_id = {product}.id"
+    special_filters:
+      in_stock:
+        description: Only active/listed products.
+        sql: "{product}.is_active = TRUE"
+
+  # ── category ─────────────────────────────────────────────────────
+  category:
+    table: categories
+    description: Product categories.
+    primary_key: id
+    # all roles can access — no restrictions
+    fields:
+      id:
+        type: integer
+        description: Unique category identifier.
+        filterable: true
+      name:
+        type: string
+        description: Category name.
+        filterable: true
+      slug:
+        type: string
+        description: URL-friendly category slug.
+      description:
+        type: string
+        description: Human-readable description of the category.
+    edges:
+      products:
+        node: product
+        description: Products in this category.
+        join_type: LEFT
+        join_steps:
+          - table: products
+            alias_key: product
+            condition: "{product}.category_id = {category}.id"

@@ -1,0 +1,1 @@
+{"root":["./src/app.tsx","./src/main.tsx","./src/types.ts","./src/components/agentchat.tsx","./src/components/chatquerypanel.tsx","./src/components/historypanel.tsx","./src/components/playground.tsx","./src/components/queryeditor.tsx","./src/components/resultspanel.tsx","./src/components/sqlpreview.tsx","./src/components/schemaexplorer.tsx"],"version":"5.9.3"}
