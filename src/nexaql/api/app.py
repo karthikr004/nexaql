@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexaql.api.deps import get_config
-from nexaql.api.routes import chat, execute, ontology, suggest, validate
+from nexaql.api.routes import admin, chat, execute, ontology, suggest, validate
 
 
 def create_app() -> FastAPI:
@@ -40,6 +40,7 @@ def create_app() -> FastAPI:
     app.include_router(ontology.router, prefix="/api")
     app.include_router(suggest.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
+    app.include_router(admin.router, prefix="/api")
 
     # ── Health check ────────────────────────────────────────────────────────
     @app.get("/api/health")

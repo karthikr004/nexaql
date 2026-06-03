@@ -14,6 +14,7 @@ import type {
 } from '../types';
 
 const QueryEditor = lazy(() => import('./QueryEditor'));
+const OntologyAdmin = lazy(() => import('./OntologyAdmin'));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -116,8 +117,8 @@ export default function Playground() {
   // Left panel view toggle
   const [leftView, setLeftView] = useState<'schema' | 'history'>('schema');
 
-  // Center panel view toggle: query editor or chat
-  const [centerView, setCenterView] = useState<'query' | 'chat'>('query');
+  // Center panel view toggle: query editor, chat, or admin
+  const [centerView, setCenterView] = useState<'query' | 'chat' | 'admin'>('query');
 
   // Last completed chat turn — drives the right panel in chat mode
   const [lastChatTurn, setLastChatTurn] = useState<ChatTurn | null>(null);
@@ -136,7 +137,7 @@ export default function Playground() {
   const dragRef = useRef<{ type: string; startX: number; startVal: number } | null>(null);
 
   // Load ontology
-  useEffect(() => {
+  const fetchOntology = useCallback(() => {
     fetch('/api/ontology')
       .then((r) => r.json())
       .then((data) => {
@@ -145,6 +146,14 @@ export default function Playground() {
       })
       .catch(console.error);
   }, []);
+
+  useEffect(() => {
+    fetchOntology();
+  }, [fetchOntology]);
+
+  const reloadOntology = useCallback(() => {
+    fetchOntology();
+  }, [fetchOntology]);
 
   // Reset results when role changes (forces re-run with new enforcement)
   const prevRoleRef = useRef(activeRole);
@@ -290,7 +299,7 @@ export default function Playground() {
     window.addEventListener('mouseup', onUp);
   };
 
-  const centerWidth = 100 - leftWidth - rightWidth;
+  const centerWidth = centerView === 'admin' ? 100 - leftWidth : 100 - leftWidth - rightWidth;
 
   const validationBadge = () => {
     if (!validLoaded) return null;
@@ -390,7 +399,7 @@ export default function Playground() {
       {/* Chat mode: full height. Query mode: share height with results panel */}
       <div
         className="flex overflow-hidden"
-        style={centerView === 'chat' ? { flex: '1 1 0', minHeight: 0 } : { height: `${100 - resultsH}%` }}
+        style={centerView === 'query' ? { height: `${100 - resultsH}%` } : { flex: '1 1 0', minHeight: 0 }}
       >
         {/* Left panel */}
         <div
@@ -452,7 +461,7 @@ export default function Playground() {
         <div style={{ width: `${centerWidth}%` }} className="flex shrink-0 flex-col overflow-hidden">
           {/* Center tab bar */}
           <div className="flex shrink-0 border-[#252d3d] border-b bg-[#0f1117]">
-            {(['query', 'chat'] as const).map((view) => (
+            {(['query', 'chat', 'admin'] as const).map((view) => (
               <button
                 type="button"
                 key={view}
@@ -461,7 +470,7 @@ export default function Playground() {
                   centerView === view ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
                 }`}
               >
-                {view === 'query' ? 'Query Editor' : '✦ Agent Chat'}
+                {view === 'query' ? 'Query Editor' : view === 'chat' ? '✦ Agent Chat' : '⚙ Admin'}
                 {centerView === view && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
               </button>
             ))}
@@ -483,37 +492,45 @@ export default function Playground() {
                   ontologyNodes={ontology?.nodes ?? []}
                 />
               </Suspense>
-            ) : (
+            ) : centerView === 'chat' ? (
               <AgentChat onTurnComplete={setLastChatTurn} />
+            ) : (
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-600 text-xs">Loading admin...</div>}>
+                <OntologyAdmin onOntologyChanged={reloadOntology} />
+              </Suspense>
             )}
           </div>
         </div>
 
-        {/* Right resizer */}
-        <div
-          className="z-10 w-1 shrink-0 cursor-col-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
-          onMouseDown={(e) => startHDrag('right', e)}
-        />
+        {/* Right resizer — hidden in admin mode */}
+        {centerView !== 'admin' && (
+          <div
+            className="z-10 w-1 shrink-0 cursor-col-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
+            onMouseDown={(e) => startHDrag('right', e)}
+          />
+        )}
 
-        {/* Right: SQL Preview (query mode) or Chat Query Panel (chat mode) */}
-        <div style={{ width: `${rightWidth}%` }} className="shrink-0 overflow-hidden">
-          {centerView === 'chat' ? (
-            <ChatQueryPanel
-              nexaqlQuery={lastChatTurn?.nexaqlQuery ?? null}
-              queryPreview={lastChatTurn?.queryPreview ?? null}
-              adapterType={lastChatTurn?.adapterType ?? null}
-            />
-          ) : (
-            <SQLPreview
-              queryPreview={result?.queryPreview ?? validation.queryPreview ?? null}
-              adapterType={result?.adapterType ?? validation.adapterType ?? null}
-              isLoading={isRunning}
-            />
-          )}
-        </div>
+        {/* Right: SQL Preview (query mode) or Chat Query Panel (chat mode) — hidden in admin */}
+        {centerView !== 'admin' && (
+          <div style={{ width: `${rightWidth}%` }} className="shrink-0 overflow-hidden">
+            {centerView === 'chat' ? (
+              <ChatQueryPanel
+                nexaqlQuery={lastChatTurn?.nexaqlQuery ?? null}
+                queryPreview={lastChatTurn?.queryPreview ?? null}
+                adapterType={lastChatTurn?.adapterType ?? null}
+              />
+            ) : (
+              <SQLPreview
+                queryPreview={result?.queryPreview ?? validation.queryPreview ?? null}
+                adapterType={result?.adapterType ?? validation.adapterType ?? null}
+                isLoading={isRunning}
+              />
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Vertical resizer + Results panel — hidden in chat mode */}
+      {/* Vertical resizer + Results panel — only shown in query mode */}
       {centerView === 'query' && (
         <>
           <div

@@ -95,3 +95,61 @@ export interface HistoryEntry {
   durationMs?: number;
   hadError: boolean;
 }
+
+// ── Full ontology structure for admin editing ────────────────────────────────
+
+export interface OntologyData {
+  version: string;
+  domain: string;
+  description: string;
+  nodes: Record<string, NodeData>;
+}
+
+export interface NodeData {
+  table?: string;
+  primary_key: string;
+  description: string;
+  datasource?: string;
+  visible_to?: string[];
+  row_policies?: RowPolicyData[];
+  fields: Record<string, FieldData>;
+  edges?: Record<string, EdgeData>;
+  special_filters?: Record<string, SpecialFilterData>;
+}
+
+export interface FieldData {
+  type: string;
+  description: string;
+  filterable?: boolean;
+  values?: string[];
+  derived?: boolean;
+  sql_expr?: string;
+  visible_to?: string[];
+  pii?: boolean;
+  mask_with?: string;
+}
+
+export interface EdgeData {
+  node: string;
+  description: string;
+  join_type?: string;
+  join_steps: JoinStepData[];
+}
+
+export interface JoinStepData {
+  table: string;
+  alias_key: string;
+  condition: string;
+}
+
+export interface SpecialFilterData {
+  description: string;
+  sql: string;
+  type?: string;
+}
+
+export interface RowPolicyData {
+  condition: string;
+  roles: string[];
+  except_roles?: string[];
+}
