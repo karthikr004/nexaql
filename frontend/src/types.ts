@@ -103,6 +103,7 @@ export interface OntologyData {
   domain: string;
   description: string;
   nodes: Record<string, NodeData>;
+  access_functions?: Record<string, AccessFunctionData>;
 }
 
 export interface NodeData {
@@ -152,4 +153,13 @@ export interface RowPolicyData {
   condition: string;
   roles: string[];
   except_roles?: string[];
+  mode?: 'function' | 'raw';
+  function_name?: string;
+  function_field?: string;
+}
+
+export interface AccessFunctionData {
+  description: string;
+  sql: string;
+  requires?: string[];
 }

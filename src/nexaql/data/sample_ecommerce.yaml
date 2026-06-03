@@ -2,6 +2,16 @@
 # Sample E-Commerce Ontology with Tiered Access Control
 # Ships with NexaQL — works out of the box with the sample DuckDB seed data.
 #
+# Standard user context attributes:
+#   user.user_id    — unique user identifier
+#   user.name       — display name
+#   user.email      — email address
+#   user.manager_id — user's manager ID (for org hierarchy policies)
+#   user.region     — geographic region (US-EAST, US-WEST, EU, APAC)
+#   user.level      — seniority level (L1-L10)
+#   user.job_role   — job role/title
+#   user.team_id    — team identifier
+#
 # Access tiers:
 #   admin    — full access to all nodes, fields, and rows
 #   manager  — all nodes, but only their region's data; no PII masking
@@ -15,7 +25,79 @@ description: >
   E-commerce platform with customers, orders, products, and categories.
   Use the Role switcher to test access control across admin, manager, analyst, and anonymous roles.
 
+access_functions:
+  self_only:
+    description: "Only records created by the current user"
+    sql: "{field} = '{user.user_id}'"
+    requires: ["user.user_id"]
+  same_team:
+    description: "Records created by users on the same team"
+    sql: "{field} IN (SELECT user_id FROM employees WHERE team_id = '{user.team_id}')"
+    requires: ["user.team_id"]
+  same_manager:
+    description: "Records created by users reporting to the same manager"
+    sql: "{field} IN (SELECT user_id FROM employees WHERE manager_id = '{user.manager_id}')"
+    requires: ["user.manager_id"]
+  direct_reports:
+    description: "Records created by the user's direct reports"
+    sql: "{field} IN (SELECT user_id FROM employees WHERE manager_id = '{user.user_id}')"
+    requires: ["user.user_id"]
+  region_match:
+    description: "Records where region matches the user's region"
+    sql: "{field} = '{user.region}'"
+    requires: ["user.region"]
+  department_match:
+    description: "Records created by users in the same department"
+    sql: "{field} IN (SELECT user_id FROM employees WHERE department = '{user.department}')"
+    requires: ["user.department"]
+
 nodes:
+  # ── employee ─────────────────────────────────────────────────────
+  employee:
+    table: employees
+    description: "Internal users/employees who create and manage records."
+    primary_key: user_id
+    visible_to: [admin]
+    fields:
+      user_id:
+        type: string
+        description: Unique employee identifier.
+        filterable: true
+      name:
+        type: string
+        description: Employee full name.
+        filterable: true
+      email:
+        type: string
+        description: Employee email.
+        filterable: true
+        pii: true
+        mask_with: email
+      manager_id:
+        type: string
+        description: ID of the employee's manager.
+        filterable: true
+      region:
+        type: string
+        description: Employee's region.
+        filterable: true
+      department:
+        type: string
+        description: Department name.
+        filterable: true
+      team_id:
+        type: string
+        description: Team identifier.
+        filterable: true
+      level:
+        type: string
+        description: Seniority level (L1-L10).
+        filterable: true
+      job_role:
+        type: string
+        description: Job title/role.
+        filterable: true
+
   # ── customer ─────────────────────────────────────────────────────
   customer:
     table: customers
@@ -23,7 +105,8 @@ nodes:
     primary_key: id
     visible_to: [analyst, manager, admin]         # anonymous cannot access
     row_policies:
-      - condition: "region = '{user.region}'"
+      - function: region_match
+        field: region
         roles: [manager]
         except_roles: [admin]
     fields:
@@ -66,6 +149,11 @@ nodes:
         description: Total amount spent across all orders.
         filterable: true
         visible_to: [manager, admin]               # analysts can't see spend data
+      created_by:
+        type: string
+        description: "User who created this record."
+        filterable: true
+        visible_to: [manager, admin]
     edges:
       orders:
         node: order
@@ -91,7 +179,8 @@ nodes:
     primary_key: id
     # all roles can access orders (including anonymous)
     row_policies:
-      - condition: "customer_id IN (SELECT id FROM customers WHERE region = '{user.region}')"
+      - function: same_team
+        field: customer_id
         roles: [manager]
         except_roles: [admin]
     fields:
@@ -122,6 +211,11 @@ nodes:
         description: Total order value.
         filterable: true
         visible_to: [manager, admin]               # analysts and anonymous can't see amounts
+      created_by:
+        type: string
+        description: "User who created this record."
+        filterable: true
+        visible_to: [manager, admin]
     edges:
       customer:
         node: customer
@@ -177,6 +271,11 @@ nodes:
         description: Line total (quantity * unit_price).
         filterable: true
         visible_to: [manager, admin]               # analysts and anonymous can't see amounts
+      created_by:
+        type: string
+        description: "User who created this record."
+        filterable: true
+        visible_to: [manager, admin]
     edges:
       order:
         node: order
@@ -229,6 +328,11 @@ nodes:
         type: date
         description: Date the product was added.
         filterable: true
+      created_by:
+        type: string
+        description: "User who created this record."
+        filterable: true
+        visible_to: [manager, admin]
     edges:
       category:
         node: category
@@ -271,6 +375,11 @@ nodes:
       description:
         type: string
         description: Human-readable description of the category.
+      created_by:
+        type: string
+        description: "User who created this record."
+        filterable: true
+        visible_to: [manager, admin]
     edges:
       products:
         node: product

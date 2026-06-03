@@ -14,7 +14,7 @@ import type {
 } from '../types';
 
 const QueryEditor = lazy(() => import('./QueryEditor'));
-const OntologyAdmin = lazy(() => import('./OntologyAdmin'));
+const AdminView = lazy(() => import('./AdminView'));
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -90,16 +90,31 @@ export default function Playground() {
   const [isRunning, setIsRunning] = useState(false);
   const [isIdle, setIsIdle] = useState(true);
 
+  // Top-level view: playground or admin
+  const [view, setView] = useState<'playground' | 'admin'>('playground');
+
   // Role switcher for access control testing
   const [activeRole, setActiveRole] = useState<string>('anonymous');
 
-  const ROLE_CONFIGS: Record<string, { label: string; roles: string[]; attributes: Record<string, string> }> = {
-    anonymous: { label: '👤 Anonymous', roles: [], attributes: {} },
-    analyst: { label: '🔍 Analyst', roles: ['analyst'], attributes: {} },
-    'manager-east': { label: '🔒 Manager (US-EAST)', roles: ['manager'], attributes: { region: 'US-EAST' } },
-    'manager-west': { label: '🔒 Manager (US-WEST)', roles: ['manager'], attributes: { region: 'US-WEST' } },
-    'manager-eu': { label: '🔒 Manager (EU)', roles: ['manager'], attributes: { region: 'EU' } },
-    admin: { label: '⚡ Admin (full access)', roles: ['admin'], attributes: {} },
+  const ROLE_CONFIGS: Record<string, { label: string; roles: string[]; user_id: string; attributes: Record<string, string> }> = {
+    anonymous: { label: '👤 Anonymous', roles: [], user_id: 'anonymous', attributes: {} },
+    analyst: { label: '🔍 Analyst (bob)', roles: ['analyst'], user_id: 'bob', attributes: {
+      name: 'Bob Smith', email: 'bob@company.com', manager_id: 'mgr-east', region: 'US-EAST',
+      department: 'Engineering', team_id: 'eng-platform', level: 'L4', job_role: 'Software Engineer'
+    }},
+    'manager-east': { label: '🔒 Manager (alice, US-EAST)', roles: ['manager'], user_id: 'alice', attributes: {
+      name: 'Alice Johnson', email: 'alice@company.com', manager_id: 'mgr-east', region: 'US-EAST',
+      department: 'Engineering', team_id: 'eng-platform', level: 'L6', job_role: 'Engineering Manager'
+    }},
+    'manager-west': { label: '🔒 Manager (carol, US-WEST)', roles: ['manager'], user_id: 'carol', attributes: {
+      name: 'Carol Williams', email: 'carol@company.com', manager_id: 'mgr-west', region: 'US-WEST',
+      department: 'Sales', team_id: 'sales-west', level: 'L6', job_role: 'Sales Manager'
+    }},
+    'manager-eu': { label: '🔒 Manager (emma, EU)', roles: ['manager'], user_id: 'emma', attributes: {
+      name: 'Emma Davis', email: 'emma@company.com', manager_id: 'mgr-eu', region: 'EU',
+      department: 'Operations', team_id: 'ops-eu', level: 'L6', job_role: 'Operations Manager'
+    }},
+    admin: { label: '⚡ Admin (full access)', roles: ['admin'], user_id: 'admin', attributes: {} },
   };
 
   const userContextHeaders = (): Record<string, string> => {
@@ -107,9 +122,9 @@ export default function Playground() {
     if (!cfg) return {};
     return {
       'X-User-Context': JSON.stringify({
-        user_id: activeRole === 'anonymous' ? 'anonymous' : 'demo',
+        user_id: cfg.user_id,
         roles: cfg.roles,
-        attributes: cfg.attributes,
+        ...cfg.attributes,
       }),
     };
   };
@@ -117,8 +132,8 @@ export default function Playground() {
   // Left panel view toggle
   const [leftView, setLeftView] = useState<'schema' | 'history'>('schema');
 
-  // Center panel view toggle: query editor, chat, or admin
-  const [centerView, setCenterView] = useState<'query' | 'chat' | 'admin'>('query');
+  // Center panel view toggle: query editor or chat
+  const [centerView, setCenterView] = useState<'query' | 'chat'>('query');
 
   // Last completed chat turn — drives the right panel in chat mode
   const [lastChatTurn, setLastChatTurn] = useState<ChatTurn | null>(null);
@@ -299,7 +314,7 @@ export default function Playground() {
     window.addEventListener('mouseup', onUp);
   };
 
-  const centerWidth = centerView === 'admin' ? 100 - leftWidth : 100 - leftWidth - rightWidth;
+  const centerWidth = 100 - leftWidth - rightWidth;
 
   const validationBadge = () => {
     if (!validLoaded) return null;
@@ -315,6 +330,18 @@ export default function Playground() {
       </span>
     );
   };
+
+  // ── Admin view ─────────────────────────────────────────────────────────────
+
+  if (view === 'admin') {
+    return (
+      <Suspense fallback={<div className="flex h-screen items-center justify-center bg-[#0f1117] text-slate-600 text-sm">Loading admin...</div>}>
+        <AdminView onBack={() => setView('playground')} onOntologyChanged={reloadOntology} />
+      </Suspense>
+    );
+  }
+
+  // ── Playground view ────────────────────────────────────────────────────────
 
   return (
     <div className="flex h-screen flex-col overflow-hidden bg-[#0f1117]">
@@ -392,6 +419,18 @@ export default function Playground() {
               </>
             )}
           </button>
+          {/* Admin gear icon */}
+          <button
+            type="button"
+            onClick={() => setView('admin')}
+            className="rounded border border-[#252d3d] bg-[#1e2535] p-1.5 text-slate-400 transition-colors hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+            title="Settings & Admin"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+            </svg>
+          </button>
         </div>
       </header>
 
@@ -408,16 +447,16 @@ export default function Playground() {
         >
           {/* Left panel tab toggle */}
           <div className="flex shrink-0 border-[#252d3d] border-b bg-[#0f1117]">
-            {(['schema', 'history'] as const).map((view) => (
+            {(['schema', 'history'] as const).map((v) => (
               <button
                 type="button"
-                key={view}
-                onClick={() => setLeftView(view)}
+                key={v}
+                onClick={() => setLeftView(v)}
                 className={`relative flex-1 py-1.5 font-semibold text-[10px] uppercase tracking-widest transition-colors ${
-                  leftView === view ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
+                  leftView === v ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
                 }`}
               >
-                {view === 'schema' ? (
+                {v === 'schema' ? (
                   'Schema'
                 ) : (
                   <span className="flex items-center justify-center gap-1">
@@ -427,7 +466,7 @@ export default function Playground() {
                     )}
                   </span>
                 )}
-                {leftView === view && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
+                {leftView === v && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
               </button>
             ))}
           </div>
@@ -461,17 +500,17 @@ export default function Playground() {
         <div style={{ width: `${centerWidth}%` }} className="flex shrink-0 flex-col overflow-hidden">
           {/* Center tab bar */}
           <div className="flex shrink-0 border-[#252d3d] border-b bg-[#0f1117]">
-            {(['query', 'chat', 'admin'] as const).map((view) => (
+            {(['query', 'chat'] as const).map((v) => (
               <button
                 type="button"
-                key={view}
-                onClick={() => setCenterView(view)}
+                key={v}
+                onClick={() => setCenterView(v)}
                 className={`relative px-4 py-1.5 font-semibold text-[10px] uppercase tracking-widest transition-colors ${
-                  centerView === view ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
+                  centerView === v ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
                 }`}
               >
-                {view === 'query' ? 'Query Editor' : view === 'chat' ? '✦ Agent Chat' : '⚙ Admin'}
-                {centerView === view && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
+                {v === 'query' ? 'Query Editor' : '✦ Agent Chat'}
+                {centerView === v && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
               </button>
             ))}
             {centerView === 'query' && (
@@ -492,42 +531,34 @@ export default function Playground() {
                   ontologyNodes={ontology?.nodes ?? []}
                 />
               </Suspense>
-            ) : centerView === 'chat' ? (
-              <AgentChat onTurnComplete={setLastChatTurn} />
             ) : (
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-600 text-xs">Loading admin...</div>}>
-                <OntologyAdmin onOntologyChanged={reloadOntology} />
-              </Suspense>
+              <AgentChat onTurnComplete={setLastChatTurn} />
             )}
           </div>
         </div>
 
-        {/* Right resizer — hidden in admin mode */}
-        {centerView !== 'admin' && (
-          <div
-            className="z-10 w-1 shrink-0 cursor-col-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
-            onMouseDown={(e) => startHDrag('right', e)}
-          />
-        )}
+        {/* Right resizer */}
+        <div
+          className="z-10 w-1 shrink-0 cursor-col-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
+          onMouseDown={(e) => startHDrag('right', e)}
+        />
 
-        {/* Right: SQL Preview (query mode) or Chat Query Panel (chat mode) — hidden in admin */}
-        {centerView !== 'admin' && (
-          <div style={{ width: `${rightWidth}%` }} className="shrink-0 overflow-hidden">
-            {centerView === 'chat' ? (
-              <ChatQueryPanel
-                nexaqlQuery={lastChatTurn?.nexaqlQuery ?? null}
-                queryPreview={lastChatTurn?.queryPreview ?? null}
-                adapterType={lastChatTurn?.adapterType ?? null}
-              />
-            ) : (
-              <SQLPreview
-                queryPreview={result?.queryPreview ?? validation.queryPreview ?? null}
-                adapterType={result?.adapterType ?? validation.adapterType ?? null}
-                isLoading={isRunning}
-              />
-            )}
-          </div>
-        )}
+        {/* Right: SQL Preview or Chat Query Panel */}
+        <div style={{ width: `${rightWidth}%` }} className="shrink-0 overflow-hidden">
+          {centerView === 'chat' ? (
+            <ChatQueryPanel
+              nexaqlQuery={lastChatTurn?.nexaqlQuery ?? null}
+              queryPreview={lastChatTurn?.queryPreview ?? null}
+              adapterType={lastChatTurn?.adapterType ?? null}
+            />
+          ) : (
+            <SQLPreview
+              queryPreview={result?.queryPreview ?? validation.queryPreview ?? null}
+              adapterType={result?.adapterType ?? validation.adapterType ?? null}
+              isLoading={isRunning}
+            />
+          )}
+        </div>
       </div>
 
       {/* Vertical resizer + Results panel — only shown in query mode */}

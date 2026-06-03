@@ -80,14 +80,16 @@ function NodeDetail({
               )}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={insertNodeTemplate}
-            className="shrink-0 rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
-            title="Insert query template"
-          >
-            ↗ Insert
-          </button>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button
+              type="button"
+              onClick={insertNodeTemplate}
+              className="rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+              title="Insert query template"
+            >
+              ↗ Insert
+            </button>
+          </div>
         </div>
       </div>
 
@@ -362,7 +364,9 @@ function NodeList({
             </div>
             <p className="mt-0.5 truncate text-[10px] text-slate-500">{node.description}</p>
           </div>
-          <span className="ml-2 shrink-0 text-slate-600 text-sm group-hover:text-slate-400">›</span>
+          <div className="ml-2 flex shrink-0 items-center gap-1.5">
+            <span className="text-slate-600 text-sm group-hover:text-slate-400">&#8250;</span>
+          </div>
         </button>
       ))}
     </div>

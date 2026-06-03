@@ -19,7 +19,7 @@ from nexaql.engine.types import (
     QueryAST,
     ScalarField,
 )
-from nexaql.policy.context import UserContext, has_role
+from nexaql.policy.context import UserContext, has_role, resolve_user_value
 from nexaql.policy.masking import MaskRule
 
 
@@ -92,15 +92,50 @@ _PLACEHOLDER_RE = re.compile(r"\{user\.(\w+)\}")
 
 
 def _resolve_placeholders(template: str, user: UserContext) -> str:
-    """Replace ``{user.xxx}`` placeholders with values from *user.attributes*."""
+    """Replace ``{user.xxx}`` placeholders with properly typed values.
+
+    - String values are escaped for SQL (single quotes handled)
+    - Numeric values (int/float) are NOT quoted -- they produce bare numbers
+    - None values produce empty string (with a warning)
+    """
 
     def _replacer(m: re.Match) -> str:
         key = m.group(1)
-        val = user.attributes.get(key, "")
-        # Escape single quotes for safe SQL interpolation
+        val = resolve_user_value(user, key)
+        if val is None:
+            return ""
+        if isinstance(val, (int, float)):
+            return str(val)
         return str(val).replace("'", "''")
 
     return _PLACEHOLDER_RE.sub(_replacer, template)
+
+
+def _resolve_function_policy(policy: Any, ontology: Any, user: "UserContext") -> str:
+    """Resolve a function-reference row policy into a concrete SQL condition.
+
+    Looks up *policy.function* in ``ontology.access_functions``, substitutes
+    ``{field}`` with *policy.field*, then resolves ``{user.xxx}`` placeholders.
+    """
+    func_name = getattr(policy, "function", None)
+    field = getattr(policy, "field", None)
+
+    access_functions = getattr(ontology, "access_functions", None) or {}
+    func_def = access_functions.get(func_name) if access_functions else None
+
+    if func_def is None:
+        raise ValueError(
+            f"Row policy references unknown access function '{func_name}'. "
+            f"Available functions: {list(access_functions.keys())}"
+        )
+
+    if not field:
+        raise ValueError(
+            f"Row policy using access function '{func_name}' must specify a 'field'."
+        )
+
+    sql = func_def.sql.replace("{field}", field)
+    return _resolve_placeholders(sql, user)
 
 
 def _enforce_node(
@@ -142,8 +177,19 @@ def _enforce_node(
         if set(user.roles) & set(except_roles):
             continue
 
-        condition = getattr(policy, "condition", "")
-        resolved = _resolve_placeholders(condition, user)
+        # Resolve the condition -- either raw or via a named access function
+        func_name = getattr(policy, "function", None)
+        condition = getattr(policy, "condition", None)
+
+        if func_name is not None:
+            resolved = _resolve_function_policy(policy, ontology, user)
+        elif condition:
+            resolved = _resolve_placeholders(condition, user)
+        else:
+            warnings.append(
+                f"Row policy on '{node.name}' has neither 'condition' nor 'function'; skipping"
+            )
+            continue
 
         # Inject as a raw RLS filter — the translator will inject this as a
         # raw WHERE clause, qualifying only the node's own field names with the

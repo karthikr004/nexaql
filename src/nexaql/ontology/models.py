@@ -93,8 +93,34 @@ DatasourceConfig = (
 # ── Node / field definitions ─────────────────────────────────────────────────
 
 
+class AccessFunction(BaseModel):
+    """A reusable, named access-policy function defined at the ontology level.
+
+    The *sql* template may contain ``{field}`` (resolved to the column the
+    policy targets) and ``{user.xxx}`` placeholders (resolved from user
+    attributes at enforcement time).
+    """
+
+    description: str
+    sql: str
+    requires: Optional[list[str]] = None
+
+
 class RowPolicy(BaseModel):
-    condition: str
+    """Row-level security policy.
+
+    Supports two modes:
+    * **Raw condition** -- set *condition* directly (existing / backward-compat).
+    * **Function reference** -- set *function* (name of an ``AccessFunction``)
+      and *field* (column the function applies to).
+    """
+
+    # Raw condition mode (existing):
+    condition: Optional[str] = None
+    # Function reference mode (new):
+    function: Optional[str] = None
+    field: Optional[str] = None
+    # Common fields:
     roles: list[str]
     except_roles: Optional[list[str]] = None
 
@@ -159,4 +185,5 @@ class Ontology(BaseModel):
     domain: str
     description: str
     datasources: Optional[dict[str, DatasourceConfig]] = None
+    access_functions: Optional[dict[str, AccessFunction]] = None
     nodes: dict[str, OntologyNode]

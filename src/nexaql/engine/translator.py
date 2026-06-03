@@ -430,7 +430,7 @@ def _process_node(
 
     # -- Directives (root only) ------------------------------------------------
     if is_root:
-        _apply_directives(node.directives, ctx, node_def, node.name)
+        _apply_directives(node.directives, ctx, node_def, node.name, table_alias)
 
     my_column_aliases: List[str] = []
     my_agg_aliases: List[str] = []
@@ -515,6 +515,7 @@ def _apply_directives(
     ctx: TranslatorContext,
     node_def: Any = None,
     node_name: Optional[str] = None,
+    table_alias: Optional[str] = None,
 ) -> None:
     fields_map: Dict[str, Any] = getattr(node_def, "fields", {}) or {} if node_def else {}
 
@@ -527,12 +528,13 @@ def _apply_directives(
         elif d_type == "orderby":
             d_field = getattr(d, "field", "")
             d_direction = getattr(d, "direction", "ASC")
-            # If the orderby field is a derived ontology field, use the node-prefixed column alias
-            # so PostgreSQL can resolve it (derived fields have no physical column name).
-            # calc() aliases are bare aliases in SELECT and resolve directly -- leave them as-is.
+            # Qualify the ORDER BY field with the table alias to avoid ambiguity
+            # when the same field name exists on multiple joined tables.
             field_def = fields_map.get(d_field)
             if field_def is not None and getattr(field_def, "derived", False) and node_name:
                 order_expr = f"{node_name}__{d_field}"
+            elif field_def is not None:
+                order_expr = f"{table_alias}.{d_field}"
             else:
                 order_expr = d_field
             ctx.order_bys.append(f"{order_expr} {d_direction}")
