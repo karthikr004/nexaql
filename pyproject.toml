@@ -4,8 +4,8 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexaql"
-version = "0.1.0"
-description = "A GraphQL-inspired query language for any structured data"
+version = "0.1.1"
+description = "The query language built for AI agents — deterministic queries across any database with built-in privacy"
 readme = "README.md"
 license = "Apache-2.0"
 requires-python = ">=3.11"
@@ -44,9 +44,6 @@ nexaql = "nexaql.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/nexaql"]
-
-[tool.hatch.build.targets.wheel.force-include]
-"src/nexaql/data" = "nexaql/data"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
