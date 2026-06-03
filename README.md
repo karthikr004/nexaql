@@ -200,14 +200,41 @@ order_item(calc(quantity * unit_price): { gt: 500 })
 
 ## Access Control
 
-Define privacy policies directly in the ontology:
+NexaQL enforces privacy at the query engine level — RBAC, field-level security, row-level security, and PII masking.
+
+> **Full access control guide**: [docs/access-control.md](docs/access-control.md)
+
+### Role Registry
+
+Define valid roles in the ontology. All access policies validate against this list:
 
 ```yaml
+roles:
+  admin:
+    description: "Full access to all data"
+  manager:
+    description: "Regional data access with all fields"
+  analyst:
+    description: "Read access without PII or financial data"
+```
+
+### Policy Functions
+
+Reusable, named access policies for row-level security:
+
+```yaml
+access_functions:
+  same_team:
+    description: "Records created by users on the same team"
+    sql: "{field} IN (SELECT user_id FROM employees WHERE team_id = '{user.team_id}')"
+    requires: ["user.team_id"]
+
 nodes:
   customer:
-    visible_to: [analyst, manager, admin]     # anonymous users can't query this
+    visible_to: [analyst, manager, admin]
     row_policies:
-      - condition: "region = '{user.region}'"  # managers see only their region
+      - function: same_team       # reference a named policy function
+        field: created_by          # which column it applies to
         roles: [manager]
         except_roles: [admin]
     fields:
@@ -217,19 +244,24 @@ nodes:
         mask_with: email
 ```
 
-Test with the role switcher in the playground, or via API headers:
+### Admin UI
+
+Click the ⚙ gear icon in the playground header to manage:
+- **Roles** — define valid role names
+- **Policy Functions** — create reusable access policies
+- **Per-node access** — visible_to, row policies, field-level PII/masking
+
+### User Context
+
+The calling application sends user identity via the `X-User-Context` header:
 
 ```bash
-# As analyst — email and amounts stripped
-curl -H 'X-User-Context: {"user_id":"1","roles":["analyst"]}' \
+curl -H 'X-User-Context: {"user_id":"alice","roles":["manager"],"region":"US-EAST","team_id":"eng-platform"}' \
      -X POST localhost:3717/api/execute \
-     -d '{"query": "{ customer @limit(5) { name email lifetime_value } }"}'
-
-# As admin — full access
-curl -H 'X-User-Context: {"user_id":"1","roles":["admin"]}' \
-     -X POST localhost:3717/api/execute \
-     -d '{"query": "{ customer @limit(5) { name email lifetime_value } }"}'
+     -d '{"query": "{ customer @limit(5) { name email } }"}'
 ```
+
+Standard user context fields: `user_id`, `name`, `email`, `manager_id`, `region`, `department`, `team_id`, `level`, `job_role`, `org_id`. Custom attributes are also supported.
 
 ## Configuration
 
