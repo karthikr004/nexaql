@@ -175,6 +175,11 @@ class OntologyNode(BaseModel):
     row_policies: Optional[list[RowPolicy]] = None
 
 
+class RoleDef(BaseModel):
+    """Definition of a role in the access control system."""
+    description: str
+
+
 class Ontology(BaseModel):
     """Top-level ontology definition.
 
@@ -185,5 +190,6 @@ class Ontology(BaseModel):
     domain: str
     description: str
     datasources: Optional[dict[str, DatasourceConfig]] = None
+    roles: Optional[dict[str, RoleDef]] = None
     access_functions: Optional[dict[str, AccessFunction]] = None
     nodes: dict[str, OntologyNode]

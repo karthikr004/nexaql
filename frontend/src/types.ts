@@ -98,10 +98,15 @@ export interface HistoryEntry {
 
 // ── Full ontology structure for admin editing ────────────────────────────────
 
+export interface RoleDefData {
+  description: string;
+}
+
 export interface OntologyData {
   version: string;
   domain: string;
   description: string;
+  roles?: Record<string, RoleDefData>;
   nodes: Record<string, NodeData>;
   access_functions?: Record<string, AccessFunctionData>;
 }

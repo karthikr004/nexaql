@@ -25,6 +25,15 @@ description: >
   E-commerce platform with customers, orders, products, and categories.
   Use the Role switcher to test access control across admin, manager, analyst, and anonymous roles.
 
+# ── Role definitions (validated — all role references must use these names) ──
+roles:
+  admin:
+    description: "Full access to all nodes, fields, and rows"
+  manager:
+    description: "All nodes with region-filtered rows and all fields visible"
+  analyst:
+    description: "All nodes but no PII fields (email, phone) or financial amounts"
+
 access_functions:
   self_only:
     description: "Only records created by the current user"

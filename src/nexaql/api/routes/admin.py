@@ -38,7 +38,57 @@ async def get_full_ontology() -> JSONResponse:
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# ── GET /admin/roles ──────────────────────────────────────────────────────
+
+
+@router.get("/admin/roles")
+async def get_roles() -> JSONResponse:
+    """Return the defined roles from the ontology."""
+    try:
+        ont = get_ontology()
+        roles = {name: defn.model_dump() for name, defn in (ont.roles or {}).items()}
+        return JSONResponse({"roles": roles})
+    except Exception as e:
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
 # ── PUT /admin/ontology ────────────────────────────────────────────────────
+
+
+def _format_validation_errors(exc: ValidationError) -> list[str]:
+    """Convert Pydantic validation errors into human-readable messages."""
+    messages = []
+    for err in exc.errors():
+        loc = " → ".join(str(p) for p in err["loc"])
+        msg = err["msg"]
+        messages.append(f"{loc}: {msg}")
+    return messages
+
+
+def _validate_roles(ontology: "Ontology") -> list[str]:
+    """Check that all role references in the ontology are defined in the roles registry."""
+    if not ontology.roles:
+        return []  # No role registry — skip validation
+    valid_roles = set(ontology.roles.keys())
+    errors: list[str] = []
+    for node_name, node_def in ontology.nodes.items():
+        if node_def.visible_to:
+            for r in node_def.visible_to:
+                if r not in valid_roles:
+                    errors.append(f"Node '{node_name}' → visible_to: unknown role '{r}'. Defined roles: {sorted(valid_roles)}")
+        for fname, fdef in node_def.fields.items():
+            if fdef.visible_to:
+                for r in fdef.visible_to:
+                    if r not in valid_roles:
+                        errors.append(f"Node '{node_name}' → field '{fname}' → visible_to: unknown role '{r}'")
+        for pi, pol in enumerate(node_def.row_policies or []):
+            for r in pol.roles:
+                if r != "*" and r not in valid_roles:
+                    errors.append(f"Node '{node_name}' → row policy {pi + 1} → roles: unknown role '{r}'")
+            for r in (pol.except_roles or []):
+                if r not in valid_roles:
+                    errors.append(f"Node '{node_name}' → row policy {pi + 1} → except_roles: unknown role '{r}'")
+    return errors
 
 
 @router.put("/admin/ontology")
@@ -46,7 +96,21 @@ async def replace_ontology(data: dict[str, Any]) -> JSONResponse:
     try:
         ontology = Ontology(**data)
     except ValidationError as e:
-        return JSONResponse({"error": str(e)}, status_code=400)
+        errors = _format_validation_errors(e)
+        return JSONResponse({
+            "error": "Validation failed",
+            "details": errors,
+            "message": errors[0] if errors else str(e),
+        }, status_code=400)
+
+    # Validate role references
+    role_errors = _validate_roles(ontology)
+    if role_errors:
+        return JSONResponse({
+            "error": "Invalid role references",
+            "details": role_errors,
+            "message": role_errors[0],
+        }, status_code=400)
 
     try:
         save_ontology(ontology, _ontology_path())

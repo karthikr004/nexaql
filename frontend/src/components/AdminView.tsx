@@ -72,19 +72,23 @@ function makeEmptyNode(): NodeData {
 
 function Toast({ message, type, onDismiss }: { message: string; type: 'success' | 'error'; onDismiss: () => void }) {
   useEffect(() => {
-    const t = setTimeout(onDismiss, 3500);
+    const duration = type === 'error' ? 8000 : 3500;
+    const t = setTimeout(onDismiss, duration);
     return () => clearTimeout(t);
-  }, [onDismiss]);
+  }, [onDismiss, type]);
 
   return (
     <div
-      className={`fixed top-4 right-4 z-50 rounded border px-4 py-2 text-sm shadow-lg ${
+      className={`fixed top-4 right-4 z-50 max-w-lg rounded border px-4 py-3 text-sm shadow-lg ${
         type === 'success'
           ? 'border-[#3dd68c]/40 bg-[#1a2f25] text-[#3dd68c]'
           : 'border-red-500/40 bg-[#2f1a1a] text-red-400'
       }`}
     >
-      {message}
+      <div className="flex items-start gap-2">
+        <div className="whitespace-pre-wrap text-[12px] leading-relaxed">{message}</div>
+        <button type="button" onClick={onDismiss} className="shrink-0 text-[10px] opacity-60 hover:opacity-100">✕</button>
+      </div>
     </div>
   );
 }
@@ -180,6 +184,70 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
   const handleSave = useCallback(async () => {
     if (!ontology || !isDirty) return;
+
+    // ── Client-side validation ──────────────────────────────────────────
+    const clientErrors: string[] = [];
+    for (const [nodeName, nodeData] of Object.entries(ontology.nodes)) {
+      if (!nodeData.primary_key) {
+        clientErrors.push(`Node '${nodeName}': primary_key is required`);
+      }
+      if (!nodeData.description) {
+        clientErrors.push(`Node '${nodeName}': description is required`);
+      }
+      for (const [fname, fdef] of Object.entries(nodeData.fields)) {
+        if (!fdef.type) {
+          clientErrors.push(`Node '${nodeName}' → field '${fname}': type is required`);
+        }
+        if (!fdef.description) {
+          clientErrors.push(`Node '${nodeName}' → field '${fname}': description is required`);
+        }
+      }
+      for (const [ename, edef] of Object.entries(nodeData.edges ?? {})) {
+        if (!edef.node) {
+          clientErrors.push(`Node '${nodeName}' → edge '${ename}': target node is required`);
+        }
+        if (!edef.join_steps || edef.join_steps.length === 0) {
+          clientErrors.push(`Node '${nodeName}' → edge '${ename}': at least one join step is required`);
+        }
+      }
+      for (const [sfname, sfdef] of Object.entries(nodeData.special_filters ?? {})) {
+        if (!sfdef.sql) {
+          clientErrors.push(`Node '${nodeName}' → filter '${sfname}': SQL expression is required`);
+        }
+      }
+      // Validate row policies
+      for (const [pi, pol] of (nodeData.row_policies ?? []).entries()) {
+        if (pol.mode === 'function') {
+          if (!pol.function_name) {
+            clientErrors.push(`Node '${nodeName}' → row policy ${pi + 1}: policy function is required`);
+          }
+          if (!pol.function_field) {
+            clientErrors.push(`Node '${nodeName}' → row policy ${pi + 1}: field (column) is required`);
+          } else if (!nodeData.fields[pol.function_field]) {
+            clientErrors.push(`Node '${nodeName}' → row policy ${pi + 1}: field '${pol.function_field}' does not exist on this node`);
+          }
+        } else if (!pol.condition) {
+          clientErrors.push(`Node '${nodeName}' → row policy ${pi + 1}: SQL condition is required`);
+        }
+      }
+    }
+    // Validate access functions
+    for (const [fname, fdef] of Object.entries(ontology.access_functions ?? {})) {
+      if (!fdef.sql) {
+        clientErrors.push(`Access function '${fname}': SQL template is required`);
+      }
+      if (!fdef.sql?.includes('{field}')) {
+        clientErrors.push(`Access function '${fname}': SQL template must include {field} placeholder`);
+      }
+    }
+    if (clientErrors.length > 0) {
+      setToast({
+        message: `Validation errors:\n${clientErrors.map((e) => `• ${e}`).join('\n')}`,
+        type: 'error',
+      });
+      return;
+    }
+
     setSaving(true);
     try {
       // Transform frontend RowPolicyData (function_name/function_field/mode)
@@ -213,7 +281,12 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
-        throw new Error(body.error || `HTTP ${res.status}`);
+        const details: string[] = body.details ?? [];
+        const msg = details.length > 0
+          ? `Validation errors:\n${details.map((d: string) => `• ${d}`).join('\n')}`
+          : body.message || body.error || `HTTP ${res.status}`;
+        setToast({ message: msg, type: 'error' });
+        return;
       }
       setSavedSnapshot(JSON.stringify(ontology));
       setToast({ message: 'Ontology saved successfully', type: 'success' });
@@ -240,8 +313,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
   const node = selectedItem && !isPolicyFunctions && ontology ? ontology.nodes[selectedItem] ?? null : null;
 
-  // ── Access functions from ontology ─────────────────────────────────────────
+  // ── Roles + Access functions from ontology ──────────────────────────────────
 
+  const roleNames = Object.keys(ontology?.roles ?? {});
   const accessFunctions = ontology?.access_functions ?? {};
   const accessFunctionNames = Object.keys(accessFunctions);
 
@@ -1093,44 +1167,73 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     </>
                   )}
                   <div>
-                    <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Roles (comma-separated)</label>
-                    <input
-                      key={`roles-${selectedItem}-${pi}`}
-                      defaultValue={pol.roles.join(', ')}
-                      onBlur={(e) =>
-                        updateNode((n) => {
-                          const p = n.row_policies?.[pi];
-                          if (p)
-                            p.roles = e.target.value
-                              .split(',')
-                              .map((v) => v.trim())
-                              .filter(Boolean);
-                        })
-                      }
-                      className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
-                      placeholder="e.g. analyst, manager"
-                    />
+                    <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Applies to Roles</label>
+                    <div className="flex flex-wrap gap-1.5 rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 min-h-[32px]">
+                      {roleNames.length === 0 ? (
+                        <span className="text-[10px] text-slate-600 italic">No roles defined — add roles in the Roles section</span>
+                      ) : roleNames.map((rn) => {
+                        const selected = pol.roles.includes(rn);
+                        return (
+                          <button
+                            key={rn}
+                            type="button"
+                            onClick={() =>
+                              updateNode((n) => {
+                                const p = n.row_policies?.[pi];
+                                if (!p) return;
+                                if (selected) {
+                                  p.roles = p.roles.filter((r) => r !== rn);
+                                } else {
+                                  p.roles = [...p.roles, rn];
+                                }
+                              })
+                            }
+                            className={`rounded px-2 py-0.5 text-[10px] font-medium border transition-colors ${
+                              selected
+                                ? 'bg-[#4f8ef7]/20 border-[#4f8ef7] text-[#4f8ef7]'
+                                : 'bg-[#0f1117] border-[#252d3d] text-slate-500 hover:border-slate-400'
+                            }`}
+                          >
+                            {rn}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div>
-                    <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Except Roles (comma-separated)</label>
-                    <input
-                      key={`except-${selectedItem}-${pi}`}
-                      defaultValue={(pol.except_roles ?? []).join(', ')}
-                      onBlur={(e) =>
-                        updateNode((n) => {
-                          const p = n.row_policies?.[pi];
-                          if (p) {
-                            const val = e.target.value
-                              .split(',')
-                              .map((v) => v.trim())
-                              .filter(Boolean);
-                            p.except_roles = val.length ? val : undefined;
-                          }
-                        })
-                      }
-                      className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
-                      placeholder="e.g. admin"
-                    />
+                    <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Except Roles</label>
+                    <div className="flex flex-wrap gap-1.5 rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 min-h-[32px]">
+                      {roleNames.length === 0 ? (
+                        <span className="text-[10px] text-slate-600 italic">No roles defined</span>
+                      ) : roleNames.map((rn) => {
+                        const selected = (pol.except_roles ?? []).includes(rn);
+                        return (
+                          <button
+                            key={rn}
+                            type="button"
+                            onClick={() =>
+                              updateNode((n) => {
+                                const p = n.row_policies?.[pi];
+                                if (!p) return;
+                                const current = p.except_roles ?? [];
+                                if (selected) {
+                                  p.except_roles = current.filter((r) => r !== rn);
+                                } else {
+                                  p.except_roles = [...current, rn];
+                                }
+                              })
+                            }
+                            className={`rounded px-2 py-0.5 text-[10px] font-medium border transition-colors ${
+                              selected
+                                ? 'bg-red-500/20 border-red-500 text-red-400'
+                                : 'bg-[#0f1117] border-[#252d3d] text-slate-500 hover:border-slate-400'
+                            }`}
+                          >
+                            {rn}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                   {/* Test Policy button */}
                   <div className="flex items-center gap-2">
@@ -1307,9 +1410,21 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             />
           </div>
 
-          {/* Policy Functions entry */}
+          {/* Roles + Policy Functions entries */}
           {!sidebarSearch && (
             <>
+              <button
+                type="button"
+                onClick={() => setSelectedItem('__roles__')}
+                className={`flex w-full items-center gap-2 border-b border-[#252d3d] px-3 py-2.5 text-left transition-colors hover:bg-[#1e2535] ${
+                  selectedItem === '__roles__' ? 'bg-[#1e2535] border-l-2 border-l-green-500' : ''
+                }`}
+              >
+                <span className="font-semibold text-green-400/90 text-[12px]">Roles</span>
+                <span className="rounded bg-green-950/30 px-1 py-0.5 text-[9px] text-green-500 border border-green-800/40">
+                  {Object.keys(ontology?.roles ?? {}).length} defined
+                </span>
+              </button>
               <button
                 type="button"
                 onClick={() => {
@@ -1368,7 +1483,75 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
         {/* ── Main content area ────────────────────────────────────── */}
         <div className="flex flex-1 flex-col overflow-hidden bg-[#0f1117]">
-          {isPolicyFunctions ? (
+          {selectedItem === '__roles__' ? (
+            /* Roles editor */
+            <>
+              <div className="shrink-0 border-b border-[#252d3d] px-4 py-2">
+                <span className="font-semibold text-green-400/90 text-sm">Roles</span>
+                <span className="ml-2 text-[10px] text-slate-600">Define valid roles for access control policies</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-3">
+                <p className="text-[11px] text-slate-500 leading-relaxed">
+                  Roles defined here are the only valid role names that can be used in <code className="text-[#4f8ef7]">visible_to</code>, <code className="text-[#4f8ef7]">row_policies</code>, and other access control settings. The source system (IdP/auth) maps users to these roles via the <code className="text-[#4f8ef7]">X-User-Context</code> header.
+                </p>
+                {Object.entries(ontology?.roles ?? {}).map(([roleName, roleDef]) => (
+                  <div key={roleName} className="flex items-start gap-3 rounded border border-[#252d3d] bg-[#131920] p-3">
+                    <div className="flex-1 space-y-2">
+                      <input
+                        defaultValue={roleName}
+                        key={`rn-${roleName}`}
+                        onBlur={(e) => {
+                          const newName = e.target.value.trim();
+                          if (newName && newName !== roleName) {
+                            updateOntology((o) => {
+                              if (!o.roles) return;
+                              const def = o.roles[roleName] ?? { description: '' };
+                              delete o.roles[roleName];
+                              o.roles[newName] = def;
+                            });
+                          }
+                        }}
+                        className="rounded border border-[#252d3d] bg-[#0f1117] px-2 py-1 font-mono text-sm font-semibold text-green-400 focus:border-green-500 focus:outline-none"
+                        placeholder="role_name"
+                      />
+                      <input
+                        defaultValue={roleDef.description}
+                        key={`rd-${roleName}`}
+                        onBlur={(e) =>
+                          updateOntology((o) => {
+                            if (o.roles?.[roleName]) o.roles[roleName].description = e.target.value;
+                          })
+                        }
+                        className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                        placeholder="Description"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => updateOntology((o) => { if (o.roles) delete o.roles[roleName]; })}
+                      className="shrink-0 text-slate-600 text-xs hover:text-red-400"
+                      title="Delete role"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ))}
+                <button
+                  type="button"
+                  onClick={() =>
+                    updateOntology((o) => {
+                      if (!o.roles) o.roles = {};
+                      const name = `new_role_${Object.keys(o.roles).length + 1}`;
+                      o.roles[name] = { description: '' };
+                    })
+                  }
+                  className="rounded border border-[#252d3d] px-3 py-1.5 text-[11px] text-green-400 hover:border-green-500 hover:bg-[#1e2535]"
+                >
+                  + Add Role
+                </button>
+              </div>
+            </>
+          ) : isPolicyFunctions ? (
             /* Policy functions view */
             <>
               <div className="shrink-0 border-b border-[#252d3d] px-4 py-2">
