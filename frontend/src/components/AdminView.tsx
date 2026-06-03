@@ -189,17 +189,18 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
         if (node.row_policies) {
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           (node as any).row_policies = node.row_policies.map((p: any) => {
+            const roles = Array.isArray(p.roles) && p.roles.length > 0 ? p.roles : ['*'];
             if (p.mode === 'function' && p.function_name) {
               return {
                 function: p.function_name,
                 field: p.function_field || '',
-                roles: p.roles,
+                roles,
                 ...(p.except_roles?.length ? { except_roles: p.except_roles } : {}),
               };
             }
             return {
-              condition: p.condition,
-              roles: p.roles,
+              condition: p.condition || '',
+              roles,
               ...(p.except_roles?.length ? { except_roles: p.except_roles } : {}),
             };
           });
