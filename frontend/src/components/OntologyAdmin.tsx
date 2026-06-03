@@ -223,7 +223,9 @@ export default function OntologyAdmin({ onOntologyChanged }: OntologyAdminProps)
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
         return r.json();
       })
-      .then((data: OntologyData) => {
+      .then((resp) => {
+        // API returns {ontology: {...}, path: "..."}
+        const data: OntologyData = resp.ontology ?? resp;
         setOntology(data);
         setSavedSnapshot(JSON.stringify(data));
       })
