@@ -17,12 +17,12 @@ const PREVIEW_LIMIT = 5;
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function cellClass(type: string, value: unknown): string {
-  if (value === null || value === undefined) return 'font-mono text-[12px] text-slate-600 italic';
-  if (type === 'boolean') return 'font-mono text-[12px] text-purple-400';
+function cellStyle(type: string, value: unknown): React.CSSProperties {
+  if (value === null || value === undefined) return { color: 'var(--text-secondary)' };
+  if (type === 'boolean') return { color: '#c084fc' };
   if (['integer', 'bigint', 'smallint', 'numeric', 'float4', 'float8'].includes(type))
-    return 'font-mono text-[12px] text-[#3dd68c]';
-  return 'font-mono text-[12px] text-slate-200';
+    return { color: 'var(--success)' };
+  return { color: 'var(--text-primary)' };
 }
 
 function cellValue(value: unknown): string {
@@ -150,22 +150,42 @@ export default function ResultsPanel({
   const hasMore = rows.length > PREVIEW_LIMIT;
 
   return (
-    <div className="flex h-full flex-col bg-[#0f1117]">
+    <div className="flex h-full flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* ── Status bar ─────────────────────────────────────────────── */}
-      <div className="flex shrink-0 items-center justify-between border-[#252d3d] border-b px-3 py-2">
+      <div
+        className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <div className="flex items-center gap-2.5">
-          <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">Results</span>
+          <span
+            className="font-semibold text-[10px] uppercase tracking-widest"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Results
+          </span>
           {!isIdle && !isLoading && !error && (
             <>
-              <span className="rounded-full border border-[#252d3d] bg-[#1a2233] px-2 py-0.5 font-mono text-[11px] text-slate-300">
+              <span
+                className="rounded-full border px-2 py-0.5 font-mono text-[11px]"
+                style={{
+                  borderColor: 'var(--border)',
+                  backgroundColor: 'var(--bg-elevated)',
+                  color: 'var(--text-primary)',
+                }}
+              >
                 {rowCount.toLocaleString()} rows
               </span>
-              <span className="text-[11px] text-slate-500">{durationMs}ms</span>
+              <span className="text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                {durationMs}ms
+              </span>
             </>
           )}
           {isLoading && (
-            <div className="flex items-center gap-1.5 text-[11px] text-slate-500">
-              <div className="h-3 w-3 animate-spin rounded-full border border-[#4f8ef7] border-t-transparent" />
+            <div className="flex items-center gap-1.5 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+              <div
+                className="h-3 w-3 animate-spin rounded-full border border-t-transparent"
+                style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+              />
               Running…
             </div>
           )}
@@ -173,15 +193,18 @@ export default function ResultsPanel({
 
         <div className="flex items-center gap-2">
           {rows.length > 0 && (
-            <div className="flex overflow-hidden rounded border border-[#252d3d]">
+            <div className="flex overflow-hidden rounded border" style={{ borderColor: 'var(--border)' }}>
               {(['table', 'json'] as const).map((t) => (
                 <button
                   type="button"
                   key={t}
                   onClick={() => setActiveTab(t)}
-                  className={`px-2.5 py-1 text-[10px] transition-colors ${
-                    activeTab === t ? 'bg-[#1e2535] text-slate-200' : 'text-slate-500 hover:text-slate-300'
-                  }`}
+                  className="px-2.5 py-1 text-[10px] transition-colors"
+                  style={
+                    activeTab === t
+                      ? { backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' }
+                      : { color: 'var(--text-muted)' }
+                  }
                 >
                   {t === 'table' ? '⊞ Table' : '{ } JSON'}
                 </button>
@@ -192,7 +215,12 @@ export default function ResultsPanel({
             <button
               type="button"
               onClick={() => downloadCSV(rows, columns)}
-              className="rounded border border-[#252d3d] bg-[#1e2535] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:text-slate-200"
+              className="rounded border px-2 py-1 text-[10px] transition-colors"
+              style={{
+                borderColor: 'var(--border)',
+                backgroundColor: 'var(--bg-elevated)',
+                color: 'var(--text-secondary)',
+              }}
             >
               ↓ CSV
             </button>
@@ -201,9 +229,12 @@ export default function ResultsPanel({
             <button
               type="button"
               onClick={copyJson}
-              className={`rounded border border-[#252d3d] bg-[#1e2535] px-2 py-1 text-[10px] transition-colors ${
-                copied ? 'border-[#3dd68c] text-[#3dd68c]' : 'text-slate-400 hover:text-slate-200'
-              }`}
+              className="rounded border px-2 py-1 text-[10px] transition-colors"
+              style={
+                copied
+                  ? { borderColor: 'var(--success)', color: 'var(--success)', backgroundColor: 'var(--bg-elevated)' }
+                  : { borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }
+              }
             >
               {copied ? '✓ Copied' : '⎘ Copy'}
             </button>
@@ -213,9 +244,9 @@ export default function ResultsPanel({
 
       {/* ── Warnings ────────────────────────────────────────────────── */}
       {warnings.length > 0 && (
-        <div className="shrink-0 border-yellow-900/30 border-b bg-yellow-950/20 px-3 py-2">
+        <div className="shrink-0 border-b px-3 py-2" style={{ backgroundColor: 'var(--bg-warning)', borderColor: 'var(--border-warning)' }}>
           {warnings.map((w, i) => (
-            <div key={i} className="flex items-start gap-1.5 text-[11px] text-yellow-400">
+            <div key={i} className="flex items-start gap-1.5 text-[11px]" style={{ color: 'var(--text-warning)' }}>
               <span>⚠</span>
               <span>{w}</span>
             </div>
@@ -226,7 +257,10 @@ export default function ResultsPanel({
       {/* ── Content ─────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-auto">
         {isIdle && (
-          <div className="flex h-full flex-col items-center justify-center gap-2 text-slate-600">
+          <div
+            className="flex h-full flex-col items-center justify-center gap-2"
+            style={{ color: 'var(--text-secondary)' }}
+          >
             <span className="text-3xl">⬡</span>
             <p className="text-sm">Run a query to see results</p>
             <p className="text-xs">Press ⌘↩ or click Run</p>
@@ -234,14 +268,16 @@ export default function ResultsPanel({
         )}
 
         {error && (
-          <div className="fade-in m-3 rounded-lg border border-red-900/50 bg-red-950/20 p-3">
-            <p className="mb-1 font-semibold text-[11px] text-red-400">Error</p>
-            <pre className="whitespace-pre-wrap font-mono text-[11px] text-red-300">{error}</pre>
+          <div className="fade-in m-3 rounded-lg border p-3" style={{ backgroundColor: 'var(--bg-error)', borderColor: 'var(--border-error)' }}>
+            <p className="mb-1 font-semibold text-[11px]" style={{ color: 'var(--text-error)' }}>Error</p>
+            <pre className="whitespace-pre-wrap font-mono text-[11px]" style={{ color: 'var(--text-error)' }}>{error}</pre>
           </div>
         )}
 
         {!isIdle && !error && rows.length === 0 && !isLoading && (
-          <div className="flex h-full items-center justify-center text-slate-500 text-sm">No rows returned</div>
+          <div className="flex h-full items-center justify-center text-sm" style={{ color: 'var(--text-muted)' }}>
+            No rows returned
+          </div>
         )}
 
         {/* ── Flat table ──────────────────────────────────────────── */}
@@ -249,11 +285,12 @@ export default function ResultsPanel({
           <div className="fade-in">
             <table className="w-full border-collapse">
               <thead>
-                <tr className="border-[#252d3d] border-b">
+                <tr className="border-b" style={{ borderColor: 'var(--border)' }}>
                   {columns.map((col) => (
                     <th
                       key={col.name}
-                      className="max-w-[220px] px-3 py-2.5 text-left font-mono font-semibold text-[12px] text-slate-300"
+                      className="max-w-[220px] px-3 py-2.5 text-left font-mono font-semibold text-[12px]"
+                      style={{ color: 'var(--text-primary)' }}
                     >
                       <span
                         className="block overflow-hidden text-ellipsis whitespace-nowrap"
@@ -267,15 +304,23 @@ export default function ResultsPanel({
               </thead>
               <tbody>
                 {displayedRows.map((row, i) => (
-                  <tr key={i} className="border-[#1e2535] border-b hover:bg-[#131920]">
+                  <tr
+                    key={i}
+                    className="result-row border-b"
+                    style={{ borderColor: 'var(--border)' }}
+                    onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-secondary)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = '')}
+                  >
                     {columns.map((col) => {
                       const val = row[col.name];
                       const text = cellValue(val);
+                      const isNull = val === null || val === undefined;
                       return (
                         <td
                           key={col.name}
-                          className={`max-w-[220px] px-3 py-2.5 ${cellClass(col.type, val)}`}
+                          className={`max-w-[220px] px-3 py-2.5 font-mono text-[12px]${isNull ? ' italic' : ''}`}
                           title={text}
+                          style={cellStyle(col.type, val)}
                         >
                           <span className="block overflow-hidden text-ellipsis whitespace-nowrap">{text}</span>
                         </td>
@@ -291,7 +336,16 @@ export default function ResultsPanel({
               <button
                 type="button"
                 onClick={() => setShowAll((s) => !s)}
-                className="w-full border-[#252d3d] border-t py-2.5 text-center text-[12px] text-slate-400 transition-colors hover:bg-[#131920] hover:text-slate-200"
+                className="w-full border-t py-2.5 text-center text-[12px] transition-colors"
+                style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                onMouseEnter={(e) => {
+                  e.currentTarget.style.backgroundColor = 'var(--bg-secondary)';
+                  e.currentTarget.style.color = 'var(--text-primary)';
+                }}
+                onMouseLeave={(e) => {
+                  e.currentTarget.style.backgroundColor = '';
+                  e.currentTarget.style.color = 'var(--text-secondary)';
+                }}
               >
                 {showAll ? `▲ Show first ${PREVIEW_LIMIT} rows` : `▼ Show all ${rowCount.toLocaleString()} rows`}
               </button>
@@ -313,12 +367,15 @@ export default function ResultsPanel({
 
       {/* ── Footer ──────────────────────────────────────────────────── */}
       {rows.length > 0 && (
-        <div className="flex shrink-0 items-center gap-3 border-[#252d3d] border-t bg-[#0f1117] px-3 py-1.5">
-          <span className="text-[10px] text-slate-500">{columns.length} columns</span>
-          <span className="text-[10px] text-slate-500">{rowCount.toLocaleString()} rows</span>
-          <span className="text-[10px] text-slate-500">{durationMs}ms</span>
+        <div
+          className="flex shrink-0 items-center gap-3 border-t px-3 py-1.5"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}
+        >
+          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{columns.length} columns</span>
+          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{rowCount.toLocaleString()} rows</span>
+          <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{durationMs}ms</span>
           {activeTab === 'json' && nestedRows && (
-            <span className="text-[#4f8ef7] text-[10px]">
+            <span className="text-[10px]" style={{ color: 'var(--accent)' }}>
               ↳ nested · {nestedRows.length} root object{nestedRows.length !== 1 ? 's' : ''}
             </span>
           )}

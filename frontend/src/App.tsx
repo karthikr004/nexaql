@@ -1,5 +1,10 @@
-import Playground from "./components/Playground";
+import { ThemeProvider } from './ThemeContext';
+import Playground from './components/Playground';
 
 export default function App() {
-  return <Playground />;
+  return (
+    <ThemeProvider>
+      <Playground />
+    </ThemeProvider>
+  );
 }

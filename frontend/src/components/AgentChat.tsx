@@ -20,20 +20,41 @@ function CompactTable({
   if (!rows.length) return null;
 
   return (
-    <div className="overflow-hidden rounded border border-[#252d3d] text-[11px]">
+    <div
+      className="overflow-hidden rounded border text-[11px]"
+      style={{ borderColor: 'var(--border)' }}
+    >
       {/* mini header */}
-      <div className="flex items-center gap-2 border-[#252d3d] border-b bg-[#131920] px-3 py-1.5">
-        <span className="font-semibold text-[9px] text-slate-500 uppercase tracking-widest">Results</span>
-        <span className="rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[#3dd68c] text-[9px]">
+      <div
+        className="flex items-center gap-2 border-b px-3 py-1.5"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}
+      >
+        <span
+          className="font-semibold text-[9px] uppercase tracking-widest"
+          style={{ color: 'var(--text-muted)' }}
+        >
+          Results
+        </span>
+        <span
+          className="rounded border px-1.5 py-0.5 text-[9px]"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--success)' }}
+        >
           {rowCount} row{rowCount !== 1 ? 's' : ''}
         </span>
       </div>
       <div className="overflow-x-auto">
         <table className="w-full text-left">
           <thead>
-            <tr className="border-[#252d3d] border-b bg-[#0d1117]">
+            <tr
+              className="border-b"
+              style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}
+            >
               {columns.map((c) => (
-                <th key={c.name} className="whitespace-nowrap px-3 py-1.5 font-mono text-[10px] text-slate-500">
+                <th
+                  key={c.name}
+                  className="whitespace-nowrap px-3 py-1.5 font-mono text-[10px]"
+                  style={{ color: 'var(--text-muted)' }}
+                >
                   {cleanName(c.name)}
                 </th>
               ))}
@@ -41,15 +62,26 @@ function CompactTable({
           </thead>
           <tbody>
             {display.map((row, i) => (
-              <tr key={i} className="border-[#1e2535] border-b hover:bg-[#131920]">
+              <tr
+                key={i}
+                className="group border-b"
+                style={{ borderColor: 'var(--border)' }}
+                onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'var(--bg-secondary)'; }}
+                onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = ''; }}
+              >
                 {columns.map((c) => {
                   const v = row[c.name];
                   return (
                     <td
                       key={c.name}
-                      className="max-w-[220px] truncate whitespace-nowrap px-3 py-1.5 font-mono text-slate-300"
+                      className="max-w-[220px] truncate whitespace-nowrap px-3 py-1.5 font-mono"
+                      style={{ color: 'var(--text-primary)' }}
                     >
-                      {v === null || v === undefined ? <span className="text-slate-600 italic">null</span> : String(v)}
+                      {v === null || v === undefined ? (
+                        <span className="italic" style={{ color: 'var(--text-secondary)' }}>null</span>
+                      ) : (
+                        String(v)
+                      )}
                     </td>
                   );
                 })}
@@ -62,7 +94,10 @@ function CompactTable({
         <button
           type="button"
           onClick={() => setExpanded((e) => !e)}
-          className="w-full border-[#1e2535] border-t bg-[#0d1117] py-1.5 text-[10px] text-slate-500 transition-colors hover:text-slate-300"
+          className="w-full border-t py-1.5 text-[10px] transition-colors"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)', color: 'var(--text-muted)' }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-muted)'; }}
         >
           {expanded ? '▲ Show less' : `▼ Show all ${rowCount} rows`}
         </button>
@@ -77,11 +112,17 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
   if (turn.loading) {
     return (
       <div className="flex gap-3">
-        <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#252d3d] bg-[#1e2535] text-[10px]">
+        <div
+          className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px]"
+          style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}
+        >
           ⬡
         </div>
-        <div className="flex items-center gap-2 pt-1 text-slate-500 text-xs">
-          <div className="h-3 w-3 animate-spin rounded-full border border-[#4f8ef7] border-t-transparent" />
+        <div className="flex items-center gap-2 pt-1 text-xs" style={{ color: 'var(--text-muted)' }}>
+          <div
+            className="h-3 w-3 animate-spin rounded-full border border-t-transparent"
+            style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+          />
           Thinking…
         </div>
       </div>
@@ -90,16 +131,22 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
 
   return (
     <div className="flex gap-3">
-      <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-[#252d3d] bg-[#1e2535] text-[10px]">
+      <div
+        className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border text-[10px]"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }}
+      >
         ⬡
       </div>
       <div className="min-w-0 flex-1 space-y-2.5">
         {/* Summary */}
-        <p className="text-[13px] text-slate-200 leading-relaxed">{turn.summary}</p>
+        <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>{turn.summary}</p>
 
         {/* Error */}
         {turn.error && (
-          <p className="rounded border border-red-900/40 bg-[#1a0f0f] px-2 py-1.5 font-mono text-[11px] text-red-400">
+          <p
+            className="rounded border px-2 py-1.5 font-mono text-[11px]"
+            style={{ borderColor: 'var(--error)', backgroundColor: 'var(--bg-error)', color: 'var(--error)' }}
+          >
             {turn.error}
           </p>
         )}
@@ -231,15 +278,15 @@ export default function AgentChat({ onTurnComplete }: Props) {
   };
 
   return (
-    <div className="flex h-full flex-col bg-[#0f1117]">
+    <div className="flex h-full flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Thread */}
       <div className="flex-1 overflow-y-auto">
         {turns.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-5 px-6">
             <div className="text-center">
               <div className="mb-2 text-2xl">⬡</div>
-              <p className="font-medium text-slate-300 text-sm">Ask anything about your data</p>
-              <p className="mt-1 text-slate-600 text-xs">Queries are generated and run automatically</p>
+              <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>Ask anything about your data</p>
+              <p className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>Queries are generated and run automatically</p>
             </div>
             <div className="w-full max-w-md space-y-1.5">
               {SUGGESTIONS.map((s) => (
@@ -247,7 +294,16 @@ export default function AgentChat({ onTurnComplete }: Props) {
                   type="button"
                   key={s}
                   onClick={() => sendMessage(s)}
-                  className="w-full rounded border border-[#252d3d] bg-[#131920] px-3 py-2 text-left text-[12px] text-slate-400 transition-colors hover:border-[#4f8ef7] hover:text-slate-200"
+                  className="w-full rounded border px-3 py-2 text-left text-[12px] transition-colors"
+                  style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--accent)';
+                    e.currentTarget.style.color = 'var(--text-primary)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.borderColor = 'var(--border)';
+                    e.currentTarget.style.color = 'var(--text-secondary)';
+                  }}
                 >
                   {s}
                 </button>
@@ -260,7 +316,10 @@ export default function AgentChat({ onTurnComplete }: Props) {
               <div key={turn.id} className="space-y-2">
                 {/* User question */}
                 <div className="flex justify-end">
-                  <div className="max-w-[80%] rounded-lg border border-[#2d3f63] bg-[#1e2d4a] px-3 py-2 text-[13px] text-slate-200">
+                  <div
+                    className="max-w-[80%] rounded-lg border px-3 py-2 text-[13px]"
+                    style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
+                  >
                     {turn.question}
                   </div>
                 </div>
@@ -274,13 +333,19 @@ export default function AgentChat({ onTurnComplete }: Props) {
       </div>
 
       {/* Clear + Input */}
-      <div className="shrink-0 border-[#252d3d] border-t bg-[#0d1117]">
+      <div
+        className="shrink-0 border-t"
+        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}
+      >
         {turns.length > 0 && (
           <div className="flex justify-end px-4 pt-2">
             <button
               type="button"
               onClick={() => setTurns([])}
-              className="text-[10px] text-slate-600 transition-colors hover:text-slate-400"
+              className="text-[10px] transition-colors"
+              style={{ color: 'var(--text-secondary)' }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--text-primary)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--text-secondary)'; }}
             >
               Clear chat
             </button>
@@ -294,26 +359,47 @@ export default function AgentChat({ onTurnComplete }: Props) {
             onKeyDown={handleKeyDown}
             placeholder="Ask a question about your data…"
             rows={2}
-            className="flex-1 resize-none rounded-lg border border-[#252d3d] bg-[#131920] px-3 py-2 text-[13px] text-slate-200 leading-relaxed placeholder-slate-600 focus:border-[#4f8ef7] focus:outline-none"
+            className="flex-1 resize-none rounded-lg border px-3 py-2 text-[13px] leading-relaxed focus:outline-none"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor: 'var(--bg-secondary)',
+              color: 'var(--text-primary)',
+              '--placeholder-color': 'var(--text-muted)',
+            } as React.CSSProperties}
+            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--accent)'; }}
+            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--border)'; }}
           />
           <button
             type="button"
             onClick={() => sendMessage(input)}
             disabled={!input.trim() || loading}
-            className={`shrink-0 rounded-lg px-4 py-2 font-semibold text-[12px] transition-all ${
+            className="shrink-0 rounded-lg px-4 py-2 font-semibold text-[12px] transition-all border"
+            style={
               !input.trim() || loading
-                ? 'cursor-not-allowed border border-[#252d3d] bg-[#1e2535] text-slate-600'
-                : 'border border-transparent bg-[#4f8ef7] text-white hover:bg-[#3b7de8]'
-            }`}
+                ? {
+                    borderColor: 'var(--border)',
+                    backgroundColor: 'var(--bg-elevated)',
+                    color: 'var(--text-secondary)',
+                    cursor: 'not-allowed',
+                  }
+                : {
+                    borderColor: 'transparent',
+                    backgroundColor: 'var(--accent)',
+                    color: '#ffffff',
+                  }
+            }
           >
             {loading ? (
-              <div className="h-4 w-4 animate-spin rounded-full border-2 border-[#4f8ef7] border-t-transparent" />
+              <div
+                className="h-4 w-4 animate-spin rounded-full border-2 border-t-transparent"
+                style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+              />
             ) : (
               'Send'
             )}
           </button>
         </div>
-        <p className="px-4 pb-2 text-[10px] text-slate-600">↵ to send · Shift+↵ for new line</p>
+        <p className="px-4 pb-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>↵ to send · Shift+↵ for new line</p>
       </div>
     </div>
   );

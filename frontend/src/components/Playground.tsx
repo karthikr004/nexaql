@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
+import { useTheme } from '../ThemeContext';
 import SchemaExplorer from './SchemaExplorer';
 import HistoryPanel from './HistoryPanel';
 import SQLPreview from './SQLPreview';
@@ -75,6 +76,7 @@ query RecentOrders {
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Playground() {
+  const { theme, toggle } = useTheme();
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [insertText, setInsertText] = useState<string | undefined>(undefined);
   const [ontology, setOntology] = useState<OntologySummary | null>(null);
@@ -320,7 +322,7 @@ export default function Playground() {
     if (!validLoaded) return null;
     if (validation.valid)
       return (
-        <span className="flex items-center gap-1 text-[#3dd68c] text-[11px]">
+        <span className="flex items-center gap-1 text-[11px]" style={{ color: 'var(--success)' }}>
           <span>&#x2713;</span> Valid
         </span>
       );
@@ -335,7 +337,7 @@ export default function Playground() {
 
   if (view === 'admin') {
     return (
-      <Suspense fallback={<div className="flex h-screen items-center justify-center bg-[#0f1117] text-slate-600 text-sm">Loading admin...</div>}>
+      <Suspense fallback={<div className="flex h-screen items-center justify-center text-sm" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>Loading admin...</div>}>
         <AdminView onBack={() => setView('playground')} onOntologyChanged={reloadOntology} />
       </Suspense>
     );
@@ -344,18 +346,18 @@ export default function Playground() {
   // ── Playground view ────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0f1117]">
+    <div className="flex h-screen flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* ── Top bar ─────────────────────────────────────────────────── */}
-      <header className="z-20 flex shrink-0 items-center justify-between border-[#252d3d] border-b bg-[#0f1117] px-4 py-2.5">
+      <header className="z-20 flex shrink-0 items-center justify-between border-b px-4 py-2.5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}>
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="text-lg">{'⬡'}</span>
-            <span className="font-semibold text-slate-200 text-sm">NexaQL</span>
-            <span className="text-slate-600 text-sm">/</span>
-            <span className="text-[#4f8ef7] text-sm">NexaQL Playground</span>
+            <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>NexaQL</span>
+            <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>/</span>
+            <span className="text-sm" style={{ color: 'var(--accent)' }}>NexaQL Playground</span>
           </div>
           {ontology && (
-            <span className="rounded-full border border-[#252d3d] bg-[#1e2535] px-2 py-0.5 text-[10px] text-slate-400">
+            <span className="rounded-full border px-2 py-0.5 text-[10px]" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
               {ontology.domain} {'·'} {ontology.nodes.length} nodes
             </span>
           )}
@@ -364,11 +366,12 @@ export default function Playground() {
         <div className="flex items-center gap-3">
           {/* Role switcher */}
           <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest">Role</span>
+            <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Role</span>
             <select
               value={activeRole}
               onChange={(e) => setActiveRole(e.target.value)}
-              className="rounded border border-[#252d3d] bg-[#1e2535] px-2 py-1 text-[11px] text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+              className="rounded border px-2 py-1 text-[11px] focus:outline-none"
+              style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
             >
               {Object.entries(ROLE_CONFIGS).map(([key, cfg]) => (
                 <option key={key} value={key}>
@@ -392,7 +395,8 @@ export default function Playground() {
                   setValidLoaded(true);
                 })
             }
-            className="rounded border border-[#252d3d] bg-[#1e2535] px-3 py-1.5 font-medium text-[11px] text-slate-300 transition-colors hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+            className="rounded border px-3 py-1.5 font-medium text-[11px] transition-colors"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-primary)' }}
           >
             Validate
           </button>
@@ -404,9 +408,14 @@ export default function Playground() {
               isRunning
                 ? 'running-border cursor-wait border border-[#4f8ef7] bg-[#1e3a5f] text-[#4f8ef7]'
                 : validLoaded && !validation.valid
-                  ? 'cursor-not-allowed border border-[#252d3d] bg-[#1e2535] text-slate-600'
+                  ? 'cursor-not-allowed border text-slate-400'
                   : 'border border-transparent bg-[#4f8ef7] text-white shadow-blue-900/30 shadow-lg hover:bg-[#3b7de8]'
             }`}
+            style={
+              !isRunning && validLoaded && !validation.valid
+                ? { borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)' }
+                : undefined
+            }
           >
             {isRunning ? (
               <>
@@ -419,11 +428,38 @@ export default function Playground() {
               </>
             )}
           </button>
+          {/* Theme toggle */}
+          <button
+            type="button"
+            onClick={toggle}
+            className="rounded border p-1.5 transition-colors"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
+            title={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+          >
+            {theme === 'dark' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="12" cy="12" r="5" />
+                <line x1="12" y1="1" x2="12" y2="3" />
+                <line x1="12" y1="21" x2="12" y2="23" />
+                <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
+                <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
+                <line x1="1" y1="12" x2="3" y2="12" />
+                <line x1="21" y1="12" x2="23" y2="12" />
+                <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
+                <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z" />
+              </svg>
+            )}
+          </button>
           {/* Admin gear icon */}
           <button
             type="button"
             onClick={() => setView('admin')}
-            className="rounded border border-[#252d3d] bg-[#1e2535] p-1.5 text-slate-400 transition-colors hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+            className="rounded border p-1.5 transition-colors"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
             title="Settings & Admin"
           >
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -442,19 +478,18 @@ export default function Playground() {
       >
         {/* Left panel */}
         <div
-          style={{ width: `${leftWidth}%` }}
-          className="flex shrink-0 flex-col overflow-hidden border-[#252d3d] border-r"
+          style={{ width: `${leftWidth}%`, borderColor: 'var(--border)' }}
+          className="flex shrink-0 flex-col overflow-hidden border-r"
         >
           {/* Left panel tab toggle */}
-          <div className="flex shrink-0 border-[#252d3d] border-b bg-[#0f1117]">
+          <div className="flex shrink-0 border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}>
             {(['schema', 'history'] as const).map((v) => (
               <button
                 type="button"
                 key={v}
                 onClick={() => setLeftView(v)}
-                className={`relative flex-1 py-1.5 font-semibold text-[10px] uppercase tracking-widest transition-colors ${
-                  leftView === v ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
-                }`}
+                className={`relative flex-1 py-1.5 font-semibold text-[10px] uppercase tracking-widest transition-colors`}
+                style={{ color: leftView === v ? 'var(--accent)' : 'var(--text-secondary)' }}
               >
                 {v === 'schema' ? (
                   'Schema'
@@ -462,11 +497,11 @@ export default function Playground() {
                   <span className="flex items-center justify-center gap-1">
                     History
                     {history.length > 0 && (
-                      <span className="rounded-full bg-[#1e2535] px-1 text-[9px] text-slate-500">{history.length}</span>
+                      <span className="rounded-full px-1 text-[9px]" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>{history.length}</span>
                     )}
                   </span>
                 )}
-                {leftView === v && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
+                {leftView === v && <span className="absolute right-0 bottom-0 left-0 h-[2px]" style={{ backgroundColor: 'var(--accent)' }} />}
               </button>
             ))}
           </div>
@@ -477,7 +512,7 @@ export default function Playground() {
               ontology ? (
                 <SchemaExplorer nodes={ontology.nodes} onInsert={handleInsert} />
               ) : (
-                <div className="flex h-full items-center justify-center text-slate-600 text-xs">Loading schema...</div>
+                <div className="flex h-full items-center justify-center text-xs" style={{ color: 'var(--text-secondary)' }}>Loading schema...</div>
               )
             ) : (
               <HistoryPanel
@@ -492,36 +527,36 @@ export default function Playground() {
 
         {/* Left resizer */}
         <div
-          className="z-10 w-1 shrink-0 cursor-col-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
+          className="z-10 w-1 shrink-0 cursor-col-resize transition-colors hover:bg-[#4f8ef7]"
+          style={{ backgroundColor: 'var(--border)' }}
           onMouseDown={(e) => startHDrag('left', e)}
         />
 
         {/* Center: Query Editor / Chat */}
         <div style={{ width: `${centerWidth}%` }} className="flex shrink-0 flex-col overflow-hidden">
           {/* Center tab bar */}
-          <div className="flex shrink-0 border-[#252d3d] border-b bg-[#0f1117]">
+          <div className="flex shrink-0 border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}>
             {(['query', 'chat'] as const).map((v) => (
               <button
                 type="button"
                 key={v}
                 onClick={() => setCenterView(v)}
-                className={`relative px-4 py-1.5 font-semibold text-[10px] uppercase tracking-widest transition-colors ${
-                  centerView === v ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
-                }`}
+                className={`relative px-4 py-1.5 font-semibold text-[10px] uppercase tracking-widest transition-colors`}
+                style={{ color: centerView === v ? 'var(--accent)' : 'var(--text-secondary)' }}
               >
                 {v === 'query' ? 'Query Editor' : '✦ Agent Chat'}
-                {centerView === v && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
+                {centerView === v && <span className="absolute right-0 bottom-0 left-0 h-[2px]" style={{ backgroundColor: 'var(--accent)' }} />}
               </button>
             ))}
             {centerView === 'query' && (
-              <span className="ml-auto self-center pr-3 font-mono text-[10px] text-slate-600">nexaql</span>
+              <span className="ml-auto self-center pr-3 font-mono text-[10px]" style={{ color: 'var(--text-secondary)' }}>nexaql</span>
             )}
           </div>
 
           {/* Center content */}
           <div className="flex-1 overflow-hidden">
             {centerView === 'query' ? (
-              <Suspense fallback={<div className="flex h-full items-center justify-center text-slate-600 text-xs">Loading editor...</div>}>
+              <Suspense fallback={<div className="flex h-full items-center justify-center text-xs" style={{ color: 'var(--text-secondary)' }}>Loading editor...</div>}>
                 <QueryEditor
                   value={query}
                   onChange={setQuery}
@@ -529,6 +564,7 @@ export default function Playground() {
                   insertText={insertText}
                   onInsertConsumed={() => setInsertText(undefined)}
                   ontologyNodes={ontology?.nodes ?? []}
+                  theme={theme}
                 />
               </Suspense>
             ) : (
@@ -539,7 +575,8 @@ export default function Playground() {
 
         {/* Right resizer */}
         <div
-          className="z-10 w-1 shrink-0 cursor-col-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
+          className="z-10 w-1 shrink-0 cursor-col-resize transition-colors hover:bg-[#4f8ef7]"
+          style={{ backgroundColor: 'var(--border)' }}
           onMouseDown={(e) => startHDrag('right', e)}
         />
 
@@ -565,10 +602,11 @@ export default function Playground() {
       {centerView === 'query' && (
         <>
           <div
-            className="z-10 h-1 shrink-0 cursor-row-resize bg-[#252d3d] transition-colors hover:bg-[#4f8ef7]"
+            className="z-10 h-1 shrink-0 cursor-row-resize transition-colors hover:bg-[#4f8ef7]"
+            style={{ backgroundColor: 'var(--border)' }}
             onMouseDown={startVDrag}
           />
-          <div style={{ height: `${resultsH}%` }} className="shrink-0 overflow-hidden border-[#252d3d] border-t">
+          <div style={{ height: `${resultsH}%`, borderColor: 'var(--border)' }} className="shrink-0 overflow-hidden border-t">
             <ResultsPanel
               rows={result?.rows ?? []}
               columns={result?.columns ?? []}

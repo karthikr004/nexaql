@@ -10,6 +10,7 @@ interface Props {
   insertText?: string;
   onInsertConsumed: () => void;
   ontologyNodes?: NodeInfo[];
+  theme?: 'dark' | 'light';
 }
 
 const LANG = 'nexaql';
@@ -81,6 +82,41 @@ function beforeMount(monaco: typeof MonacoType) {
       'list.hoverBackground': '#1e2535',
       'editor.inactiveSelectionBackground': '#1e3a5f60',
       'editorGutter.background': '#0f1117',
+    },
+  });
+
+  monaco.editor.defineTheme('nexaql-light', {
+    base: 'vs',
+    inherit: true,
+    rules: [
+      { token: 'comment', foreground: '94a3b8', fontStyle: 'italic' },
+      { token: 'keyword', foreground: '7c3aed', fontStyle: 'bold' },
+      { token: 'directive', foreground: '0891b2' },
+      { token: 'node', foreground: '2563eb', fontStyle: 'bold' },
+      { token: 'field', foreground: '16a34a' },
+      { token: 'field-alias', foreground: '334155' },
+      { token: 'aggregate', foreground: '7c3aed' },
+      { token: 'constant', foreground: 'ea580c' },
+      { token: 'string', foreground: 'ea580c' },
+      { token: 'number', foreground: '0891b2' },
+      { token: 'number.float', foreground: '0891b2' },
+      { token: 'delimiter', foreground: '94a3b8' },
+    ],
+    colors: {
+      'editor.background': '#ffffff',
+      'editor.foreground': '#0f172a',
+      'editor.lineHighlightBackground': '#f8fafc',
+      'editor.selectionBackground': '#bfdbfe',
+      'editorLineNumber.foreground': '#94a3b8',
+      'editorLineNumber.activeForeground': '#475569',
+      'editorCursor.foreground': '#2563eb',
+      'editorWidget.background': '#f8fafc',
+      'editorSuggestWidget.background': '#ffffff',
+      'editorSuggestWidget.border': '#e2e8f0',
+      'editorSuggestWidget.selectedBackground': '#eff6ff',
+      'list.hoverBackground': '#f1f5f9',
+      'editor.inactiveSelectionBackground': '#bfdbfe60',
+      'editorGutter.background': '#ffffff',
     },
   });
 }
@@ -343,6 +379,7 @@ export default function QueryEditor({
   insertText,
   onInsertConsumed,
   ontologyNodes = [],
+  theme = 'dark',
 }: Props) {
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
   const onRunRef = useRef(onRun);
@@ -610,14 +647,15 @@ export default function QueryEditor({
   return (
     <div className="flex h-full flex-col">
       {/* Example query bar */}
-      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-[#252d3d] border-b bg-[#0f1117] px-3 py-2">
-        <span className="mr-1 shrink-0 text-[10px] text-slate-500">Examples:</span>
+      <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-3 py-2" style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border)' }}>
+        <span className="mr-1 shrink-0 text-[10px]" style={{ color: 'var(--text-muted)' }}>Examples:</span>
         {EXAMPLE_QUERIES.map((q) => (
           <button
             type="button"
             key={q.name}
             onClick={() => onChangeRef.current(q.query)}
-            className="shrink-0 whitespace-nowrap rounded border border-[#252d3d] bg-[#161b27] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+            className="shrink-0 whitespace-nowrap rounded border px-2 py-1 text-[10px] transition-colors"
+            style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-input)', color: 'var(--text-secondary)' }}
           >
             {q.name}
           </button>
@@ -629,7 +667,7 @@ export default function QueryEditor({
         <Editor
           height="100%"
           language={LANG}
-          theme="nexaql-dark"
+          theme={theme === 'light' ? 'nexaql-light' : 'nexaql-dark'}
           value={value}
           beforeMount={beforeMount}
           onChange={(v) => onChangeRef.current(v ?? '')}
@@ -662,8 +700,8 @@ export default function QueryEditor({
       </div>
 
       {/* Footer hint */}
-      <div className="shrink-0 border-[#252d3d] border-t bg-[#0f1117] px-3 py-1.5">
-        <span className="text-[10px] text-slate-600">{'⌘↩'} to run {'·'} {'⌃'}Space for suggestions {'·'} Ctrl+/ to comment</span>
+      <div className="shrink-0 border-t px-3 py-1.5" style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border)' }}>
+        <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>{'⌘↩'} to run {'·'} {'⌃'}Space for suggestions {'·'} Ctrl+/ to comment</span>
       </div>
     </div>
   );

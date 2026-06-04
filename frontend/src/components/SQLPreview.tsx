@@ -44,13 +44,12 @@ function highlightSQL(sql: string): string {
   let out = sql.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   keywords.forEach((kw) => {
-    out = out.replace(new RegExp(`\\b${kw}\\b`, 'g'), `<span class="text-[#a78bfa] font-semibold">${kw}</span>`);
+    out = out.replace(new RegExp(`\\b${kw}\\b`, 'g'), `<span style="color: #a78bfa; font-weight: 600">${kw}</span>`);
   });
 
-  out = out.replace(/'[^']*'/g, (m) => `<span class="text-orange-400">${m}</span>`);
-  out = out.replace(/\b(\d+)\b/g, (_, n) => `<span class="text-cyan-400">${n}</span>`);
-  out = out.replace(/\b([a-z][a-z0-9]*)\./g, (_, alias) => `<span class="text-slate-400">${alias}.</span>`);
-  out = out.replace(/--.*/g, (m) => `<span class="text-slate-600 italic">${m}</span>`);
+  out = out.replace(/'[^']*'/g, (m) => `<span style="color: #fb923c">${m}</span>`);
+  out = out.replace(/\b(\d+)\b/g, (_, n) => `<span style="color: #22d3ee">${n}</span>`);
+  out = out.replace(/\b([a-z][a-z0-9]*)\./g, (_, alias) => `<span style="color: var(--text-muted)">${alias}.</span>`);
 
   return out;
 }
@@ -63,7 +62,7 @@ function highlightURL(url: string): string {
     // Split on query string
     const qIdx = rest.indexOf('?');
     if (qIdx === -1) {
-      return `<span class="text-[#a78bfa] font-semibold">${method}</span> <span class="text-[#4f8ef7]">${rest}</span>`;
+      return `<span style="color: #a78bfa; font-weight: 600">${method}</span> <span style="color: var(--accent)">${rest}</span>`;
     }
     const path = rest.slice(0, qIdx);
     const params = rest
@@ -71,22 +70,23 @@ function highlightURL(url: string): string {
       .split('&amp;')
       .map((p: string) => {
         const [k, v] = p.split('=');
-        return `<span class="text-cyan-400">${k}</span>=<span class="text-orange-400">${v ?? ''}</span>`;
+        return `<span style="color: #22d3ee">${k}</span>=<span style="color: #fb923c">${v ?? ''}</span>`;
       })
-      .join("<span class='text-slate-600'>&amp;</span>");
-    return `<span class="text-[#a78bfa] font-semibold">${method}</span> <span class="text-[#4f8ef7]">${path}</span><span class="text-slate-600">?</span>${params}`;
+      .join(`<span style="color: var(--text-secondary)">&amp;</span>`);
+    return `<span style="color: #a78bfa; font-weight: 600">${method}</span> <span style="color: var(--accent)">${path}</span><span style="color: var(--text-secondary)">?</span>${params}`;
   });
 }
 
-const ADAPTER_LABELS: Record<string, { label: string; color: string }> = {
-  postgresql: { label: 'PostgreSQL', color: 'text-[#3dd68c]' },
-  mysql: { label: 'MySQL', color: 'text-[#f97316]' },
-  mongodb: { label: 'MongoDB', color: 'text-[#3dd68c]' },
-  rest: { label: 'REST API', color: 'text-[#a78bfa]' },
+const ADAPTER_LABELS: Record<string, { label: string; colorVar: string }> = {
+  postgresql: { label: 'PostgreSQL', colorVar: 'var(--success)' },
+  mysql: { label: 'MySQL', colorVar: '#f97316' },
+  mongodb: { label: 'MongoDB', colorVar: 'var(--success)' },
+  rest: { label: 'REST API', colorVar: '#a78bfa' },
 };
 
 export default function SQLPreview({ queryPreview, adapterType, isLoading }: Props) {
   const [copied, setCopied] = useState(false);
+  const [copyHover, setCopyHover] = useState(false);
 
   const copy = async () => {
     if (!queryPreview) return;
@@ -96,9 +96,9 @@ export default function SQLPreview({ queryPreview, adapterType, isLoading }: Pro
   };
 
   const isREST = adapterType === 'rest';
-  const adapterMeta: { label: string; color: string } = (adapterType ? ADAPTER_LABELS[adapterType] : undefined) ?? {
+  const adapterMeta: { label: string; colorVar: string } = (adapterType ? ADAPTER_LABELS[adapterType] : undefined) ?? {
     label: adapterType ?? 'SQL',
-    color: 'text-[#3dd68c]',
+    colorVar: 'var(--success)',
   };
   const panelLabel = isREST ? 'Request Preview' : 'SQL Preview';
   const emptyHint = isREST
@@ -108,13 +108,26 @@ export default function SQLPreview({ queryPreview, adapterType, isLoading }: Pro
   const highlighted = queryPreview ? (isREST ? highlightURL(queryPreview) : highlightSQL(queryPreview)) : null;
 
   return (
-    <div className="flex h-full flex-col bg-[#0f1117]">
+    <div className="flex h-full flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-[#252d3d] border-b px-3 py-2">
+      <div
+        className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">{panelLabel}</span>
           <span
-            className={`rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[9px] ${adapterMeta.color}`}
+            className="font-semibold text-[10px] uppercase tracking-widest"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            {panelLabel}
+          </span>
+          <span
+            className="rounded border px-1.5 py-0.5 text-[9px]"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor: 'var(--bg-elevated)',
+              color: adapterMeta.colorVar,
+            }}
           >
             {adapterMeta.label}
           </span>
@@ -123,7 +136,14 @@ export default function SQLPreview({ queryPreview, adapterType, isLoading }: Pro
           <button
             type="button"
             onClick={copy}
-            className="rounded border border-[#252d3d] bg-[#1e2535] px-2 py-1 text-[10px] text-slate-400 transition-colors hover:text-slate-200"
+            onMouseEnter={() => setCopyHover(true)}
+            onMouseLeave={() => setCopyHover(false)}
+            className="rounded border px-2 py-1 text-[10px] transition-colors"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor: 'var(--bg-elevated)',
+              color: copyHover ? 'var(--text-primary)' : 'var(--text-secondary)',
+            }}
           >
             {copied ? '✓ Copied' : 'Copy'}
           </button>
@@ -133,19 +153,25 @@ export default function SQLPreview({ queryPreview, adapterType, isLoading }: Pro
       {/* Content */}
       <div className="flex-1 overflow-auto p-3">
         {isLoading && (
-          <div className="flex items-center gap-2 text-slate-500 text-xs">
-            <div className="h-3 w-3 animate-spin rounded-full border border-[#4f8ef7] border-t-transparent" />
+          <div className="flex items-center gap-2 text-xs" style={{ color: 'var(--text-muted)' }}>
+            <div
+              className="h-3 w-3 animate-spin rounded-full border border-t-transparent"
+              style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+            />
             Translating…
           </div>
         )}
 
         {!isLoading && !queryPreview && (
-          <div className="mt-8 text-center font-mono text-slate-600 text-xs">{emptyHint}</div>
+          <div className="mt-8 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+            {emptyHint}
+          </div>
         )}
 
         {!isLoading && highlighted && (
           <pre
-            className="whitespace-pre-wrap font-mono text-[11px] text-slate-300 leading-relaxed"
+            className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+            style={{ color: 'var(--text-primary)' }}
             dangerouslySetInnerHTML={{ __html: highlighted }}
           />
         )}

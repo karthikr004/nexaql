@@ -1,36 +1,140 @@
 @import "tailwindcss";
 
+/* ── Dark theme (default) ──────────────────────────────────────────────── */
+:root, [data-theme="dark"] {
+  --bg-primary: #0f1117;
+  --bg-secondary: #131920;
+  --bg-elevated: #1e2535;
+  --bg-hover: #252d3d;
+  --bg-input: #161b27;
+
+  --border: #2d3548;
+  --border-focus: #4f8ef7;
+
+  --text-primary: #e2e8f0;
+  --text-secondary: #94a3b8;
+  --text-muted: #64748b;
+  --text-placeholder: #475569;
+
+  --accent: #4f8ef7;
+  --accent-hover: #3b7de8;
+  --success: #3dd68c;
+  --error: #ef4444;
+  --warning: #f59e0b;
+
+  --bg-warning: #422006;
+  --border-warning: #92400e;
+  --text-warning: #fbbf24;
+
+  --bg-error: #450a0a;
+  --border-error: #991b1b;
+  --text-error: #fca5a5;
+
+  --badge-red-bg: #3b1114;
+  --badge-red-border: #7f1d1d;
+  --badge-red-text: #fca5a5;
+
+  --badge-amber-bg: #3b2506;
+  --badge-amber-border: #92400e;
+  --badge-amber-text: #fbbf24;
+
+  --badge-green-bg: #052e16;
+  --badge-green-border: #166534;
+  --badge-green-text: #86efac;
+
+  /* Schema explorer semantic colors */
+  --type-string: #fb923c;
+  --type-integer: #22d3ee;
+  --type-numeric: #22d3ee;
+  --type-boolean: #c084fc;
+  --type-date: #fbbf24;
+  --type-enum: #4ade80;
+  --field-filterable: #3dd68c;
+  --field-filter: #fbbf24;
+  --field-edge: #fb923c;
+  --field-special: #f472b6;
+
+  --badge-pii-bg: #3b2506;
+  --badge-pii-border: #92400e;
+  --badge-pii-text: #fbbf24;
+
+  --scrollbar-track: #1a1b23;
+  --scrollbar-thumb: #3a3b45;
+}
+
+/* ── Light theme ───────────────────────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-primary: #ffffff;
+  --bg-secondary: #f8fafc;
+  --bg-elevated: #f1f5f9;
+  --bg-hover: #e2e8f0;
+  --bg-input: #ffffff;
+
+  --border: #e2e8f0;
+  --border-focus: #4f8ef7;
+
+  --text-primary: #0f172a;
+  --text-secondary: #475569;
+  --text-muted: #94a3b8;
+  --text-placeholder: #94a3b8;
+
+  --accent: #3b82f6;
+  --accent-hover: #2563eb;
+  --success: #22c55e;
+  --error: #ef4444;
+  --warning: #f59e0b;
+
+  --bg-warning: #fef3c7;
+  --border-warning: #fcd34d;
+  --text-warning: #92400e;
+
+  --bg-error: #fef2f2;
+  --border-error: #fca5a5;
+  --text-error: #991b1b;
+
+  --badge-red-bg: #fef2f2;
+  --badge-red-border: #fca5a5;
+  --badge-red-text: #991b1b;
+
+  --badge-amber-bg: #fffbeb;
+  --badge-amber-border: #fcd34d;
+  --badge-amber-text: #92400e;
+
+  --badge-green-bg: #f0fdf4;
+  --badge-green-border: #86efac;
+  --badge-green-text: #166534;
+
+  /* Schema explorer semantic colors */
+  --type-string: #c2410c;
+  --type-integer: #0e7490;
+  --type-numeric: #0e7490;
+  --type-boolean: #7c3aed;
+  --type-date: #a16207;
+  --type-enum: #15803d;
+  --field-filterable: #16a34a;
+  --field-filter: #a16207;
+  --field-edge: #c2410c;
+  --field-special: #be185d;
+
+  --badge-pii-bg: #fffbeb;
+  --badge-pii-border: #fcd34d;
+  --badge-pii-text: #92400e;
+
+  --scrollbar-track: #f1f5f9;
+  --scrollbar-thumb: #cbd5e1;
+}
+
 body {
-  background-color: #0f1117;
-  color: #ffffff;
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
     "Helvetica Neue", Arial, sans-serif;
   margin: 0;
   padding: 0;
 }
 
-/* Dark theme scrollbar */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-::-webkit-scrollbar-track {
-  background: #1a1b23;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb {
-  background: #3a3b45;
-  border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-  background: #4a4b55;
-}
-
-/* Firefox scrollbar */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #3a3b45 #1a1b23;
-}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: var(--scrollbar-track); border-radius: 4px; }
+::-webkit-scrollbar-thumb { background: var(--scrollbar-thumb); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--scrollbar-thumb); }
+* { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track); }

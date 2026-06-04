@@ -34,29 +34,45 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
 
   if (entries.length === 0) {
     return (
-      <div className="flex h-full flex-col bg-[#0f1117]">
-        <div className="shrink-0 border-[#252d3d] border-b px-3 pt-3 pb-2">
-          <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">Query History</span>
+      <div className="flex h-full flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <div
+          className="shrink-0 border-b px-3 pt-3 pb-2"
+          style={{ borderColor: 'var(--border)' }}
+        >
+          <span
+            className="font-semibold text-[10px] uppercase tracking-widest"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            Query History
+          </span>
         </div>
-        <div className="flex flex-1 flex-col items-center justify-center gap-2 text-slate-600">
+        <div className="flex flex-1 flex-col items-center justify-center gap-2" style={{ color: 'var(--text-secondary)' }}>
           <span className="text-2xl">⏱</span>
           <p className="text-xs">No queries run yet</p>
-          <p className="text-[10px] text-slate-700">Run a query to build history</p>
+          <p className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Run a query to build history</p>
         </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col bg-[#0f1117]">
+    <div className="flex h-full flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* Header */}
-      <div className="flex shrink-0 items-center justify-between border-[#252d3d] border-b px-3 pt-3 pb-2">
-        <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">Query History</span>
+      <div
+        className="flex shrink-0 items-center justify-between border-b px-3 pt-3 pb-2"
+        style={{ borderColor: 'var(--border)' }}
+      >
+        <span
+          className="font-semibold text-[10px] uppercase tracking-widest"
+          style={{ color: 'var(--text-secondary)' }}
+        >
+          Query History
+        </span>
         <div className="flex items-center gap-2">
-          <span className="text-[10px] text-slate-600">{entries.length} queries</span>
+          <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>{entries.length} queries</span>
           {confirmClear ? (
             <div className="flex items-center gap-1">
-              <span className="text-[10px] text-slate-500">Clear all?</span>
+              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Clear all?</span>
               <button
                 type="button"
                 onClick={() => {
@@ -70,7 +86,12 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
               <button
                 type="button"
                 onClick={() => setConfirmClear(false)}
-                className="rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors"
+                className="rounded border px-1.5 py-0.5 text-[10px] transition-colors"
+                style={{
+                  borderColor: 'var(--border)',
+                  backgroundColor: 'var(--bg-elevated)',
+                  color: 'var(--text-secondary)',
+                }}
               >
                 No
               </button>
@@ -79,7 +100,8 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
             <button
               type="button"
               onClick={() => setConfirmClear(true)}
-              className="text-[10px] text-slate-600 transition-colors hover:text-slate-400"
+              className="text-[10px] transition-colors"
+              style={{ color: 'var(--text-secondary)' }}
               title="Clear all history"
             >
               Clear
@@ -93,13 +115,15 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
         {entries.map((entry) => (
           <div
             key={entry.id}
-            className={`relative border-[#161b27] border-b transition-colors ${
-              hoveredId === entry.id ? 'bg-[#161b27]' : ''
-            }`}
+            className="relative border-b transition-colors"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor: hoveredId === entry.id ? 'var(--bg-input)' : undefined,
+            }}
             onMouseEnter={() => setHoveredId(entry.id)}
             onMouseLeave={() => setHoveredId(null)}
           >
-            {/* Main click area → load query */}
+            {/* Main click area -> load query */}
             <button
               type="button"
               className="w-full px-3 py-2.5 pr-8 text-left"
@@ -109,17 +133,26 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
               {/* Top row: name + meta */}
               <div className="mb-0.5 flex items-center gap-2">
                 <span
-                  className={`truncate font-mono font-semibold text-[11px] ${
-                    entry.hadError ? 'text-red-400' : 'text-[#4f8ef7]'
-                  }`}
+                  className="truncate font-mono font-semibold text-[11px]"
+                  style={{ color: entry.hadError ? '#f87171' : 'var(--accent)' }}
                 >
                   {entry.queryName}
                 </span>
-                <span className="ml-auto shrink-0 text-[9px] text-slate-600">{timeAgo(entry.timestamp)}</span>
+                <span
+                  className="ml-auto shrink-0 text-[9px]"
+                  style={{ color: 'var(--text-secondary)' }}
+                >
+                  {timeAgo(entry.timestamp)}
+                </span>
               </div>
 
               {/* Preview line */}
-              <p className="truncate font-mono text-[10px] text-slate-500 leading-snug">{queryPreview(entry.query)}</p>
+              <p
+                className="truncate font-mono text-[10px] leading-snug"
+                style={{ color: 'var(--text-muted)' }}
+              >
+                {queryPreview(entry.query)}
+              </p>
 
               {/* Bottom meta */}
               <div className="mt-1 flex items-center gap-2">
@@ -128,10 +161,14 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
                 ) : (
                   <>
                     {entry.rowCount !== undefined && (
-                      <span className="text-[#3dd68c] text-[9px]">{entry.rowCount} rows</span>
+                      <span className="text-[9px]" style={{ color: 'var(--success)' }}>
+                        {entry.rowCount} rows
+                      </span>
                     )}
                     {entry.durationMs !== undefined && (
-                      <span className="text-[9px] text-slate-600">{entry.durationMs}ms</span>
+                      <span className="text-[9px]" style={{ color: 'var(--text-secondary)' }}>
+                        {entry.durationMs}ms
+                      </span>
                     )}
                   </>
                 )}
@@ -145,9 +182,10 @@ export default function HistoryPanel({ entries, onLoad, onDelete, onClear }: Pro
                 e.stopPropagation();
                 onDelete(entry.id);
               }}
-              className={`absolute top-2.5 right-2 text-[11px] text-slate-700 transition-colors hover:text-red-400 ${
+              className={`absolute top-2.5 right-2 text-[11px] transition-colors hover:text-red-400 ${
                 hoveredId === entry.id ? 'opacity-100' : 'opacity-0'
               }`}
+              style={{ color: 'var(--text-muted)' }}
               title="Remove from history"
             >
               ✕

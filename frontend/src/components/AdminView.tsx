@@ -93,6 +93,18 @@ function Toast({ message, type, onDismiss }: { message: string; type: 'success' 
   );
 }
 
+// ── Shared input style helper ───────────────────────────────────────────────
+
+const inputStyle: React.CSSProperties = {
+  borderColor: 'var(--border)',
+  backgroundColor: 'var(--bg-input)',
+  color: 'var(--text-primary)',
+};
+
+const labelStyle: React.CSSProperties = {
+  color: 'var(--text-muted)',
+};
+
 // ── Main Component ──────────────────────────────────────────────────────────
 
 export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps) {
@@ -393,9 +405,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
   if (loadError) {
     return (
-      <div className="flex h-screen flex-col bg-[#0f1117]">
-        <div className="flex shrink-0 items-center justify-between border-b border-[#252d3d] px-4 py-2.5">
-          <button type="button" onClick={onBack} className="text-sm text-[#4f8ef7] hover:underline">
+      <div className="flex h-screen flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" style={{ borderColor: 'var(--border)' }}>
+          <button type="button" onClick={onBack} className="text-sm hover:underline" style={{ color: 'var(--accent)' }}>
             &larr; Back to Playground
           </button>
           <span className="text-sm text-red-400">Error</span>
@@ -409,14 +421,14 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
   if (!ontology) {
     return (
-      <div className="flex h-screen flex-col bg-[#0f1117]">
-        <div className="flex shrink-0 items-center justify-between border-b border-[#252d3d] px-4 py-2.5">
-          <button type="button" onClick={onBack} className="text-sm text-[#4f8ef7] hover:underline">
+      <div className="flex h-screen flex-col" style={{ backgroundColor: 'var(--bg-primary)' }}>
+        <div className="flex shrink-0 items-center justify-between border-b px-4 py-2.5" style={{ borderColor: 'var(--border)' }}>
+          <button type="button" onClick={onBack} className="text-sm hover:underline" style={{ color: 'var(--accent)' }}>
             &larr; Back to Playground
           </button>
-          <span className="text-sm text-slate-400">Loading...</span>
+          <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>Loading...</span>
         </div>
-        <div className="flex flex-1 items-center justify-center text-sm text-slate-600">Loading ontology...</div>
+        <div className="flex flex-1 items-center justify-center text-sm" style={{ color: 'var(--text-secondary)' }}>Loading ontology...</div>
       </div>
     );
   }
@@ -430,10 +442,10 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
     return (
       <div className="flex flex-1 overflow-hidden">
         {/* Left: function name list */}
-        <div className="flex w-[40%] shrink-0 flex-col border-r border-[#252d3d]">
-          <div className="shrink-0 border-b border-[#252d3d] px-3 py-2">
-            <span className="text-[10px] text-slate-500 uppercase tracking-widest">Functions</span>
-            <span className="ml-2 rounded-full bg-[#1e2535] px-1.5 text-[10px] text-slate-500">{fnEntries.length}</span>
+        <div className="flex w-[40%] shrink-0 flex-col border-r" style={{ borderColor: 'var(--border)' }}>
+          <div className="shrink-0 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
+            <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Functions</span>
+            <span className="ml-2 rounded-full px-1.5 text-[10px]" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-muted)' }}>{fnEntries.length}</span>
           </div>
           <div className="flex-1 overflow-y-auto">
             {fnEntries.map(([fnName]) => (
@@ -441,18 +453,24 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 type="button"
                 key={fnName}
                 onClick={() => setSelectedFunction(fnName)}
-                className={`flex w-full items-center justify-between border-b border-[#252d3d]/50 px-3 py-2.5 text-left transition-colors hover:bg-[#161b27] ${
-                  selectedFunction === fnName ? 'border-l-2 border-l-amber-500 bg-[#161b27]' : ''
+                className={`flex w-full items-center justify-between border-b px-3 py-2.5 text-left transition-colors ${
+                  selectedFunction === fnName ? 'border-l-2 border-l-amber-500' : ''
                 }`}
+                style={{
+                  borderBottomColor: 'var(--border)',
+                  backgroundColor: selectedFunction === fnName ? 'var(--bg-input)' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (selectedFunction !== fnName) e.currentTarget.style.backgroundColor = 'var(--bg-input)'; }}
+                onMouseLeave={(e) => { if (selectedFunction !== fnName) e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <span className="truncate font-mono text-xs text-slate-300">{fnName}</span>
+                <span className="truncate font-mono text-xs" style={{ color: 'var(--text-primary)' }}>{fnName}</span>
               </button>
             ))}
             {fnEntries.length === 0 && (
-              <div className="py-6 text-center text-xs text-slate-600">No policy functions defined</div>
+              <div className="py-6 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>No policy functions defined</div>
             )}
           </div>
-          <div className="shrink-0 border-t border-[#252d3d] p-3">
+          <div className="shrink-0 border-t p-3" style={{ borderColor: 'var(--border)' }}>
             <button
               type="button"
               onClick={() => {
@@ -463,7 +481,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 });
                 setSelectedFunction(name);
               }}
-              className="w-full rounded border border-[#252d3d] py-1.5 text-[11px] text-slate-400 hover:border-amber-500 hover:text-amber-400"
+              className="w-full rounded border py-1.5 text-[11px] hover:border-amber-500 hover:text-amber-400"
+              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
             >
               + Add Function
             </button>
@@ -476,7 +495,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             <div className="flex-1 overflow-y-auto p-4">
               <div className="space-y-3">
                 <div>
-                  <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Name</label>
+                  <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Name</label>
                   <input
                     value={selectedFunction}
                     onChange={(e) => {
@@ -492,12 +511,13 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       });
                       setSelectedFunction(newName);
                     }}
-                    className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 font-mono text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                    className="w-full rounded border px-2 py-1.5 font-mono text-sm focus:outline-none"
+                    style={inputStyle}
                     placeholder="function_name"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Description</label>
+                  <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Description</label>
                   <input
                     value={selectedFnData.description}
                     onChange={(e) =>
@@ -506,12 +526,13 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         if (fn) fn.description = e.target.value;
                       })
                     }
-                    className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                    className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                    style={inputStyle}
                     placeholder="What this function does"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">SQL Template</label>
+                  <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>SQL Template</label>
                   <textarea
                     rows={3}
                     value={selectedFnData.sql}
@@ -521,12 +542,13 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         if (fn) fn.sql = e.target.value;
                       })
                     }
-                    className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 font-mono text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none resize-none"
+                    className="w-full rounded border px-2 py-1.5 font-mono text-sm focus:outline-none resize-none"
+                    style={inputStyle}
                     placeholder="e.g. {field} = current_user_attr('org_id')"
                   />
                 </div>
                 <div>
-                  <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Requires (comma-separated user context attributes)</label>
+                  <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Requires (comma-separated user context attributes)</label>
                   <input
                     value={(selectedFnData.requires ?? []).join(', ')}
                     onChange={(e) =>
@@ -538,7 +560,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         }
                       })
                     }
-                    className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                    className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                    style={inputStyle}
                     placeholder="e.g. org_id, user_id"
                   />
                 </div>
@@ -561,8 +584,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           ) : (
             <div className="flex flex-1 items-center justify-center">
               <div className="text-center">
-                <div className="mb-2 text-lg text-slate-700">&#x1f512;</div>
-                <div className="text-xs text-slate-600">Select a function to view details</div>
+                <div className="mb-2 text-lg" style={{ color: 'var(--text-muted)' }}>&#x1f512;</div>
+                <div className="text-xs" style={{ color: 'var(--text-secondary)' }}>Select a function to view details</div>
               </div>
             </div>
           )}
@@ -578,36 +601,40 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
     return (
       <div className="space-y-4 p-4">
         <div>
-          <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Table</label>
+          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Table</label>
           <input
             value={node.table ?? ''}
             onChange={(e) => updateNode((n) => { n.table = e.target.value; })}
-            className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+            style={inputStyle}
           />
         </div>
         <div>
-          <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Primary Key</label>
+          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Primary Key</label>
           <input
             value={node.primary_key}
             onChange={(e) => updateNode((n) => { n.primary_key = e.target.value; })}
-            className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+            style={inputStyle}
           />
         </div>
         <div>
-          <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Description</label>
+          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Description</label>
           <textarea
             rows={3}
             value={node.description}
             onChange={(e) => updateNode((n) => { n.description = e.target.value; })}
-            className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none resize-none"
+            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none resize-none"
+            style={inputStyle}
           />
         </div>
         <div>
-          <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Datasource (optional)</label>
+          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Datasource (optional)</label>
           <input
             value={node.datasource ?? ''}
             onChange={(e) => updateNode((n) => { n.datasource = e.target.value || undefined; })}
-            className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+            style={inputStyle}
           />
         </div>
       </div>
@@ -622,7 +649,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead>
-              <tr className="border-b border-[#252d3d] text-[10px] text-slate-500 uppercase tracking-widest">
+              <tr className="border-b text-[10px] uppercase tracking-widest" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
                 <th className="py-2 pr-2 text-left">Name</th>
                 <th className="py-2 pr-2 text-left">Type</th>
                 <th className="py-2 pr-2 text-left">Description</th>
@@ -632,7 +659,13 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             </thead>
             <tbody>
               {fieldEntries.map(([fname, fdata]) => (
-                <tr key={fname} className="border-b border-[#252d3d]/50 hover:bg-[#161b27]">
+                <tr
+                  key={fname}
+                  className="border-b"
+                  style={{ borderColor: 'var(--border)' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-input)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                >
                   <td className="py-1.5 pr-2">
                     <input
                       value={fname}
@@ -645,14 +678,16 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                           n.fields[newName] = val;
                         });
                       }}
-                      className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                      className="w-full rounded border px-1.5 py-1 font-mono text-xs focus:outline-none"
+                      style={inputStyle}
                     />
                   </td>
                   <td className="py-1.5 pr-2">
                     <select
                       value={fdata.type}
                       onChange={(e) => updateNode((n) => { get(n.fields, fname).type = e.target.value; })}
-                      className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                      className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                      style={inputStyle}
                     >
                       {FIELD_TYPES.map((t) => (
                         <option key={t} value={t}>{t}</option>
@@ -663,7 +698,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     <input
                       value={fdata.description}
                       onChange={(e) => updateNode((n) => { get(n.fields, fname).description = e.target.value; })}
-                      className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                      className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                      style={inputStyle}
                     />
                   </td>
                   <td className="py-1.5 pr-2 text-center">
@@ -678,7 +714,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     <button
                       type="button"
                       onClick={() => updateNode((n) => { delete n.fields[fname]; })}
-                      className="text-slate-600 hover:text-red-400"
+                      className="hover:text-red-400"
+                      style={{ color: 'var(--text-secondary)' }}
                       title="Delete field"
                     >
                       x
@@ -688,7 +725,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
               ))}
               {fieldEntries.length === 0 && (
                 <tr>
-                  <td colSpan={5} className="py-6 text-center text-xs text-slate-600">No fields defined</td>
+                  <td colSpan={5} className="py-6 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>No fields defined</td>
                 </tr>
               )}
             </tbody>
@@ -697,9 +734,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           {fieldEntries
             .filter(([, fd]) => fd.type === 'enum')
             .map(([fname, fdata]) => (
-              <div key={`enum-${fname}`} className="mt-2 rounded border border-[#252d3d] bg-[#131920] p-2">
-                <label className="text-[10px] text-slate-500 uppercase tracking-widest">
-                  Enum values for <span className="font-mono text-slate-400">{fname}</span>
+              <div key={`enum-${fname}`} className="mt-2 rounded border p-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                <label className="text-[10px] uppercase tracking-widest" style={labelStyle}>
+                  Enum values for <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{fname}</span>
                 </label>
                 <input
                   value={(fdata.values ?? []).join(', ')}
@@ -712,7 +749,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     })
                   }
                   placeholder="value1, value2, ..."
-                  className="mt-1 w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="mt-1 w-full rounded border px-2 py-1 font-mono text-xs focus:outline-none"
+                  style={inputStyle}
                 />
               </div>
             ))}
@@ -723,7 +761,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             const name = `field_${Object.keys(node.fields).length + 1}`;
             updateNode((n) => { n.fields[name] = makeEmptyField(); });
           }}
-          className="mt-3 rounded border border-[#252d3d] px-3 py-1.5 text-[11px] text-slate-400 hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+          className="mt-3 rounded border px-3 py-1.5 text-[11px] transition-colors"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
         >
           + Add Field
         </button>
@@ -738,7 +777,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
     return (
       <div className="space-y-3 p-4">
         {edgeEntries.map(([ename, edata]) => (
-          <div key={ename} className="rounded-lg border border-[#252d3d] bg-[#131920] p-3">
+          <div key={ename} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
             <div className="mb-2 flex items-center justify-between">
               <input
                 value={ename}
@@ -753,13 +792,15 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     n.edges = ed;
                   });
                 }}
-                className="rounded border border-[#252d3d] bg-[#161b27] px-2 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                className="rounded border px-2 py-1 font-mono text-xs focus:outline-none"
+                style={inputStyle}
                 placeholder="Edge name"
               />
               <button
                 type="button"
                 onClick={() => updateNode((n) => { if (n.edges) delete n.edges[ename]; })}
-                className="text-slate-600 hover:text-red-400"
+                className="hover:text-red-400"
+                style={{ color: 'var(--text-secondary)' }}
                 title="Delete edge"
               >
                 x
@@ -767,11 +808,12 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             </div>
             <div className="grid grid-cols-3 gap-2">
               <div>
-                <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Target Node</label>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Target Node</label>
                 <select
                   value={edata.node}
                   onChange={(e) => updateNode((n) => { const ed = n.edges?.[ename]; if (ed) ed.node = e.target.value; })}
-                  className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                  style={inputStyle}
                 >
                   <option value="">-- select --</option>
                   {nodeNames.map((nn) => (
@@ -780,19 +822,21 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 </select>
               </div>
               <div>
-                <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Description</label>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Description</label>
                 <input
                   value={edata.description}
                   onChange={(e) => updateNode((n) => { const ed = n.edges?.[ename]; if (ed) ed.description = e.target.value; })}
-                  className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                  style={inputStyle}
                 />
               </div>
               <div>
-                <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Join Type</label>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Join Type</label>
                 <select
                   value={edata.join_type ?? 'JOIN'}
                   onChange={(e) => updateNode((n) => { const ed = n.edges?.[ename]; if (ed) ed.join_type = e.target.value; })}
-                  className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                  style={inputStyle}
                 >
                   {JOIN_TYPES.map((jt) => (
                     <option key={jt} value={jt}>{jt}</option>
@@ -802,7 +846,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             </div>
             {/* Join Steps */}
             <div className="mt-2">
-              <label className="mb-1 block text-[9px] text-slate-500 uppercase tracking-widest">Join Steps</label>
+              <label className="mb-1 block text-[9px] uppercase tracking-widest" style={labelStyle}>Join Steps</label>
               {edata.join_steps.map((step, si) => (
                 <div key={si} className="mb-1 grid grid-cols-[1fr_1fr_2fr_auto] gap-1.5">
                   <input
@@ -814,7 +858,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       })
                     }
                     placeholder="table"
-                    className="rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-[10px] text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                    className="rounded border px-1.5 py-1 font-mono text-[10px] focus:outline-none"
+                    style={inputStyle}
                   />
                   <input
                     value={step.alias_key}
@@ -825,7 +870,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       })
                     }
                     placeholder="alias_key"
-                    className="rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-[10px] text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                    className="rounded border px-1.5 py-1 font-mono text-[10px] focus:outline-none"
+                    style={inputStyle}
                   />
                   <input
                     value={step.condition}
@@ -836,7 +882,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       })
                     }
                     placeholder="condition"
-                    className="rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-[10px] text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                    className="rounded border px-1.5 py-1 font-mono text-[10px] focus:outline-none"
+                    style={inputStyle}
                   />
                   <button
                     type="button"
@@ -846,7 +893,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         if (ed) ed.join_steps.splice(si, 1);
                       })
                     }
-                    className="text-slate-600 hover:text-red-400"
+                    className="hover:text-red-400"
+                    style={{ color: 'var(--text-secondary)' }}
                   >
                     x
                   </button>
@@ -860,7 +908,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     if (ed) ed.join_steps.push(makeEmptyJoinStep());
                   })
                 }
-                className="mt-1 text-[10px] text-slate-500 hover:text-[#4f8ef7]"
+                className="mt-1 text-[10px]"
+                style={{ color: 'var(--text-muted)' }}
               >
                 + Add Join Step
               </button>
@@ -868,7 +917,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           </div>
         ))}
         {edgeEntries.length === 0 && (
-          <div className="py-6 text-center text-xs text-slate-600">No edges defined</div>
+          <div className="py-6 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>No edges defined</div>
         )}
         <button
           type="button"
@@ -879,7 +928,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
               n.edges[name] = makeEmptyEdge();
             });
           }}
-          className="rounded border border-[#252d3d] px-3 py-1.5 text-[11px] text-slate-400 hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+          className="rounded border px-3 py-1.5 text-[11px] transition-colors"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
         >
           + Add Edge
         </button>
@@ -894,7 +944,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
     return (
       <div className="space-y-3 p-4">
         {filterEntries.map(([fname, fdata]) => (
-          <div key={fname} className="rounded-lg border border-[#252d3d] bg-[#131920] p-3">
+          <div key={fname} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
             <div className="mb-2 flex items-center justify-between">
               <input
                 value={fname}
@@ -909,20 +959,22 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     n.special_filters = sf;
                   });
                 }}
-                className="rounded border border-[#252d3d] bg-[#161b27] px-2 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                className="rounded border px-2 py-1 font-mono text-xs focus:outline-none"
+                style={inputStyle}
                 placeholder="Filter name"
               />
               <button
                 type="button"
                 onClick={() => updateNode((n) => { if (n.special_filters) delete n.special_filters[fname]; })}
-                className="text-slate-600 hover:text-red-400"
+                className="hover:text-red-400"
+                style={{ color: 'var(--text-secondary)' }}
               >
                 x
               </button>
             </div>
             <div className="space-y-2">
               <div>
-                <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Description</label>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Description</label>
                 <input
                   value={fdata.description}
                   onChange={(e) =>
@@ -931,11 +983,12 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       if (sf) sf.description = e.target.value;
                     })
                   }
-                  className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                  style={inputStyle}
                 />
               </div>
               <div>
-                <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">SQL Expression</label>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>SQL Expression</label>
                 <input
                   value={fdata.sql}
                   onChange={(e) =>
@@ -944,11 +997,12 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       if (sf) sf.sql = e.target.value;
                     })
                   }
-                  className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="w-full rounded border px-1.5 py-1 font-mono text-xs focus:outline-none"
+                  style={inputStyle}
                 />
               </div>
               <div>
-                <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Type (optional)</label>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Type (optional)</label>
                 <select
                   value={fdata.type ?? ''}
                   onChange={(e) =>
@@ -957,7 +1011,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       if (sf) sf.type = e.target.value || undefined;
                     })
                   }
-                  className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                  style={inputStyle}
                 >
                   <option value="">none</option>
                   <option value="integer">integer</option>
@@ -967,7 +1022,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           </div>
         ))}
         {filterEntries.length === 0 && (
-          <div className="py-6 text-center text-xs text-slate-600">No special filters defined</div>
+          <div className="py-6 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>No special filters defined</div>
         )}
         <button
           type="button"
@@ -978,7 +1033,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
               n.special_filters[name] = makeEmptyFilter();
             });
           }}
-          className="rounded border border-[#252d3d] px-3 py-1.5 text-[11px] text-slate-400 hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+          className="rounded border px-3 py-1.5 text-[11px] transition-colors"
+          style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
         >
           + Add Filter
         </button>
@@ -994,7 +1050,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
       <div className="space-y-5 p-4">
         {/* Node-level visible_to */}
         <div>
-          <label className="mb-1 block text-[10px] text-slate-500 uppercase tracking-widest">Node visible_to (comma-separated roles)</label>
+          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Node visible_to (comma-separated roles)</label>
           <input
             defaultValue={(node.visible_to ?? []).join(', ')}
             key={`vt-${selectedItem}`}
@@ -1007,25 +1063,26 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 n.visible_to = val.length ? val : undefined;
               })
             }
-            className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-sm text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+            style={inputStyle}
             placeholder="e.g. analyst, manager, admin"
           />
         </div>
 
         {/* Row policies */}
         <div>
-          <h4 className="mb-2 text-[10px] text-slate-500 uppercase tracking-widest">Row Policies</h4>
+          <h4 className="mb-2 text-[10px] uppercase tracking-widest" style={labelStyle}>Row Policies</h4>
           {policies.map((pol, pi) => {
             const mode = pol.mode ?? 'raw';
             const testKey = `${selectedItem}-${pi}`;
             const testResult = policyTestResults[testKey] ?? null;
             const isTesting = policyTesting[testKey] ?? false;
             return (
-              <div key={pi} className="mb-2 rounded-lg border border-[#252d3d] bg-[#131920] p-3">
+              <div key={pi} className="mb-2 rounded-lg border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
                 <div className="mb-2 flex items-start justify-between">
                   <div className="flex items-center gap-2">
-                    <span className="text-[10px] text-slate-500">Policy {pi + 1}</span>
-                    <div className="inline-flex rounded-full border border-[#252d3d] bg-[#161b27] p-0.5">
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Policy {pi + 1}</span>
+                    <div className="inline-flex rounded-full border p-0.5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-input)' }}>
                       <button
                         type="button"
                         onClick={() =>
@@ -1037,8 +1094,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         className={`rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors ${
                           mode === 'function'
                             ? 'bg-[#4f8ef7] text-white'
-                            : 'text-slate-500 hover:text-slate-300'
+                            : ''
                         }`}
+                        style={mode !== 'function' ? { color: 'var(--text-muted)' } : undefined}
                       >
                         Function
                       </button>
@@ -1053,8 +1111,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         className={`rounded-full px-2 py-0.5 text-[9px] font-semibold transition-colors ${
                           mode === 'raw'
                             ? 'bg-[#4f8ef7] text-white'
-                            : 'text-slate-500 hover:text-slate-300'
+                            : ''
                         }`}
+                        style={mode !== 'raw' ? { color: 'var(--text-muted)' } : undefined}
                       >
                         Raw SQL
                       </button>
@@ -1067,7 +1126,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         if (n.row_policies) n.row_policies.splice(pi, 1);
                       })
                     }
-                    className="text-slate-600 hover:text-red-400"
+                    className="hover:text-red-400"
+                    style={{ color: 'var(--text-secondary)' }}
                   >
                     x
                   </button>
@@ -1076,7 +1136,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                   {mode === 'function' ? (
                     <>
                       <div>
-                        <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Policy Function</label>
+                        <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Policy Function</label>
                         <select
                           value={pol.function_name ?? ''}
                           onChange={(e) =>
@@ -1093,7 +1153,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                               }
                             })
                           }
-                          className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                          className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                          style={inputStyle}
                         >
                           <option value="">-- select function --</option>
                           {accessFunctionNames.map((fn) => (
@@ -1102,7 +1163,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         </select>
                       </div>
                       <div>
-                        <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Field (column the function applies to)</label>
+                        <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Field (column the function applies to)</label>
                         <select
                           value={pol.function_field ?? ''}
                           onChange={(e) =>
@@ -1119,7 +1180,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                               }
                             })
                           }
-                          className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                          className="w-full rounded border px-1.5 py-1 font-mono text-xs focus:outline-none"
+                          style={inputStyle}
                         >
                           <option value="">-- select column --</option>
                           {node && Object.keys(node.fields).map((fname) => (
@@ -1131,14 +1193,14 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         const selFn = pol.function_name ? accessFunctions[pol.function_name] : undefined;
                         if (!selFn) return null;
                         return (
-                          <div className="rounded border border-[#252d3d]/60 bg-[#0f1117] p-2">
-                            <div className="mb-1 text-[9px] text-slate-500">{selFn.description}</div>
-                            <div className="font-mono text-[10px] text-slate-600">{selFn.sql}</div>
+                          <div className="rounded border p-2" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}>
+                            <div className="mb-1 text-[9px]" style={{ color: 'var(--text-muted)' }}>{selFn.description}</div>
+                            <div className="font-mono text-[10px]" style={{ color: 'var(--text-secondary)' }}>{selFn.sql}</div>
                             {(selFn.requires ?? []).length > 0 && (
-                              <div className="mt-1 text-[9px] text-slate-600">
+                              <div className="mt-1 text-[9px]" style={{ color: 'var(--text-secondary)' }}>
                                 Requires:{' '}
                                 {selFn.requires!.map((r) => (
-                                  <span key={r} className="mr-1 inline-block rounded bg-[#1e2535] px-1 py-0.5 font-mono text-[9px] text-slate-400">{r}</span>
+                                  <span key={r} className="mr-1 inline-block rounded px-1 py-0.5 font-mono text-[9px]" style={{ backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>{r}</span>
                                 ))}
                               </div>
                             )}
@@ -1149,7 +1211,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                   ) : (
                     <>
                       <div>
-                        <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Condition</label>
+                        <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Condition</label>
                         <input
                           value={pol.condition}
                           onChange={(e) =>
@@ -1158,7 +1220,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                               if (p) p.condition = e.target.value;
                             })
                           }
-                          className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 font-mono text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                          className="w-full rounded border px-1.5 py-1 font-mono text-xs focus:outline-none"
+                          style={inputStyle}
                         />
                       </div>
                       <div className="flex items-center gap-1.5 rounded border border-yellow-700/30 bg-yellow-900/10 px-2 py-1">
@@ -1167,10 +1230,10 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     </>
                   )}
                   <div>
-                    <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Applies to Roles</label>
-                    <div className="flex flex-wrap gap-1.5 rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 min-h-[32px]">
+                    <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Applies to Roles</label>
+                    <div className="flex flex-wrap gap-1.5 rounded border px-2 py-1.5 min-h-[32px]" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-input)' }}>
                       {roleNames.length === 0 ? (
-                        <span className="text-[10px] text-slate-600 italic">No roles defined — add roles in the Roles section</span>
+                        <span className="text-[10px] italic" style={{ color: 'var(--text-secondary)' }}>No roles defined — add roles in the Roles section</span>
                       ) : roleNames.map((rn) => {
                         const selected = pol.roles.includes(rn);
                         return (
@@ -1191,8 +1254,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                             className={`rounded px-2 py-0.5 text-[10px] font-medium border transition-colors ${
                               selected
                                 ? 'bg-[#4f8ef7]/20 border-[#4f8ef7] text-[#4f8ef7]'
-                                : 'bg-[#0f1117] border-[#252d3d] text-slate-500 hover:border-slate-400'
+                                : ''
                             }`}
+                            style={!selected ? { backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border)', color: 'var(--text-muted)' } : undefined}
                           >
                             {rn}
                           </button>
@@ -1201,10 +1265,10 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                     </div>
                   </div>
                   <div>
-                    <label className="mb-0.5 block text-[9px] text-slate-500 uppercase tracking-widest">Except Roles</label>
-                    <div className="flex flex-wrap gap-1.5 rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 min-h-[32px]">
+                    <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Except Roles</label>
+                    <div className="flex flex-wrap gap-1.5 rounded border px-2 py-1.5 min-h-[32px]" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-input)' }}>
                       {roleNames.length === 0 ? (
-                        <span className="text-[10px] text-slate-600 italic">No roles defined</span>
+                        <span className="text-[10px] italic" style={{ color: 'var(--text-secondary)' }}>No roles defined</span>
                       ) : roleNames.map((rn) => {
                         const selected = (pol.except_roles ?? []).includes(rn);
                         return (
@@ -1226,8 +1290,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                             className={`rounded px-2 py-0.5 text-[10px] font-medium border transition-colors ${
                               selected
                                 ? 'bg-red-500/20 border-red-500 text-red-400'
-                                : 'bg-[#0f1117] border-[#252d3d] text-slate-500 hover:border-slate-400'
+                                : ''
                             }`}
+                            style={!selected ? { backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border)', color: 'var(--text-muted)' } : undefined}
                           >
                             {rn}
                           </button>
@@ -1241,7 +1306,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       type="button"
                       disabled={isTesting || !pol.condition}
                       onClick={() => handleTestPolicy(pi, resolvePolicyCondition(pol), pol.mode === 'function' ? pol.function_field : undefined)}
-                      className="rounded border border-[#252d3d] px-3 py-1 text-[10px] font-semibold text-slate-400 hover:border-[#4f8ef7] hover:text-[#4f8ef7] disabled:opacity-40"
+                      className="rounded border px-3 py-1 text-[10px] font-semibold disabled:opacity-40"
+                      style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
                     >
                       {isTesting ? 'Testing...' : 'Test Policy'}
                     </button>
@@ -1269,7 +1335,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 n.row_policies.push(makeEmptyRowPolicy());
               })
             }
-            className="rounded border border-[#252d3d] px-3 py-1.5 text-[11px] text-slate-400 hover:border-[#4f8ef7] hover:text-[#4f8ef7]"
+            className="rounded border px-3 py-1.5 text-[11px] transition-colors"
+            style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
           >
             + Add Row Policy
           </button>
@@ -1277,12 +1344,12 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
         {/* Per-field access table */}
         <div>
-          <h4 className="mb-2 text-[10px] text-slate-500 uppercase tracking-widest">Per-Field Access</h4>
+          <h4 className="mb-2 text-[10px] uppercase tracking-widest" style={labelStyle}>Per-Field Access</h4>
           {fieldEntries.length > 0 ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-[#252d3d] text-[10px] text-slate-500 uppercase tracking-widest">
+                  <tr className="border-b text-[10px] uppercase tracking-widest" style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}>
                     <th className="py-2 pr-2 text-left">Field</th>
                     <th className="py-2 pr-2 text-left">visible_to</th>
                     <th className="py-2 pr-2 text-center">PII</th>
@@ -1291,8 +1358,14 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 </thead>
                 <tbody>
                   {fieldEntries.map(([fname, fdata]) => (
-                    <tr key={fname} className="border-b border-[#252d3d]/50 hover:bg-[#161b27]">
-                      <td className="py-1.5 pr-2 font-mono text-xs text-slate-400">{fname}</td>
+                    <tr
+                      key={fname}
+                      className="border-b"
+                      style={{ borderColor: 'var(--border)' }}
+                      onMouseEnter={(e) => (e.currentTarget.style.backgroundColor = 'var(--bg-input)')}
+                      onMouseLeave={(e) => (e.currentTarget.style.backgroundColor = 'transparent')}
+                    >
+                      <td className="py-1.5 pr-2 font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>{fname}</td>
                       <td className="py-1.5 pr-2">
                         <input
                           value={(fdata.visible_to ?? []).join(', ')}
@@ -1308,7 +1381,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                               }
                             })
                           }
-                          className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                          className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                          style={inputStyle}
                           placeholder="all"
                         />
                       </td>
@@ -1329,7 +1403,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                               if (f) f.mask_with = e.target.value || undefined;
                             })
                           }
-                          className="w-full rounded border border-[#252d3d] bg-[#161b27] px-1.5 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                          className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none"
+                          style={inputStyle}
                           placeholder="e.g. hash, redact"
                         />
                       </td>
@@ -1339,7 +1414,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
               </table>
             </div>
           ) : (
-            <div className="py-4 text-center text-xs text-slate-600">Add fields first to configure access</div>
+            <div className="py-4 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>Add fields first to configure access</div>
           )}
         </div>
       </div>
@@ -1359,22 +1434,23 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
   // ── Main render ────────────────────────────────────────────────────────────
 
   return (
-    <div className="flex h-screen flex-col overflow-hidden bg-[#0f1117]">
+    <div className="flex h-screen flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {toast && <Toast message={toast.message} type={toast.type} onDismiss={() => setToast(null)} />}
 
       {/* ── Header bar ─────────────────────────────────────────────── */}
-      <header className="z-20 flex shrink-0 items-center justify-between border-[#252d3d] border-b bg-[#0f1117] px-4 py-2.5">
+      <header className="z-20 flex shrink-0 items-center justify-between border-b px-4 py-2.5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}>
         <div className="flex items-center gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="flex items-center gap-1 text-sm text-[#4f8ef7] transition-colors hover:text-[#3b7de8]"
+            className="flex items-center gap-1 text-sm transition-colors"
+            style={{ color: 'var(--accent)' }}
           >
             &larr; Back to Playground
           </button>
         </div>
 
-        <span className="font-semibold text-slate-200 text-sm">NexaQL Admin</span>
+        <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>NexaQL Admin</span>
 
         <button
           type="button"
@@ -1383,8 +1459,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           className={`rounded px-4 py-1.5 text-[12px] font-semibold transition-all ${
             isDirty
               ? 'bg-[#3dd68c] text-[#0f1117] hover:bg-[#32b577]'
-              : 'border border-[#252d3d] bg-[#1e2535] text-slate-600'
+              : 'border'
           }`}
+          style={!isDirty ? { borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' } : undefined}
         >
           {saving ? 'Saving...' : isDirty ? 'Save Changes' : 'Saved'}
         </button>
@@ -1393,20 +1470,21 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
       {/* ── Body: sidebar + content ────────────────────────────────── */}
       <div className="flex flex-1 overflow-hidden">
         {/* ── Sidebar (250px) ──────────────────────────────────────── */}
-        <div className="flex w-[250px] shrink-0 flex-col border-r border-[#252d3d] bg-[#131920]">
+        <div className="flex w-[250px] shrink-0 flex-col border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
           {/* Sidebar header */}
-          <div className="shrink-0 border-b border-[#252d3d] px-3 py-2">
-            <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">Schemas</span>
+          <div className="shrink-0 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
+            <span className="font-semibold text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-secondary)' }}>Schemas</span>
           </div>
 
           {/* Search */}
-          <div className="shrink-0 border-b border-[#252d3d] px-3 py-2">
+          <div className="shrink-0 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
             <input
               type="text"
               placeholder="Search..."
               value={sidebarSearch}
               onChange={(e) => setSidebarSearch(e.target.value)}
-              className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1.5 text-slate-300 text-xs placeholder-slate-600 focus:border-[#4f8ef7] focus:outline-none"
+              className="w-full rounded border px-2 py-1.5 text-xs focus:outline-none"
+              style={inputStyle}
             />
           </div>
 
@@ -1416,12 +1494,18 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
               <button
                 type="button"
                 onClick={() => setSelectedItem('__roles__')}
-                className={`flex w-full items-center gap-2 border-b border-[#252d3d] px-3 py-2.5 text-left transition-colors hover:bg-[#1e2535] ${
-                  selectedItem === '__roles__' ? 'bg-[#1e2535] border-l-2 border-l-green-500' : ''
+                className={`flex w-full items-center gap-2 border-b px-3 py-2.5 text-left transition-colors ${
+                  selectedItem === '__roles__' ? 'border-l-2 border-l-green-500' : ''
                 }`}
+                style={{
+                  borderBottomColor: 'var(--border)',
+                  backgroundColor: selectedItem === '__roles__' ? 'var(--bg-elevated)' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (selectedItem !== '__roles__') e.currentTarget.style.backgroundColor = 'var(--bg-elevated)'; }}
+                onMouseLeave={(e) => { if (selectedItem !== '__roles__') e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <span className="font-semibold text-green-400/90 text-[12px]">Roles</span>
-                <span className="rounded bg-green-950/30 px-1 py-0.5 text-[9px] text-green-500 border border-green-800/40">
+                <span className="font-semibold text-[12px]" style={{ color: 'var(--badge-green-text)' }}>Roles</span>
+                <span className="rounded px-1 py-0.5 text-[9px] border" style={{ backgroundColor: 'var(--badge-green-bg)', borderColor: 'var(--badge-green-border)', color: 'var(--badge-green-text)' }}>
                   {Object.keys(ontology?.roles ?? {}).length} defined
                 </span>
               </button>
@@ -1431,23 +1515,29 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                   setSelectedItem('__policy_functions__');
                   setSelectedFunction(null);
                 }}
-                className={`flex w-full items-center gap-2 border-b border-[#252d3d] px-3 py-2.5 text-left transition-colors hover:bg-[#1e2535] ${
-                  isPolicyFunctions ? 'bg-[#1e2535] border-l-2 border-l-amber-500' : ''
+                className={`flex w-full items-center gap-2 border-b px-3 py-2.5 text-left transition-colors ${
+                  isPolicyFunctions ? 'border-l-2 border-l-amber-500' : ''
                 }`}
+                style={{
+                  borderBottomColor: 'var(--border)',
+                  backgroundColor: isPolicyFunctions ? 'var(--bg-elevated)' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (!isPolicyFunctions) e.currentTarget.style.backgroundColor = 'var(--bg-elevated)'; }}
+                onMouseLeave={(e) => { if (!isPolicyFunctions) e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <span className="font-semibold text-amber-400/90 text-[12px]">Policy Functions</span>
-                <span className="rounded bg-amber-950/30 px-1 py-0.5 text-[9px] text-amber-500 border border-amber-800/40">
+                <span className="font-semibold text-[12px]" style={{ color: 'var(--badge-amber-text)' }}>Policy Functions</span>
+                <span className="rounded px-1 py-0.5 text-[9px] border" style={{ backgroundColor: 'var(--badge-amber-bg)', borderColor: 'var(--badge-amber-border)', color: 'var(--badge-amber-text)' }}>
                   ontology-level
                 </span>
               </button>
-              <div className="border-b border-[#252d3d]" />
+              <div className="border-b" style={{ borderColor: 'var(--border)' }} />
             </>
           )}
 
           {/* Node list */}
           <div className="flex-1 overflow-y-auto">
             {filteredNodeNames.length === 0 && (
-              <p className="px-3 py-3 text-[11px] text-slate-600">
+              <p className="px-3 py-3 text-[11px]" style={{ color: 'var(--text-secondary)' }}>
                 {sidebarSearch ? `No nodes match "${sidebarSearch}"` : 'No nodes defined'}
               </p>
             )}
@@ -1459,22 +1549,29 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                   setSelectedItem(name);
                   setActiveTab('general');
                 }}
-                className={`flex w-full items-center justify-between border-b border-[#252d3d]/50 px-3 py-2.5 text-left transition-colors hover:bg-[#1e2535] ${
-                  selectedItem === name ? 'bg-[#1e2535] border-l-2 border-l-[#4f8ef7]' : ''
+                className={`flex w-full items-center justify-between border-b px-3 py-2.5 text-left transition-colors ${
+                  selectedItem === name ? 'border-l-2 border-l-[#4f8ef7]' : ''
                 }`}
+                style={{
+                  borderBottomColor: 'var(--border)',
+                  backgroundColor: selectedItem === name ? 'var(--bg-elevated)' : 'transparent',
+                }}
+                onMouseEnter={(e) => { if (selectedItem !== name) e.currentTarget.style.backgroundColor = 'var(--bg-elevated)'; }}
+                onMouseLeave={(e) => { if (selectedItem !== name) e.currentTarget.style.backgroundColor = 'transparent'; }}
               >
-                <span className="truncate font-mono text-[12px] text-slate-300">{name}</span>
-                <span className="text-slate-600 text-sm">&rsaquo;</span>
+                <span className="truncate font-mono text-[12px]" style={{ color: 'var(--text-primary)' }}>{name}</span>
+                <span className="text-sm" style={{ color: 'var(--text-secondary)' }}>&rsaquo;</span>
               </button>
             ))}
           </div>
 
           {/* + New Schema */}
-          <div className="shrink-0 border-t border-[#252d3d] p-3">
+          <div className="shrink-0 border-t p-3" style={{ borderColor: 'var(--border)' }}>
             <button
               type="button"
               onClick={handleNewNode}
-              className="flex w-full items-center justify-center gap-1.5 rounded border border-[#252d3d] py-1.5 text-[11px] text-[#4f8ef7] hover:border-[#4f8ef7] hover:bg-[#1e2535]"
+              className="flex w-full items-center justify-center gap-1.5 rounded border py-1.5 text-[11px]"
+              style={{ borderColor: 'var(--border)', color: 'var(--accent)' }}
             >
               + New Schema
             </button>
@@ -1482,20 +1579,20 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
         </div>
 
         {/* ── Main content area ────────────────────────────────────── */}
-        <div className="flex flex-1 flex-col overflow-hidden bg-[#0f1117]">
+        <div className="flex flex-1 flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
           {selectedItem === '__roles__' ? (
             /* Roles editor */
             <>
-              <div className="shrink-0 border-b border-[#252d3d] px-4 py-2">
-                <span className="font-semibold text-green-400/90 text-sm">Roles</span>
-                <span className="ml-2 text-[10px] text-slate-600">Define valid roles for access control policies</span>
+              <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold text-sm" style={{ color: 'var(--badge-green-text)' }}>Roles</span>
+                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Define valid roles for access control policies</span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                <p className="text-[11px] text-slate-500 leading-relaxed">
-                  Roles defined here are the only valid role names that can be used in <code className="text-[#4f8ef7]">visible_to</code>, <code className="text-[#4f8ef7]">row_policies</code>, and other access control settings. The source system (IdP/auth) maps users to these roles via the <code className="text-[#4f8ef7]">X-User-Context</code> header.
+                <p className="text-[11px] leading-relaxed" style={{ color: 'var(--text-muted)' }}>
+                  Roles defined here are the only valid role names that can be used in <code style={{ color: 'var(--accent)' }}>visible_to</code>, <code style={{ color: 'var(--accent)' }}>row_policies</code>, and other access control settings. The source system (IdP/auth) maps users to these roles via the <code style={{ color: 'var(--accent)' }}>X-User-Context</code> header.
                 </p>
                 {Object.entries(ontology?.roles ?? {}).map(([roleName, roleDef]) => (
-                  <div key={roleName} className="flex items-start gap-3 rounded border border-[#252d3d] bg-[#131920] p-3">
+                  <div key={roleName} className="flex items-start gap-3 rounded border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
                     <div className="flex-1 space-y-2">
                       <input
                         defaultValue={roleName}
@@ -1511,7 +1608,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                             });
                           }
                         }}
-                        className="rounded border border-[#252d3d] bg-[#0f1117] px-2 py-1 font-mono text-sm font-semibold text-green-400 focus:border-green-500 focus:outline-none"
+                        className="rounded border px-2 py-1 font-mono text-sm font-semibold focus:outline-none"
+                        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)', color: 'var(--accent)' }}
                         placeholder="role_name"
                       />
                       <input
@@ -1522,14 +1620,16 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                             if (o.roles?.[roleName]) o.roles[roleName].description = e.target.value;
                           })
                         }
-                        className="w-full rounded border border-[#252d3d] bg-[#161b27] px-2 py-1 text-xs text-slate-300 focus:border-[#4f8ef7] focus:outline-none"
+                        className="w-full rounded border px-2 py-1 text-xs focus:outline-none"
+                        style={inputStyle}
                         placeholder="Description"
                       />
                     </div>
                     <button
                       type="button"
                       onClick={() => updateOntology((o) => { if (o.roles) delete o.roles[roleName]; })}
-                      className="shrink-0 text-slate-600 text-xs hover:text-red-400"
+                      className="shrink-0 text-xs hover:text-red-400"
+                      style={{ color: 'var(--text-secondary)' }}
                       title="Delete role"
                     >
                       ✕
@@ -1545,7 +1645,8 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                       o.roles[name] = { description: '' };
                     })
                   }
-                  className="rounded border border-[#252d3d] px-3 py-1.5 text-[11px] text-green-400 hover:border-green-500 hover:bg-[#1e2535]"
+                  className="rounded border px-3 py-1.5 text-[11px]"
+                  style={{ borderColor: 'var(--border)', color: 'var(--accent)' }}
                 >
                   + Add Role
                 </button>
@@ -1554,9 +1655,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           ) : isPolicyFunctions ? (
             /* Policy functions view */
             <>
-              <div className="shrink-0 border-b border-[#252d3d] px-4 py-2">
-                <span className="font-semibold text-amber-400/90 text-sm">Policy Functions</span>
-                <span className="ml-2 text-[10px] text-slate-600">(ontology-level)</span>
+              <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>Policy Functions</span>
+                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>(ontology-level)</span>
               </div>
               {renderPolicyFunctions()}
             </>
@@ -1564,26 +1665,25 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             /* Node editor view */
             <>
               {/* Node header */}
-              <div className="shrink-0 border-b border-[#252d3d] px-4 py-2">
+              <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
                 <div className="flex items-center gap-2 text-sm">
-                  <span className="text-slate-500">Editing:</span>
-                  <span className="font-mono text-slate-200">{selectedItem}</span>
+                  <span style={{ color: 'var(--text-muted)' }}>Editing:</span>
+                  <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{selectedItem}</span>
                 </div>
               </div>
 
               {/* Tabs */}
-              <div className="flex shrink-0 border-b border-[#252d3d] bg-[#0f1117]">
+              <div className="flex shrink-0 border-b" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-primary)' }}>
                 {tabs.map((t) => (
                   <button
                     type="button"
                     key={t.key}
                     onClick={() => setActiveTab(t.key)}
-                    className={`relative px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors ${
-                      activeTab === t.key ? 'text-[#4f8ef7]' : 'text-slate-600 hover:text-slate-400'
-                    }`}
+                    className={`relative px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest transition-colors`}
+                    style={{ color: activeTab === t.key ? 'var(--accent)' : 'var(--text-secondary)' }}
                   >
                     {t.label}
-                    {activeTab === t.key && <span className="absolute right-0 bottom-0 left-0 h-[2px] bg-[#4f8ef7]" />}
+                    {activeTab === t.key && <span className="absolute right-0 bottom-0 left-0 h-[2px]" style={{ backgroundColor: 'var(--accent)' }} />}
                   </button>
                 ))}
               </div>
@@ -1601,9 +1701,9 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
             /* Welcome / nothing selected */
             <div className="flex flex-1 items-center justify-center">
               <div className="text-center">
-                <div className="mb-3 text-3xl text-slate-700">&#x2699;</div>
-                <p className="mb-1 text-sm text-slate-400">NexaQL Admin</p>
-                <p className="text-xs text-slate-600">
+                <div className="mb-3 text-3xl" style={{ color: 'var(--text-muted)' }}>&#x2699;</div>
+                <p className="mb-1 text-sm" style={{ color: 'var(--text-secondary)' }}>NexaQL Admin</p>
+                <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
                   Select a schema from the sidebar to edit, or create a new one.
                 </p>
               </div>

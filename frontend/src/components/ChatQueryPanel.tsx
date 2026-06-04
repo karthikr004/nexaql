@@ -18,29 +18,29 @@ function highlightNexaQL(code: string): string {
 
       // Whole-line comments
       if (/^\s*#/.test(line)) {
-        return `<span class="text-slate-600 italic">${line}</span>`;
+        return `<span style="color: var(--text-secondary); font-style: italic">${line}</span>`;
       }
 
       // query/mutation keyword + query name (same line, single pass)
       line = line.replace(
         /\b(query|mutation)\b(\s+)(\w+)/g,
-        `<span class="text-[#a78bfa] font-semibold">$1</span>$2<span class="text-[#4f8ef7] font-semibold">$3</span>`,
+        `<span style="color: #a78bfa; font-weight: 600">$1</span>$2<span style="color: var(--accent); font-weight: 600">$3</span>`,
       );
 
       // Directives @word
-      line = line.replace(/@(\w+)/g, `<span class="text-[#f97316]">@$1</span>`);
+      line = line.replace(/@(\w+)/g, `<span style="color: #f97316">@$1</span>`);
 
       // Aggregation aliases / field aliases  word: (before any parens)
-      line = line.replace(/\b([a-z_]\w*)\s*:/g, `<span class="text-[#3dd68c]">$1</span>:`);
+      line = line.replace(/\b([a-z_]\w*)\s*:/g, `<span style="color: var(--success)">$1</span>:`);
 
       // String values "..."
-      line = line.replace(/"([^"]*)"/g, `<span class="text-orange-400">"$1"</span>`);
+      line = line.replace(/"([^"]*)"/g, `<span style="color: #fb923c">"$1"</span>`);
 
       // Numbers
-      line = line.replace(/\b(\d+(?:\.\d+)?)\b/g, `<span class="text-cyan-400">$1</span>`);
+      line = line.replace(/\b(\d+(?:\.\d+)?)\b/g, `<span style="color: #22d3ee">$1</span>`);
 
       // Booleans / null
-      line = line.replace(/\b(true|false|null)\b/g, `<span class="text-[#a78bfa]">$1</span>`);
+      line = line.replace(/\b(true|false|null)\b/g, `<span style="color: #a78bfa">$1</span>`);
 
       return line;
     })
@@ -84,12 +84,11 @@ function highlightSQL(sql: string): string {
   let out = sql.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
   keywords.forEach((kw) => {
-    out = out.replace(new RegExp(`\\b${kw}\\b`, 'g'), `<span class="text-[#a78bfa] font-semibold">${kw}</span>`);
+    out = out.replace(new RegExp(`\\b${kw}\\b`, 'g'), `<span style="color: #a78bfa; font-weight: 600">${kw}</span>`);
   });
-  out = out.replace(/'[^']*'/g, (m) => `<span class="text-orange-400">${m}</span>`);
-  out = out.replace(/\b(\d+)\b/g, `<span class="text-cyan-400">$1</span>`);
-  out = out.replace(/\b([a-z][a-z0-9]*)\./g, `<span class="text-slate-400">$1.</span>`);
-  out = out.replace(/--.*/g, (m) => `<span class="text-slate-600 italic">${m}</span>`);
+  out = out.replace(/'[^']*'/g, (m) => `<span style="color: #fb923c">${m}</span>`);
+  out = out.replace(/\b(\d+)\b/g, `<span style="color: #22d3ee">$1</span>`);
+  out = out.replace(/\b([a-z][a-z0-9]*)\./g, `<span style="color: var(--text-muted)">$1.</span>`);
   return out;
 }
 
@@ -98,7 +97,7 @@ function highlightURL(url: string): string {
   return out.replace(/^(GET|POST)\s+(.+)$/, (_, method, rest) => {
     const qIdx = rest.indexOf('?');
     if (qIdx === -1) {
-      return `<span class="text-[#a78bfa] font-semibold">${method}</span> <span class="text-[#4f8ef7]">${rest}</span>`;
+      return `<span style="color: #a78bfa; font-weight: 600">${method}</span> <span style="color: var(--accent)">${rest}</span>`;
     }
     const path = rest.slice(0, qIdx);
     const params = rest
@@ -106,24 +105,25 @@ function highlightURL(url: string): string {
       .split('&amp;')
       .map((p: string) => {
         const [k, v] = p.split('=');
-        return `<span class="text-cyan-400">${k}</span>=<span class="text-orange-400">${v ?? ''}</span>`;
+        return `<span style="color: #22d3ee">${k}</span>=<span style="color: #fb923c">${v ?? ''}</span>`;
       })
-      .join("<span class='text-slate-600'>&amp;</span>");
-    return `<span class="text-[#a78bfa] font-semibold">${method}</span> <span class="text-[#4f8ef7]">${path}</span><span class="text-slate-600">?</span>${params}`;
+      .join(`<span style="color: var(--text-secondary)">&amp;</span>`);
+    return `<span style="color: #a78bfa; font-weight: 600">${method}</span> <span style="color: var(--accent)">${path}</span><span style="color: var(--text-secondary)">?</span>${params}`;
   });
 }
 
-const ADAPTER_LABELS: Record<string, { label: string; color: string }> = {
-  postgresql: { label: 'PostgreSQL', color: 'text-[#3dd68c]' },
-  rest: { label: 'REST API', color: 'text-[#a78bfa]' },
-  mysql: { label: 'MySQL', color: 'text-[#f97316]' },
-  mongodb: { label: 'MongoDB', color: 'text-[#3dd68c]' },
+const ADAPTER_LABELS: Record<string, { label: string; colorVar: string }> = {
+  postgresql: { label: 'PostgreSQL', colorVar: 'var(--success)' },
+  rest: { label: 'REST API', colorVar: '#a78bfa' },
+  mysql: { label: 'MySQL', colorVar: '#f97316' },
+  mongodb: { label: 'MongoDB', colorVar: 'var(--success)' },
 };
 
 // ── CopyButton ─────────────────────────────────────────────────────────────────
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
+  const [hover, setHover] = useState(false);
   const copy = async () => {
     await navigator.clipboard.writeText(text);
     setCopied(true);
@@ -133,7 +133,14 @@ function CopyButton({ text }: { text: string }) {
     <button
       type="button"
       onClick={copy}
-      className="rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[10px] text-slate-400 transition-colors hover:text-slate-200"
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      className="rounded border px-1.5 py-0.5 text-[10px] transition-colors"
+      style={{
+        borderColor: 'var(--border)',
+        backgroundColor: 'var(--bg-elevated)',
+        color: hover ? 'var(--text-primary)' : 'var(--text-secondary)',
+      }}
     >
       {copied ? '✓' : 'Copy'}
     </button>
@@ -143,9 +150,9 @@ function CopyButton({ text }: { text: string }) {
 // ── Component ──────────────────────────────────────────────────────────────────
 
 export default function ChatQueryPanel({ nexaqlQuery, queryPreview, adapterType }: Props) {
-  const adapterMeta: { label: string; color: string } = (adapterType ? ADAPTER_LABELS[adapterType] : undefined) ?? {
+  const adapterMeta: { label: string; colorVar: string } = (adapterType ? ADAPTER_LABELS[adapterType] : undefined) ?? {
     label: adapterType ?? 'Query',
-    color: 'text-slate-400',
+    colorVar: 'var(--text-secondary)',
   };
 
   const isREST = adapterType === 'rest';
@@ -154,12 +161,27 @@ export default function ChatQueryPanel({ nexaqlQuery, queryPreview, adapterType 
   const previewHighlighted = queryPreview ? (isREST ? highlightURL(queryPreview) : highlightSQL(queryPreview)) : null;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden bg-[#0f1117]">
+    <div className="flex h-full flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
       {/* ── NexaQL Query ── */}
-      <div className="flex shrink-0 items-center justify-between border-[#252d3d] border-b px-3 py-2">
+      <div
+        className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">NexaQL Query</span>
-          <span className="rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[#4f8ef7] text-[9px]">
+          <span
+            className="font-semibold text-[10px] uppercase tracking-widest"
+            style={{ color: 'var(--text-secondary)' }}
+          >
+            NexaQL Query
+          </span>
+          <span
+            className="rounded border px-1.5 py-0.5 text-[9px]"
+            style={{
+              borderColor: 'var(--border)',
+              backgroundColor: 'var(--bg-elevated)',
+              color: 'var(--accent)',
+            }}
+          >
             generated
           </span>
         </div>
@@ -169,26 +191,40 @@ export default function ChatQueryPanel({ nexaqlQuery, queryPreview, adapterType 
       <div className="shrink-0 overflow-auto p-3" style={{ maxHeight: '45%' }}>
         {nexaqlHighlighted ? (
           <pre
-            className="whitespace-pre-wrap font-mono text-[11px] text-slate-300 leading-relaxed"
+            className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+            style={{ color: 'var(--text-primary)' }}
             dangerouslySetInnerHTML={{ __html: nexaqlHighlighted }}
           />
         ) : (
-          <div className="mt-4 text-center font-mono text-slate-600 text-xs">Send a message to generate a query</div>
+          <div className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+            Send a message to generate a query
+          </div>
         )}
       </div>
 
       {/* ── Divider ── */}
-      <div className="shrink-0 border-[#252d3d] border-t" />
+      <div className="shrink-0 border-t" style={{ borderColor: 'var(--border)' }} />
 
       {/* ── Translated preview ── */}
-      <div className="flex shrink-0 items-center justify-between border-[#252d3d] border-b px-3 py-2">
+      <div
+        className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+        style={{ borderColor: 'var(--border)' }}
+      >
         <div className="flex items-center gap-2">
-          <span className="font-semibold text-[10px] text-slate-400 uppercase tracking-widest">
+          <span
+            className="font-semibold text-[10px] uppercase tracking-widest"
+            style={{ color: 'var(--text-secondary)' }}
+          >
             {isREST ? 'Request' : 'SQL'}
           </span>
           {adapterType && (
             <span
-              className={`rounded border border-[#252d3d] bg-[#1e2535] px-1.5 py-0.5 text-[9px] ${adapterMeta.color}`}
+              className="rounded border px-1.5 py-0.5 text-[9px]"
+              style={{
+                borderColor: 'var(--border)',
+                backgroundColor: 'var(--bg-elevated)',
+                color: adapterMeta.colorVar,
+              }}
             >
               {adapterMeta.label}
             </span>
@@ -200,11 +236,12 @@ export default function ChatQueryPanel({ nexaqlQuery, queryPreview, adapterType 
       <div className="flex-1 overflow-auto p-3">
         {previewHighlighted ? (
           <pre
-            className="whitespace-pre-wrap font-mono text-[11px] text-slate-300 leading-relaxed"
+            className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+            style={{ color: 'var(--text-primary)' }}
             dangerouslySetInnerHTML={{ __html: previewHighlighted }}
           />
         ) : (
-          <div className="mt-4 text-center font-mono text-slate-600 text-xs">
+          <div className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
             {nexaqlQuery ? 'No translation available' : 'Translation will appear here'}
           </div>
         )}
