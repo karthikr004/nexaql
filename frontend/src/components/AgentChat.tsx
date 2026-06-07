@@ -160,22 +160,24 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
   );
 }
 
-// ── Suggested starter questions ────────────────────────────────────────────────
+// ── Fallback suggestions (used when no domain-specific ones are available) ────
 
-const SUGGESTIONS = [
-  'Show me all orders from the last 30 days',
-  'Which customers have spent the most?',
-  'What are the top selling products?',
-  'Show revenue breakdown by category',
+const FALLBACK_SUGGESTIONS = [
+  'Show me all available data',
+  'What tables and fields are available?',
+  'Summarize the key metrics',
+  'Show me recent records',
 ];
 
 // ── Main component ─────────────────────────────────────────────────────────────
 
 interface Props {
   onTurnComplete?: (turn: ChatTurn) => void;
+  suggestions?: string[];
 }
 
-export default function AgentChat({ onTurnComplete }: Props) {
+export default function AgentChat({ onTurnComplete, suggestions }: Props) {
+  const SUGGESTIONS = suggestions?.length ? suggestions : FALLBACK_SUGGESTIONS;
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);

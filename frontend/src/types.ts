@@ -45,10 +45,17 @@ export interface NodeInfo {
   visibleTo?: string[];
 }
 
+export interface ExampleQuery {
+  name: string;
+  query: string;
+}
+
 export interface OntologySummary {
   domain: string;
   description: string;
   nodes: NodeInfo[];
+  examples?: ExampleQuery[];
+  nlQuestions?: string[];
 }
 
 export interface ExecuteResult {

@@ -14,7 +14,8 @@ from pydantic import BaseModel, Field
 
 
 class OntologyConfig(BaseModel):
-    path: str
+    path: Optional[str] = None
+    domain: Optional[str] = None
 
 
 class DatasourceEntry(BaseModel):

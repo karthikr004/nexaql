@@ -96,7 +96,234 @@ def ontology_summary(ontology: Ontology) -> dict[str, Any]:
         "domain": ontology.domain,
         "description": ontology.description,
         "nodes": nodes_out,
+        "examples": _generate_examples(ontology),
+        "nlQuestions": _generate_nl_questions(ontology),
     }
+
+
+def _generate_examples(ontology: Ontology) -> list[dict[str, str]]:
+    """Generate 3-5 example NexaQL queries based on the ontology's nodes/fields/edges."""
+    examples: list[dict[str, str]] = []
+    node_names = list(ontology.nodes.keys())
+    if not node_names:
+        return examples
+
+    # Helper: pick up to N field names from a node
+    def _pick_fields(node_name: str, max_fields: int = 4) -> list[str]:
+        defn = ontology.nodes[node_name]
+        return list(defn.fields.keys())[:max_fields]
+
+    # Helper: find the first enum field with values for a given node
+    def _first_enum(node_name: str) -> tuple[str, str] | None:
+        defn = ontology.nodes[node_name]
+        for fname, fdef in defn.fields.items():
+            if fdef.values and len(fdef.values) >= 2:
+                return fname, fdef.values[0]
+        return None
+
+    # Helper: find the first date field
+    def _first_date(node_name: str) -> str | None:
+        defn = ontology.nodes[node_name]
+        for fname, fdef in defn.fields.items():
+            if fdef.type in ("date", "datetime", "timestamp"):
+                return fname
+        return None
+
+    # Helper: find the first numeric field
+    def _first_numeric(node_name: str) -> str | None:
+        defn = ontology.nodes[node_name]
+        for fname, fdef in defn.fields.items():
+            if fdef.type in ("numeric", "integer", "float", "decimal"):
+                return fname
+        return None
+
+    # Helper: human-readable title from node name
+    def _title(name: str) -> str:
+        return name.replace("_", " ").title()
+
+    # 1. Browse all records from the first node
+    first = node_names[0]
+    fields_str = "\n    ".join(_pick_fields(first, 5))
+    examples.append({
+        "name": f"All {_title(first)}",
+        "query": (
+            f"# Browse all {first}\n"
+            f"query All{_title(first).replace(' ', '')} {{\n"
+            f"  {first} @limit(50) {{\n"
+            f"    {fields_str}\n"
+            f"  }}\n"
+            f"}}"
+        ),
+    })
+
+    # 2. Filtered query using an enum field (find first node with an enum)
+    for nname in node_names:
+        enum_info = _first_enum(nname)
+        if enum_info:
+            fname, fval = enum_info
+            fields_str = "\n    ".join(_pick_fields(nname, 4))
+            examples.append({
+                "name": f"{_title(nname)} by {_title(fname)}",
+                "query": (
+                    f"# Filter {nname} by {fname}\n"
+                    f"query FilterBy{_title(fname).replace(' ', '')} {{\n"
+                    f"  {nname}({fname}: \"{fval}\") {{\n"
+                    f"    {fields_str}\n"
+                    f"  }}\n"
+                    f"}}"
+                ),
+            })
+            break
+
+    # 3. Aggregation query — find a node with a numeric field
+    for nname in node_names:
+        num_field = _first_numeric(nname)
+        if num_field:
+            examples.append({
+                "name": f"{_title(nname)} Summary",
+                "query": (
+                    f"# Aggregate {num_field} across {nname}\n"
+                    f"query {_title(nname).replace(' ', '')}Summary {{\n"
+                    f"  {nname} {{\n"
+                    f"    total: sum({num_field})\n"
+                    f"    average: avg({num_field})\n"
+                    f"    record_count: count()\n"
+                    f"  }}\n"
+                    f"}}"
+                ),
+            })
+            break
+
+    # 4. Query with edge traversal — find first node that has edges
+    for nname in node_names:
+        defn = ontology.nodes[nname]
+        if defn.edges:
+            edge_name = next(iter(defn.edges))
+            edge_target = defn.edges[edge_name].node
+            parent_fields = "\n    ".join(_pick_fields(nname, 3))
+            child_fields = "\n      ".join(_pick_fields(edge_target, 3))
+            examples.append({
+                "name": f"{_title(nname)} + {_title(edge_name)}",
+                "query": (
+                    f"# {_title(nname)} with related {edge_name}\n"
+                    f"query {_title(nname).replace(' ', '')}With{_title(edge_name).replace(' ', '')} {{\n"
+                    f"  {nname} @limit(20) {{\n"
+                    f"    {parent_fields}\n"
+                    f"    {edge_name} {{\n"
+                    f"      {child_fields}\n"
+                    f"    }}\n"
+                    f"  }}\n"
+                    f"}}"
+                ),
+            })
+            break
+
+    # 5. Date-filtered query — if any node has a date field
+    for nname in node_names:
+        date_field = _first_date(nname)
+        if date_field:
+            fields_str = "\n    ".join(_pick_fields(nname, 4))
+            examples.append({
+                "name": f"Recent {_title(nname)}",
+                "query": (
+                    f"# Recent {nname} by {date_field}\n"
+                    f"query Recent{_title(nname).replace(' ', '')} {{\n"
+                    f"  {nname}({date_field}: {{ gte: \"2024-01-01\" }}) "
+                    f"@orderby({date_field}, DESC) @limit(20) {{\n"
+                    f"    {fields_str}\n"
+                    f"  }}\n"
+                    f"}}"
+                ),
+            })
+            break
+
+    return examples
+
+
+def _generate_nl_questions(ontology: Ontology) -> list[str]:
+    """Generate 4-6 domain-specific natural language questions for the Agent Chat.
+
+    These are plain English questions a user might ask, derived from the
+    ontology's nodes, fields, edges, and special filters.
+    """
+    questions: list[str] = []
+    node_names = list(ontology.nodes.keys())
+    if not node_names:
+        return ["Show me all available data"]
+
+    def _title(name: str) -> str:
+        return name.replace("_", " ")
+
+    def _first_date(node_name: str) -> str | None:
+        defn = ontology.nodes[node_name]
+        for fname, fdef in defn.fields.items():
+            if fdef.type in ("date", "datetime", "timestamp"):
+                return fname
+        return None
+
+    def _first_numeric(node_name: str) -> str | None:
+        defn = ontology.nodes[node_name]
+        for fname, fdef in defn.fields.items():
+            if fdef.type in ("numeric", "integer", "float", "decimal"):
+                return fname
+        return None
+
+    def _first_enum(node_name: str) -> tuple[str, list[str]] | None:
+        defn = ontology.nodes[node_name]
+        for fname, fdef in defn.fields.items():
+            if fdef.values and len(fdef.values) >= 2:
+                return fname, fdef.values
+        return None
+
+    # 1. Browse question for the primary node
+    first = node_names[0]
+    questions.append(f"Show me all {_title(first)}")
+
+    # 2. Date-based question if any node has a date field
+    for nname in node_names:
+        date_field = _first_date(nname)
+        if date_field:
+            readable_date = _title(date_field)
+            questions.append(
+                f"Which {_title(nname)} were created in the last 30 days?"
+                if "creat" in date_field.lower()
+                else f"Show me {_title(nname)} from the last 30 days"
+            )
+            break
+
+    # 3. Aggregation question if any node has a numeric field
+    for nname in node_names:
+        num_field = _first_numeric(nname)
+        if num_field:
+            readable = _title(num_field)
+            questions.append(f"What is the total and average {readable} across all {_title(nname)}?")
+            break
+
+    # 4. Enum/status breakdown question
+    for nname in node_names:
+        enum_info = _first_enum(nname)
+        if enum_info:
+            fname, vals = enum_info
+            questions.append(f"Show me {_title(nname)} grouped by {_title(fname)}")
+            break
+
+    # 5. Edge traversal question — find a relationship to ask about
+    for nname in node_names:
+        defn = ontology.nodes[nname]
+        if defn.edges:
+            edge_name = next(iter(defn.edges))
+            edge_desc = defn.edges[edge_name].description or _title(edge_name)
+            questions.append(f"Show me {_title(nname)} with their {_title(edge_name)}")
+            break
+
+    # 6. "Top N" question using a numeric field + different node if possible
+    for nname in node_names:
+        num_field = _first_numeric(nname)
+        if num_field and len(questions) < 6:
+            questions.append(f"What are the top 10 {_title(nname)} by {_title(num_field)}?")
+            break
+
+    return questions[:6]
 
 
 # ── ontology_to_agent_prompt ─────────────────────────────────────────────────

@@ -10,29 +10,50 @@ from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ValidationError
 
-from nexaql.api.deps import get_adapter_for_datasource, get_config, get_ontology
+from nexaql.api.deps import get_adapter_for_datasource, get_config, get_ontology, invalidate_ontology_cache
 from nexaql.ontology.models import Ontology, OntologyNode
-from nexaql.ontology.writer import save_ontology
 from nexaql.policy.context import CANONICAL_FIELDS
 from nexaql.policy.enforcer import _PLACEHOLDER_RE
 
 router = APIRouter(tags=["admin"])
 
 
-def _ontology_path() -> str:
-    return get_config().ontology.path
+async def _save_ontology_to_db(ontology: Ontology) -> None:
+    """Save ontology to the database via the active connector."""
+    from nexaql.api.deps import _get_db_url_from_connectors
+    db_url = _get_db_url_from_connectors()
+    if db_url:
+        from nexaql.ontology.store import PostgresStore
+        store = PostgresStore(db_url)
+        await store.save(ontology, author="admin")
+        invalidate_ontology_cache()
+    else:
+        # Fallback to YAML if no connector
+        from nexaql.ontology.writer import save_ontology
+        save_ontology(ontology, get_config().ontology.path)
+        invalidate_ontology_cache()
 
 
 # ── GET /admin/ontology ────────────────────────────────────────────────────
 
 
 @router.get("/admin/ontology")
-async def get_full_ontology() -> JSONResponse:
+async def get_full_ontology(domain: str | None = None) -> JSONResponse:
+    """Return the full ontology. If `domain` is specified, load that domain from DB."""
     try:
-        ont = get_ontology()
+        if domain:
+            from nexaql.api.deps import _get_db_url_from_connectors
+            db_url = _get_db_url_from_connectors()
+            if db_url:
+                from nexaql.ontology.store import PostgresStore
+                store = PostgresStore(db_url)
+                ont = await store.load(domain)
+            else:
+                return JSONResponse({"error": "No connector configured"}, status_code=400)
+        else:
+            ont = get_ontology()
         return JSONResponse({
             "ontology": ont.model_dump(exclude_none=True),
-            "path": _ontology_path(),
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -113,7 +134,7 @@ async def replace_ontology(data: dict[str, Any]) -> JSONResponse:
         }, status_code=400)
 
     try:
-        save_ontology(ontology, _ontology_path())
+        await _save_ontology_to_db(ontology)
         return JSONResponse({"success": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -139,7 +160,7 @@ async def update_node(node_name: str, data: dict[str, Any]) -> JSONResponse:
         ont.nodes[node_name] = node
         # Re-validate full ontology after mutation
         ontology = Ontology(**ont.model_dump())
-        save_ontology(ontology, _ontology_path())
+        await _save_ontology_to_db(ontology)
         return JSONResponse({"success": True, "node": node_name})
     except ValidationError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
@@ -176,7 +197,7 @@ async def create_node(data: dict[str, Any]) -> JSONResponse:
         ont.nodes[name] = node
         # Re-validate full ontology after mutation
         ontology = Ontology(**ont.model_dump())
-        save_ontology(ontology, _ontology_path())
+        await _save_ontology_to_db(ontology)
         return JSONResponse({"success": True, "node": name})
     except ValidationError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
@@ -197,7 +218,7 @@ async def delete_node(node_name: str) -> JSONResponse:
                 status_code=404,
             )
         del ont.nodes[node_name]
-        save_ontology(ont, _ontology_path())
+        await _save_ontology_to_db(ont)
         return JSONResponse({"success": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)

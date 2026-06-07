@@ -6,6 +6,7 @@ import SQLPreview from './SQLPreview';
 import ResultsPanel from './ResultsPanel';
 import AgentChat from './AgentChat';
 import ChatQueryPanel from './ChatQueryPanel';
+import DataSourceWizard from './DataSourceWizard';
 import type {
   OntologySummary,
   ExecuteResult,
@@ -46,38 +47,21 @@ function saveHistory(entries: HistoryEntry[]) {
 
 // ── Default query ─────────────────────────────────────────────────────────────
 
-const DEFAULT_QUERY = `# Welcome to NexaQL Playground
+const WELCOME_QUERY = `# Welcome to NexaQL Playground
 # ─────────────────────────────────────────────
 # NexaQL lets you query any structured data
 # in a single graph-traversal query.
 #
 # Try: select an example above, or start typing below.
 # ⌘↩ (Ctrl+Enter) to run  ·  click field names in the schema to insert
-
-query RecentOrders {
-  order(status: "DELIVERED") @orderby(ordered_at, DESC) @limit(10) {
-    id
-    ordered_at
-    total_amount
-    customer {
-      name
-      email
-    }
-    items {
-      quantity
-      unit_price
-      product {
-        name
-      }
-    }
-  }
-}`;
+`;
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export default function Playground() {
   const { theme, toggle } = useTheme();
-  const [query, setQuery] = useState(DEFAULT_QUERY);
+  const [query, setQuery] = useState(WELCOME_QUERY);
+  const initialQuerySet = useRef(false);
   const [insertText, setInsertText] = useState<string | undefined>(undefined);
   const [ontology, setOntology] = useState<OntologySummary | null>(null);
   const [result, setResult] = useState<ExecuteResult | null>(null);
@@ -94,6 +78,15 @@ export default function Playground() {
 
   // Top-level view: playground or admin
   const [view, setView] = useState<'playground' | 'admin'>('playground');
+
+  // Data source wizard modal
+  const [showWizard, setShowWizard] = useState(false);
+
+  // Domain selector
+  const [domains, setDomains] = useState<
+    { domain: string; description: string; nodeCount: number; path: string; active: boolean; source: string; dsType?: string }[]
+  >([]);
+  const [isSwitching, setIsSwitching] = useState(false);
 
   // Role switcher for access control testing
   const [activeRole, setActiveRole] = useState<string>('anonymous');
@@ -164,13 +157,71 @@ export default function Playground() {
       .catch(console.error);
   }, []);
 
+  // Load available domains
+  const fetchDomains = useCallback(() => {
+    fetch('/api/domains')
+      .then((r) => r.json())
+      .then((data) => {
+        if (data && Array.isArray(data.domains)) setDomains(data.domains);
+      })
+      .catch(console.error);
+  }, []);
+
   useEffect(() => {
     fetchOntology();
-  }, [fetchOntology]);
+    fetchDomains();
+  }, [fetchOntology, fetchDomains]);
 
   const reloadOntology = useCallback(() => {
     fetchOntology();
-  }, [fetchOntology]);
+    fetchDomains();
+  }, [fetchOntology, fetchDomains]);
+
+  // Switch active domain
+  const switchDomain = useCallback(
+    (domain: string) => {
+      setIsSwitching(true);
+      fetch('/api/domains/switch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ domain }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.status === 'switched') {
+            // Reload ontology and pick up new examples
+            fetch('/api/ontology')
+              .then((r) => r.json())
+              .then((ontData) => {
+                if (ontData && Array.isArray(ontData.nodes)) {
+                  setOntology(ontData);
+                  // Set editor to first example of the new domain
+                  if (ontData.examples?.length) {
+                    setQuery(ontData.examples[0].query);
+                  }
+                }
+              })
+              .catch(console.error);
+            fetchDomains();
+            setResult(null);
+          } else {
+            console.error('Domain switch failed:', data?.error);
+          }
+        })
+        .catch(console.error)
+        .finally(() => setIsSwitching(false));
+    },
+    [fetchOntology, fetchDomains],
+  );
+
+  // Set initial query from first example when ontology loads
+  useEffect(() => {
+    const first = ontology?.examples?.[0];
+    if (first && !initialQuerySet.current) {
+      initialQuerySet.current = true;
+      setQuery(first.query);
+    }
+  }, [ontology]);
 
   // Reset results when role changes (forces re-run with new enforcement)
   const prevRoleRef = useRef(activeRole);
@@ -357,13 +408,63 @@ export default function Playground() {
             <span className="text-sm" style={{ color: 'var(--accent)' }}>NexaQL Playground</span>
           </div>
           {ontology && (
-            <span className="rounded-full border px-2 py-0.5 text-[10px]" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
-              {ontology.domain} {'·'} {ontology.nodes.length} nodes
-            </span>
+            domains.length > 1 ? (
+              <div className="relative flex items-center">
+                <select
+                  value={domains.find((d) => d.active)?.domain ?? ''}
+                  onChange={(e) => switchDomain(e.target.value)}
+                  disabled={isSwitching}
+                  className="appearance-none rounded-full border pl-2.5 pr-6 py-0.5 text-[10px] font-medium cursor-pointer focus:outline-none transition-colors"
+                  style={{
+                    borderColor: 'var(--border)',
+                    backgroundColor: 'var(--bg-elevated)',
+                    color: 'var(--text-secondary)',
+                    ...(isSwitching ? { opacity: 0.6 } : {}),
+                  }}
+                  title="Switch ontology domain"
+                >
+                  {domains.map((d) => (
+                    <option key={d.domain} value={d.domain}>
+                      {d.domain} {'·'} {d.nodeCount} nodes{d.source === 'database' ? ' · db' : ''}
+                    </option>
+                  ))}
+                </select>
+                <svg
+                  className="pointer-events-none absolute right-1.5"
+                  width="10"
+                  height="10"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.5"
+                  style={{ color: 'var(--text-muted)' }}
+                >
+                  <polyline points="6 9 12 15 18 9" />
+                </svg>
+              </div>
+            ) : (
+              <span className="rounded-full border px-2.5 py-0.5 text-[10px]" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}>
+                {ontology.domain} {'·'} {ontology.nodes.length} nodes
+              </span>
+            )
           )}
         </div>
 
         <div className="flex items-center gap-3">
+          {/* Connect Data Source */}
+          <button
+            type="button"
+            onClick={() => setShowWizard(true)}
+            className="flex items-center gap-1.5 rounded border px-3 py-1.5 text-[11px] font-medium transition-colors"
+            style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}
+            title="Connect a new data source"
+          >
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
+            </svg>
+            Connect
+          </button>
           {/* Role switcher */}
           <div className="flex items-center gap-1.5">
             <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Role</span>
@@ -564,11 +665,12 @@ export default function Playground() {
                   insertText={insertText}
                   onInsertConsumed={() => setInsertText(undefined)}
                   ontologyNodes={ontology?.nodes ?? []}
+                  examples={ontology?.examples}
                   theme={theme}
                 />
               </Suspense>
             ) : (
-              <AgentChat onTurnComplete={setLastChatTurn} />
+              <AgentChat onTurnComplete={setLastChatTurn} suggestions={ontology?.nlQuestions} />
             )}
           </div>
         </div>
@@ -620,6 +722,16 @@ export default function Playground() {
             />
           </div>
         </>
+      )}
+
+      {/* Data Source Wizard modal */}
+      {showWizard && (
+        <DataSourceWizard
+          onClose={() => setShowWizard(false)}
+          onComplete={() => {
+            fetchOntology();
+          }}
+        />
       )}
     </div>
   );

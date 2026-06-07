@@ -12,11 +12,27 @@ from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 from nexaql.api.deps import get_config
-from nexaql.api.routes import admin, chat, execute, ontology, suggest, validate
+from nexaql.api.routes import admin, chat, connectors, datasource, execute, ontology, store, suggest, validate
+
+
+def _load_api_keys_into_env() -> None:
+    """Load saved API keys into environment on startup."""
+    from nexaql.api.routes.connectors import _load_api_keys
+    env_map = {
+        "anthropic": "ANTHROPIC_API_KEY",
+        "openai": "OPENAI_API_KEY",
+        "google": "GOOGLE_API_KEY",
+        "cohere": "COHERE_API_KEY",
+    }
+    for provider, info in _load_api_keys().items():
+        env_var = env_map.get(provider.lower())
+        if env_var and info.get("key") and not os.environ.get(env_var):
+            os.environ[env_var] = info["key"]
 
 
 def create_app() -> FastAPI:
     """Build and return the FastAPI application instance."""
+    _load_api_keys_into_env()
     cfg = get_config()
 
     app = FastAPI(
@@ -41,6 +57,9 @@ def create_app() -> FastAPI:
     app.include_router(suggest.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
     app.include_router(admin.router, prefix="/api")
+    app.include_router(datasource.router, prefix="/api")
+    app.include_router(connectors.router, prefix="/api")
+    app.include_router(store.router, prefix="/api")
 
     # ── Health check ────────────────────────────────────────────────────────
     @app.get("/api/health")

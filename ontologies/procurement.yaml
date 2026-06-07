@@ -1,0 +1,283 @@
+# NexaQL Ontology — managed by NexaQL Admin
+version: 1.0.0
+domain: procurement
+description: Procurement intelligence
+datasources:
+  default:
+    type: postgresql
+nodes:
+  contracts:
+    description: Contracts records
+    primary_key: id
+    fields:
+      contract_number:
+        type: enum
+        description: Contract Number
+        filterable: true
+        values:
+        - CTR-2024-001
+        - CTR-2024-002
+        - CTR-2024-003
+        - CTR-2024-004
+        - CTR-2024-005
+      title:
+        type: enum
+        description: Title
+        filterable: true
+        values:
+        - Hardware Procurement - Laptops
+        - IT Consulting Services FY2024
+        - Office Supplies Master Agreement
+        - SaaS Platform License
+        - Shipping & Logistics Services
+      start_date:
+        type: date
+        description: Start Date
+        filterable: true
+      end_date:
+        type: date
+        description: End Date
+        filterable: true
+      total_value:
+        type: numeric
+        description: Total Value
+        filterable: true
+      currency:
+        type: string
+        description: Currency
+        filterable: true
+      payment_terms:
+        type: enum
+        description: Payment Terms
+        filterable: true
+        values:
+        - Annual
+        - Net 30
+        - Net 45
+        - Net 60
+      status:
+        type: string
+        description: Status
+        filterable: true
+    edges:
+      supplier:
+        node: suppliers
+        description: Related suppliers
+        join_type: LEFT JOIN
+        join_steps:
+        - table: suppliers
+          alias_key: s1
+          condition: s1.id = c0.supplier_id
+  invoices:
+    description: Invoices records
+    primary_key: id
+    fields:
+      invoice_number:
+        type: enum
+        description: Invoice Number
+        filterable: true
+        values:
+        - INV-ACM-001
+        - INV-ACM-002
+        - INV-CF-001
+        - INV-GS-001
+        - INV-TV-001
+      amount:
+        type: numeric
+        description: Amount
+        filterable: true
+      due_date:
+        type: date
+        description: Due Date
+        filterable: true
+      paid_date:
+        type: date
+        description: Paid Date
+        filterable: true
+      status:
+        type: enum
+        description: Status
+        filterable: true
+        values:
+        - paid
+        - pending
+    edges:
+      po:
+        node: purchase_orders
+        description: Related purchase_orders
+        join_type: LEFT JOIN
+        join_steps:
+        - table: purchase_orders
+          alias_key: p1
+          condition: p1.id = i0.po_id
+  line_items:
+    description: Line Items records
+    primary_key: id
+    fields:
+      description:
+        type: enum
+        description: Description
+        filterable: true
+        values:
+        - Data Engineer - 300 hrs
+        - Express Shipping Q3
+        - MacBook Pro M3 14"
+        - Platform License - Annual
+        - Printer Paper A4 (boxes)
+        - Senior Developer - 500 hrs
+        - Toner Cartridges
+      quantity:
+        type: integer
+        description: Quantity
+        filterable: true
+      unit_price:
+        type: numeric
+        description: Unit Price
+        filterable: true
+      total:
+        type: numeric
+        description: Total
+        filterable: true
+      category:
+        type: enum
+        description: Category
+        filterable: true
+        values:
+        - Hardware
+        - Office Supplies
+        - Professional Services
+        - Shipping
+        - Software License
+    edges:
+      po:
+        node: purchase_orders
+        description: Related purchase_orders
+        join_type: LEFT JOIN
+        join_steps:
+        - table: purchase_orders
+          alias_key: p1
+          condition: p1.id = l0.po_id
+  purchase_orders:
+    description: Purchase Orders records
+    primary_key: id
+    fields:
+      po_number:
+        type: enum
+        description: Po Number
+        filterable: true
+        values:
+        - PO-2024-0001
+        - PO-2024-0002
+        - PO-2024-0003
+        - PO-2024-0004
+        - PO-2024-0005
+        - PO-2024-0006
+      requester:
+        type: enum
+        description: Requester
+        filterable: true
+        values:
+        - Alice Johnson
+        - Carol Williams
+        - Dave Brown
+        - Frank Miller
+        - Grace Lee
+        - Ivan Petrov
+      department:
+        type: enum
+        description: Department
+        filterable: true
+        values:
+        - Data Science
+        - Engineering
+        - Logistics
+        - Operations
+        - Product
+      amount:
+        type: numeric
+        description: Amount
+        filterable: true
+      status:
+        type: enum
+        description: Status
+        filterable: true
+        values:
+        - approved
+        - delivered
+        - pending
+      approved_by:
+        type: enum
+        description: Approved By
+        filterable: true
+        values:
+        - Bob Smith
+        - Eve Davis
+        - Helen Chen
+    edges:
+      contract:
+        node: contracts
+        description: Related contracts
+        join_type: LEFT JOIN
+        join_steps:
+        - table: contracts
+          alias_key: c1
+          condition: c1.id = p0.contract_id
+  suppliers:
+    description: Suppliers records
+    primary_key: id
+    fields:
+      name:
+        type: enum
+        description: Name
+        filterable: true
+        values:
+        - Acme Corp
+        - CloudFirst SaaS
+        - Global Supplies Inc
+        - Logistics Pro
+        - TechVendor Ltd
+      contact_email:
+        type: enum
+        description: Contact Email
+        filterable: true
+        values:
+        - accounts@logpro.com
+        - enterprise@cloudfirst.com
+        - info@globalsupplies.com
+        - procurement@techvendor.io
+        - sales@acme.com
+        pii: true
+        mask_with: redact
+      category:
+        type: enum
+        description: Category
+        filterable: true
+        values:
+        - Hardware
+        - IT Services
+        - Office Supplies
+        - Shipping
+        - Software
+      rating:
+        type: enum
+        description: Rating
+        filterable: true
+        values:
+        - '3.50'
+        - '3.80'
+        - '4.20'
+        - '4.50'
+        - '4.70'
+      country:
+        type: enum
+        description: Country
+        filterable: true
+        values:
+        - Canada
+        - Germany
+        - UK
+        - USA
+      status:
+        type: string
+        description: Status
+        filterable: true

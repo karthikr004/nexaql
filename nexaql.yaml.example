@@ -1,0 +1,18 @@
+# NexaQL configuration — copy to nexaql.yaml and fill in your values
+ontology:
+  domain: my-domain
+datasources:
+  default:
+    type: postgresql
+    url: postgresql://user:password@localhost:5432/mydb
+llm:
+  provider: anthropic
+  api_key: ${ANTHROPIC_API_KEY}
+  model: claude-sonnet-4-20250514
+  max_tokens: 4096
+  summary_max_tokens: 1024
+server:
+  host: 0.0.0.0
+  port: 3717
+  cors_origins:
+  - '*'

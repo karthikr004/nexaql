@@ -26,8 +26,11 @@ frontend/.vite/
 .DS_Store
 Thumbs.db
 
-# Config (contains secrets)
+# Config & secrets (never commit these)
+nexaql.yaml
 agentql.yaml
+api_keys.json
+connectors.json
 
 # Test / Coverage
 .coverage

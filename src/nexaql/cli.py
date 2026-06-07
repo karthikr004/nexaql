@@ -243,6 +243,184 @@ def query(query_text: str, config_path: str, output_format: str, limit: Optional
         _print_table(result.rows, result.columns, limit)
 
 
+# ── nexaql generate ────────────────────────────────────────────────────────
+
+
+@main.command()
+@click.argument("connection_url")
+@click.option("--schema", default="public", help="Database schema to introspect")
+@click.option("--output", "-o", default=None, help="Output YAML file path")
+@click.option("--domain", default="auto_generated", help="Domain name for the ontology")
+@click.option("--description", default=None, help="Description for the ontology")
+@click.option("--exclude", multiple=True, help="Tables to exclude (repeatable)")
+@click.option("--include", multiple=True, help="Only include these tables (repeatable)")
+@click.option("--no-enums", is_flag=True, help="Skip enum detection (faster)")
+@click.option("--no-pii", is_flag=True, help="Skip PII detection")
+@click.option("--system-columns", is_flag=True, help="Include system columns (created_at, etc.)")
+def generate(
+    connection_url: str,
+    schema: str,
+    output: Optional[str],
+    domain: str,
+    description: Optional[str],
+    exclude: tuple[str, ...],
+    include: tuple[str, ...],
+    no_enums: bool,
+    no_pii: bool,
+    system_columns: bool,
+) -> None:
+    """Generate a NexaQL ontology from a database schema.
+
+    Connects to the database, introspects tables/columns/foreign keys,
+    and generates an ontology YAML file.
+
+    Examples:
+
+        nexaql generate postgresql://user:pass@localhost/mydb
+
+        nexaql generate postgresql://user:pass@localhost/mydb -o ontologies/myapp.yaml
+
+        nexaql generate mydata.duckdb --schema main --domain inventory
+    """
+    from nexaql.ontology.generator import OntologyGenerator
+
+    desc = description or f"Auto-generated ontology from {domain} database"
+
+    click.echo(f"Connecting to {connection_url}...")
+
+    gen = OntologyGenerator(connection_url)
+
+    try:
+        ontology = asyncio.run(gen.generate(
+            schema=schema,
+            domain=domain,
+            description=desc,
+            exclude_tables=list(exclude) if exclude else None,
+            include_tables=list(include) if include else None,
+            detect_enums=not no_enums,
+            detect_pii=not no_pii,
+            include_system_columns=system_columns,
+        ))
+    except Exception as e:
+        click.echo(f"Error: {e}", err=True)
+        sys.exit(1)
+
+    node_count = len(ontology.nodes)
+    field_count = sum(len(n.fields) for n in ontology.nodes.values())
+    edge_count = sum(len(n.edges or {}) for n in ontology.nodes.values())
+
+    click.echo(f"Discovered {node_count} tables, {field_count} fields, {edge_count} edges")
+
+    # Summary table
+    for name, node in ontology.nodes.items():
+        pii_count = sum(1 for f in node.fields.values() if f.pii)
+        enum_count = sum(1 for f in node.fields.values() if f.values)
+        edge_names = ", ".join((node.edges or {}).keys()) or "—"
+        pii_str = f" ({pii_count} PII)" if pii_count else ""
+        enum_str = f" ({enum_count} enums)" if enum_count else ""
+        click.echo(f"  {name}: {len(node.fields)} fields{pii_str}{enum_str} | edges: {edge_names}")
+
+    if output:
+        os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
+        gen.save(ontology, output)
+        click.echo(f"\nSaved to {output}")
+    else:
+        # Print YAML to stdout
+        import yaml
+        data = ontology.model_dump(exclude_none=True)
+        click.echo("\n---")
+        click.echo(yaml.dump(data, default_flow_style=False, sort_keys=False))
+
+    click.echo(f"\nTo enrich with LLM descriptions, run:")
+    click.echo(f"  nexaql enrich {output or '<path>'}")
+
+
+# ── nexaql taxonomy ───────────────────────────────────────────────────────
+
+
+@main.command()
+@click.option("--category", "-c", default=None, help="Filter by category (financial, legal, etc.)")
+@click.option("--type", "-t", "type_name", default=None, help="Show details for a specific type (e.g. financial.invoice)")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def taxonomy(category: Optional[str], type_name: Optional[str], output_format: str) -> None:
+    """Browse the document taxonomy registry.
+
+    Shows all registered document types, their subtypes, entity templates,
+    and context tier definitions.
+
+    Examples:
+
+        nexaql taxonomy
+
+        nexaql taxonomy -c financial
+
+        nexaql taxonomy -t legal.contract
+    """
+    from nexaql.taxonomy import get_registry
+
+    registry = get_registry()
+
+    if type_name:
+        # Show details for a specific type
+        doc_type = registry.get(type_name)
+        if not doc_type:
+            click.echo(f"Unknown type: {type_name}", err=True)
+            click.echo(f"Available: {', '.join(t.qualified_name for t in registry.list_types())}", err=True)
+            sys.exit(1)
+
+        if output_format == "json":
+            click.echo(doc_type.model_dump_json(indent=2, exclude_none=True))
+        else:
+            click.echo(f"\n{doc_type.category.value.upper()} / {doc_type.type_name}")
+            click.echo(f"  {doc_type.description}")
+            click.echo(f"\n  Subtypes: {', '.join(doc_type.subtypes.keys()) or '—'}")
+
+            click.echo(f"\n  Entity Fields ({len(doc_type.entity_template.fields)}):")
+            for fname, fdef in doc_type.entity_template.fields.items():
+                req = " *" if fdef.required else ""
+                click.echo(f"    {fname} ({fdef.type}){req}: {fdef.description}")
+
+            click.echo(f"\n  Context Tiers:")
+            for tier_name, tier_def in doc_type.context_tiers.items():
+                click.echo(f"    {tier_name.upper()} ({tier_def.scope}): {tier_def.description}")
+                click.echo(f"      Group by: {', '.join(tier_def.group_by)}")
+                if tier_def.link_strategy:
+                    click.echo(f"      Link: match on {tier_def.link_strategy.match_fields}")
+                    if tier_def.link_strategy.match_types:
+                        click.echo(f"             across {tier_def.link_strategy.match_types}")
+
+            if doc_type.message_intents:
+                click.echo(f"\n  Message Intents:")
+                for mi in doc_type.message_intents:
+                    action = " [ACTION REQUIRED]" if mi.action_required else ""
+                    click.echo(f"    {mi.intent}{action}: {mi.description}")
+
+    else:
+        # List all types
+        types = registry.list_types(category)
+        if not types:
+            click.echo(f"No types found{' for category: ' + category if category else ''}.", err=True)
+            sys.exit(1)
+
+        if output_format == "json":
+            data = [t.model_dump(exclude_none=True) for t in types]
+            click.echo(json.dumps(data, indent=2))
+        else:
+            click.echo(f"\nDocument Taxonomy ({len(types)} types registered)\n")
+            current_cat = ""
+            for dt in sorted(types, key=lambda t: (t.category.value, t.type_name)):
+                if dt.category.value != current_cat:
+                    current_cat = dt.category.value
+                    click.echo(f"  {current_cat.upper()}")
+
+                sub_count = len(dt.subtypes)
+                field_count = len(dt.entity_template.fields)
+                subs = f" ({sub_count} subtypes)" if sub_count else ""
+                click.echo(f"    {dt.type_name}{subs} — {field_count} entity fields — {dt.description}")
+
+            click.echo(f"\nUse 'nexaql taxonomy -t <category.type>' for details.")
+
+
 def _print_table(
     rows: list[dict],
     columns: list,

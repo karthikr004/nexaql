@@ -117,42 +117,360 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
   const [policyTestResults, setPolicyTestResults] = useState<Record<string, { valid: boolean; message: string } | null>>({});
   const [policyTesting, setPolicyTesting] = useState<Record<string, boolean>>({});
 
+  // Domain selector state
+  interface DomainInfo {
+    domain: string;
+    description: string;
+    nodeCount: number;
+    active: boolean;
+    source: string;
+    version?: number;
+  }
+  const [domains, setDomains] = useState<DomainInfo[]>([]);
+  const [selectedDomain, setSelectedDomain] = useState<string>('');
+  const [domainSwitching, setDomainSwitching] = useState(false);
+
   // Sidebar state
-  const [selectedItem, setSelectedItem] = useState<string | null>(null); // node name, '__policy_functions__', or null
+  const [selectedItem, setSelectedItem] = useState<string | null>(null); // node name, '__policy_functions__', '__connectors__', '__generate__', or null
   const [sidebarSearch, setSidebarSearch] = useState('');
 
   // Policy functions sub-selection
   const [selectedFunction, setSelectedFunction] = useState<string | null>(null);
 
   const isPolicyFunctions = selectedItem === '__policy_functions__';
+  const isConnectors = selectedItem === '__connectors__';
+  const isGenerate = selectedItem === '__generate__';
+  const isApiKeys = selectedItem === '__api_keys__';
 
-  // Load ontology
-  useEffect(() => {
-    fetch('/api/admin/ontology')
-      .then((r) => {
-        if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        return r.json();
-      })
-      .then((resp) => {
-        const data: OntologyData = resp.ontology ?? resp;
-        // Transform backend RowPolicy (function/field) to frontend format (function_name/function_field/mode)
-        for (const node of Object.values(data.nodes)) {
-          if (node.row_policies) {
-            node.row_policies = node.row_policies.map((p: any) => ({
-              condition: p.condition ?? '',
-              roles: p.roles ?? [],
-              except_roles: p.except_roles,
-              mode: p.function ? 'function' as const : 'raw' as const,
-              function_name: p.function,
-              function_field: p.field,
-            }));
-          }
-        }
-        setOntology(data);
-        setSavedSnapshot(JSON.stringify(data));
-      })
-      .catch((err) => setLoadError(String(err)));
+  // ── Connectors state ──────────────────────────────────────────────────────
+  interface ConnectorInfo {
+    name: string;
+    connection_url_masked: string;
+    db_type: string;
+    schema_name: string;
+    description: string;
+    created_at: string;
+    last_tested: string | null;
+    last_test_ok: boolean | null;
+  }
+
+  interface TableInfoItem {
+    name: string;
+    schema: string;
+    column_count: number;
+    primary_key: string | null;
+    row_count_estimate: number | null;
+  }
+
+  const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
+  const [connectorsLoading, setConnectorsLoading] = useState(false);
+  const [showAddConnector, setShowAddConnector] = useState(false);
+  const [newConnName, setNewConnName] = useState('');
+  const [newConnUrl, setNewConnUrl] = useState('');
+  const [newConnSchema, setNewConnSchema] = useState('public');
+  const [newConnDesc, setNewConnDesc] = useState('');
+  const [connSaving, setConnSaving] = useState(false);
+  const [connTesting, setConnTesting] = useState<string | null>(null);
+
+  // ── Generate Ontology state ───────────────────────────────────────────────
+  const [genConnector, setGenConnector] = useState('');
+  const [genDomain, setGenDomain] = useState('');
+  const [genDescription, setGenDescription] = useState('');
+  const [genTables, setGenTables] = useState<TableInfoItem[]>([]);
+  const [genSelectedTables, setGenSelectedTables] = useState<Set<string>>(new Set());
+  const [genIntrospecting, setGenIntrospecting] = useState(false);
+  const [genGenerating, setGenGenerating] = useState(false);
+  const [genResult, setGenResult] = useState<{ status: string; domain: string; node_count: number; total_fields: number; stored_in: string } | null>(null);
+
+  // ── API Keys state ────────────────────────────────────────────────────────
+  interface ApiKeyInfo {
+    provider: string;
+    name: string;
+    key_masked: string;
+    created_at: string;
+    is_active: boolean;
+  }
+
+  const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([]);
+  const [apiKeysLoading, setApiKeysLoading] = useState(false);
+  const [newKeyName, setNewKeyName] = useState('');
+  const [newKeyProvider, setNewKeyProvider] = useState('anthropic');
+  const [newKeyValue, setNewKeyValue] = useState('');
+  const [keySaving, setKeySaving] = useState(false);
+  const [showAddKey, setShowAddKey] = useState(false);
+
+  // ── Fetch connectors ──────────────────────────────────────────────────────
+
+  const fetchConnectors = useCallback(async () => {
+    setConnectorsLoading(true);
+    try {
+      const res = await fetch('/api/connectors');
+      if (res.ok) {
+        const data = await res.json();
+        setConnectors(data.connectors ?? []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setConnectorsLoading(false);
+    }
   }, []);
+
+  useEffect(() => {
+    fetchConnectors();
+  }, [fetchConnectors]);
+
+  // ── API Keys handlers ─────────────────────────────────────────────────────
+
+  const fetchApiKeys = useCallback(async () => {
+    setApiKeysLoading(true);
+    try {
+      const res = await fetch('/api/api-keys');
+      if (res.ok) {
+        const data = await res.json();
+        setApiKeys(data.api_keys ?? []);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setApiKeysLoading(false);
+    }
+  }, []);
+
+  const handleSaveApiKey = useCallback(async () => {
+    if (!newKeyProvider.trim() || !newKeyValue.trim()) return;
+    setKeySaving(true);
+    try {
+      const res = await fetch('/api/api-keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newKeyName.trim() || newKeyProvider.trim(),
+          provider: newKeyProvider.trim(),
+          key: newKeyValue.trim(),
+        }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setToast({ message: `API key for "${newKeyProvider}" saved`, type: 'success' });
+        setShowAddKey(false);
+        setNewKeyName('');
+        setNewKeyProvider('anthropic');
+        setNewKeyValue('');
+        fetchApiKeys();
+      } else {
+        setToast({ message: body.error || 'Failed to save API key', type: 'error' });
+      }
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setKeySaving(false);
+    }
+  }, [newKeyName, newKeyProvider, newKeyValue, fetchApiKeys]);
+
+  const handleDeleteApiKey = useCallback(async (provider: string) => {
+    try {
+      const res = await fetch(`/api/api-keys/${encodeURIComponent(provider)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setToast({ message: `API key for "${provider}" deleted`, type: 'success' });
+        fetchApiKeys();
+      } else {
+        const body = await res.json();
+        setToast({ message: body.error || 'Delete failed', type: 'error' });
+      }
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    }
+  }, [fetchApiKeys]);
+
+  const handleAddConnector = useCallback(async () => {
+    if (!newConnName.trim() || !newConnUrl.trim()) return;
+    setConnSaving(true);
+    try {
+      const res = await fetch('/api/connectors', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: newConnName.trim(),
+          connection_url: newConnUrl.trim(),
+          schema_name: newConnSchema,
+          description: newConnDesc,
+        }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setToast({ message: `Connector "${newConnName}" saved (${body.table_count} tables found)`, type: 'success' });
+        setShowAddConnector(false);
+        setNewConnName('');
+        setNewConnUrl('');
+        setNewConnSchema('public');
+        setNewConnDesc('');
+        fetchConnectors();
+      } else {
+        setToast({ message: body.error || 'Failed to save connector', type: 'error' });
+      }
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setConnSaving(false);
+    }
+  }, [newConnName, newConnUrl, newConnSchema, newConnDesc, fetchConnectors]);
+
+  const handleTestConnector = useCallback(async (name: string) => {
+    setConnTesting(name);
+    try {
+      const res = await fetch('/api/connectors/test', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setToast({ message: `"${name}" is reachable (${body.table_count} tables)`, type: 'success' });
+      } else {
+        setToast({ message: `Test failed: ${body.error}`, type: 'error' });
+      }
+      fetchConnectors();
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setConnTesting(null);
+    }
+  }, [fetchConnectors]);
+
+  const handleDeleteConnector = useCallback(async (name: string) => {
+    try {
+      const res = await fetch(`/api/connectors/${encodeURIComponent(name)}`, { method: 'DELETE' });
+      if (res.ok) {
+        setToast({ message: `Connector "${name}" deleted`, type: 'success' });
+        fetchConnectors();
+      }
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    }
+  }, [fetchConnectors]);
+
+  // ── Generate Ontology handlers ────────────────────────────────────────────
+
+  const handleIntrospect = useCallback(async () => {
+    if (!genConnector) return;
+    setGenIntrospecting(true);
+    setGenTables([]);
+    setGenSelectedTables(new Set());
+    try {
+      const res = await fetch(`/api/connectors/${encodeURIComponent(genConnector)}/introspect`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ schema_name: 'public' }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setGenTables(body.tables ?? []);
+        setGenSelectedTables(new Set((body.tables ?? []).map((t: TableInfoItem) => t.name)));
+      } else {
+        setToast({ message: body.error || 'Introspection failed', type: 'error' });
+      }
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setGenIntrospecting(false);
+    }
+  }, [genConnector]);
+
+  // Fetch available domains
+  const fetchDomains = useCallback(async () => {
+    try {
+      const res = await fetch('/api/domains');
+      if (res.ok) {
+        const data = await res.json();
+        setDomains(data.domains ?? []);
+        // If no domain selected yet, pick the active one
+        if (!selectedDomain && data.activeDomain) {
+          setSelectedDomain(data.activeDomain);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }, [selectedDomain]);
+
+  // Load ontology for a specific domain (or default)
+  const loadOntologyForDomain = useCallback(async (domain?: string) => {
+    setLoadError(null);
+    try {
+      const url = domain ? `/api/admin/ontology?domain=${encodeURIComponent(domain)}` : '/api/admin/ontology';
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      const resp = await r.json();
+      const data: OntologyData = resp.ontology ?? resp;
+      // Transform backend RowPolicy (function/field) to frontend format
+      for (const node of Object.values(data.nodes)) {
+        if (node.row_policies) {
+          node.row_policies = node.row_policies.map((p: any) => ({
+            condition: p.condition ?? '',
+            roles: p.roles ?? [],
+            except_roles: p.except_roles,
+            mode: p.function ? 'function' as const : 'raw' as const,
+            function_name: p.function,
+            function_field: p.field,
+          }));
+        }
+      }
+      setOntology(data);
+      setSavedSnapshot(JSON.stringify(data));
+      setSelectedItem(null);
+    } catch (err) {
+      setLoadError(String(err));
+    }
+  }, []);
+
+  // Initial load
+  useEffect(() => {
+    fetchDomains();
+    loadOntologyForDomain();
+  }, []);
+
+  // Reload when domain changes
+  const handleDomainChange = useCallback(async (domain: string) => {
+    setDomainSwitching(true);
+    setSelectedDomain(domain);
+    await loadOntologyForDomain(domain);
+    setDomainSwitching(false);
+  }, [loadOntologyForDomain]);
+
+  const handleGenerateOntology = useCallback(async () => {
+    if (!genConnector || !genDomain.trim()) return;
+    setGenGenerating(true);
+    setGenResult(null);
+    try {
+      const includeTables = genSelectedTables.size < genTables.length
+        ? Array.from(genSelectedTables)
+        : undefined;
+      const res = await fetch('/api/generate-ontology', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connector_name: genConnector,
+          domain: genDomain.trim(),
+          description: genDescription,
+          include_tables: includeTables,
+        }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        setGenResult(body);
+        setToast({ message: `Ontology "${genDomain}" generated (${body.node_count} nodes, ${body.total_fields} fields)`, type: 'success' });
+        onOntologyChanged?.();
+        fetchDomains();
+      } else {
+        setToast({ message: body.error || 'Generation failed', type: 'error' });
+      }
+    } catch (err) {
+      setToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setGenGenerating(false);
+    }
+  }, [genConnector, genDomain, genDescription, genSelectedTables, genTables.length, onOntologyChanged, fetchDomains]);
 
   const isDirty = useMemo(() => {
     if (!ontology) return false;
@@ -1450,7 +1768,33 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
           </button>
         </div>
 
-        <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>NexaQL Admin</span>
+        <div className="flex items-center gap-3">
+          <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>NexaQL Admin</span>
+          {domains.length > 0 && (
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-muted)' }}>Domain</span>
+              <select
+                value={selectedDomain}
+                onChange={(e) => handleDomainChange(e.target.value)}
+                disabled={domainSwitching}
+                className="rounded border px-2 py-1 text-xs focus:outline-none"
+                style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-input)', color: 'var(--text-primary)' }}
+              >
+                {domains.map((d) => (
+                  <option key={d.domain} value={d.domain}>
+                    {d.domain} ({d.nodeCount} nodes)
+                  </option>
+                ))}
+              </select>
+              {domainSwitching && (
+                <div
+                  className="h-3 w-3 animate-spin rounded-full border border-t-transparent"
+                  style={{ borderColor: 'var(--accent)', borderTopColor: 'transparent' }}
+                />
+              )}
+            </div>
+          )}
+        </div>
 
         <button
           type="button"
@@ -1471,7 +1815,71 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
       <div className="flex flex-1 overflow-hidden">
         {/* ── Sidebar (250px) ──────────────────────────────────────── */}
         <div className="flex w-[250px] shrink-0 flex-col border-r" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-          {/* Sidebar header */}
+          {/* ── Admin Functions ────────────────────────────────────── */}
+          <div className="shrink-0 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
+            <span className="font-semibold text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-secondary)' }}>Admin</span>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => { setSelectedItem('__connectors__'); fetchConnectors(); }}
+            className={`flex w-full items-center gap-2 border-b px-3 py-2.5 text-left transition-colors ${
+              isConnectors ? 'border-l-2 border-l-[#4f8ef7]' : ''
+            }`}
+            style={{
+              borderBottomColor: 'var(--border)',
+              backgroundColor: isConnectors ? 'var(--bg-elevated)' : 'transparent',
+            }}
+            onMouseEnter={(e) => { if (!isConnectors) e.currentTarget.style.backgroundColor = 'var(--bg-elevated)'; }}
+            onMouseLeave={(e) => { if (!isConnectors) e.currentTarget.style.backgroundColor = 'transparent'; }}
+          >
+            <span style={{ fontSize: '12px' }}>&#x1F50C;</span>
+            <span className="font-semibold text-[12px]" style={{ color: 'var(--accent)' }}>Connectors</span>
+            <span className="rounded px-1 py-0.5 text-[9px] border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>
+              {connectors.length}
+            </span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setSelectedItem('__generate__'); fetchConnectors(); }}
+            className={`flex w-full items-center gap-2 border-b px-3 py-2.5 text-left transition-colors ${
+              isGenerate ? 'border-l-2 border-l-[#3dd68c]' : ''
+            }`}
+            style={{
+              borderBottomColor: 'var(--border)',
+              backgroundColor: isGenerate ? 'var(--bg-elevated)' : 'transparent',
+            }}
+            onMouseEnter={(e) => { if (!isGenerate) e.currentTarget.style.backgroundColor = 'var(--bg-elevated)'; }}
+            onMouseLeave={(e) => { if (!isGenerate) e.currentTarget.style.backgroundColor = 'transparent'; }}
+          >
+            <span style={{ fontSize: '12px' }}>&#x2699;</span>
+            <span className="font-semibold text-[12px]" style={{ color: 'var(--badge-green-text)' }}>Generate Ontology</span>
+          </button>
+
+          <button
+            type="button"
+            onClick={() => { setSelectedItem('__api_keys__'); fetchApiKeys(); }}
+            className={`flex w-full items-center gap-2 border-b px-3 py-2.5 text-left transition-colors ${
+              isApiKeys ? 'border-l-2 border-l-amber-500' : ''
+            }`}
+            style={{
+              borderBottomColor: 'var(--border)',
+              backgroundColor: isApiKeys ? 'var(--bg-elevated)' : 'transparent',
+            }}
+            onMouseEnter={(e) => { if (!isApiKeys) e.currentTarget.style.backgroundColor = 'var(--bg-elevated)'; }}
+            onMouseLeave={(e) => { if (!isApiKeys) e.currentTarget.style.backgroundColor = 'transparent'; }}
+          >
+            <span style={{ fontSize: '12px' }}>&#x1F511;</span>
+            <span className="font-semibold text-[12px]" style={{ color: 'var(--badge-amber-text)' }}>API Keys</span>
+            <span className="rounded px-1 py-0.5 text-[9px] border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>
+              {apiKeys.length}
+            </span>
+          </button>
+
+          <div className="border-b" style={{ borderColor: 'var(--border)' }} />
+
+          {/* ── Schemas ────────────────────────────────────────────── */}
           <div className="shrink-0 border-b px-3 py-2" style={{ borderColor: 'var(--border)' }}>
             <span className="font-semibold text-[10px] uppercase tracking-widest" style={{ color: 'var(--text-secondary)' }}>Schemas</span>
           </div>
@@ -1580,7 +1988,430 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
         {/* ── Main content area ────────────────────────────────────── */}
         <div className="flex flex-1 flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
-          {selectedItem === '__roles__' ? (
+          {isConnectors ? (
+            /* ── Connectors panel ─────────────────────────────────── */
+            <>
+              <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold text-sm" style={{ color: 'var(--accent)' }}>Connectors</span>
+                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Manage named database connections</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* Add connector form */}
+                {showAddConnector ? (
+                  <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--accent)', backgroundColor: 'var(--bg-secondary)' }}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>New Connector</span>
+                      <button type="button" onClick={() => setShowAddConnector(false)} className="text-xs hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>Cancel</button>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Name</label>
+                      <input
+                        value={newConnName}
+                        onChange={(e) => setNewConnName(e.target.value)}
+                        placeholder="e.g. production-pg, analytics-db"
+                        className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Connection URL</label>
+                      <input
+                        value={newConnUrl}
+                        onChange={(e) => setNewConnUrl(e.target.value)}
+                        placeholder="postgresql://user:pass@host:5432/dbname"
+                        className="w-full rounded border px-2 py-1.5 font-mono text-xs focus:outline-none"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div className="flex gap-3">
+                      <div className="flex-1">
+                        <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Schema</label>
+                        <input
+                          value={newConnSchema}
+                          onChange={(e) => setNewConnSchema(e.target.value)}
+                          className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                          style={inputStyle}
+                        />
+                      </div>
+                      <div className="flex-1">
+                        <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Description</label>
+                        <input
+                          value={newConnDesc}
+                          onChange={(e) => setNewConnDesc(e.target.value)}
+                          placeholder="Optional"
+                          className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                          style={inputStyle}
+                        />
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={handleAddConnector}
+                      disabled={connSaving || !newConnName.trim() || !newConnUrl.trim()}
+                      className="rounded px-4 py-1.5 text-xs font-semibold bg-[#3dd68c] text-[#0f1117] hover:bg-[#32b577] disabled:opacity-50"
+                    >
+                      {connSaving ? 'Connecting...' : 'Test & Save'}
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddConnector(true)}
+                    className="flex items-center gap-1.5 rounded border px-3 py-1.5 text-[11px]"
+                    style={{ borderColor: 'var(--border)', color: 'var(--accent)' }}
+                  >
+                    + Add Connector
+                  </button>
+                )}
+
+                {/* Connector list */}
+                {connectorsLoading ? (
+                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Loading...</p>
+                ) : connectors.length === 0 ? (
+                  <div className="rounded border p-6 text-center" style={{ borderColor: 'var(--border)' }}>
+                    <div className="mb-2 text-2xl" style={{ color: 'var(--text-muted)' }}>&#x1F50C;</div>
+                    <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>No connectors saved yet. Add one to get started.</p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {connectors.map((c) => (
+                      <div
+                        key={c.name}
+                        className="rounded border p-3"
+                        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}
+                      >
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="font-mono text-sm font-semibold" style={{ color: 'var(--text-primary)' }}>{c.name}</span>
+                              <span className="rounded px-1 py-0.5 text-[9px] border" style={{ backgroundColor: 'var(--bg-input)', borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>
+                                {c.db_type}
+                              </span>
+                              {c.last_test_ok === true && (
+                                <span className="text-[9px]" style={{ color: 'var(--badge-green-text)' }}>&#x2713; connected</span>
+                              )}
+                              {c.last_test_ok === false && (
+                                <span className="text-[9px] text-red-400">&#x2717; failed</span>
+                              )}
+                            </div>
+                            <div className="mt-1 font-mono text-[10px]" style={{ color: 'var(--text-muted)' }}>{c.connection_url_masked}</div>
+                            {c.description && (
+                              <div className="mt-0.5 text-[10px]" style={{ color: 'var(--text-secondary)' }}>{c.description}</div>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-1.5 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => handleTestConnector(c.name)}
+                              disabled={connTesting === c.name}
+                              className="rounded border px-2 py-1 text-[10px] hover:opacity-80"
+                              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                            >
+                              {connTesting === c.name ? 'Testing...' : 'Test'}
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteConnector(c.name)}
+                              className="rounded border px-2 py-1 text-[10px] hover:text-red-400"
+                              style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : isGenerate ? (
+            /* ── Generate Ontology panel ──────────────────────────── */
+            <>
+              <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold text-sm" style={{ color: 'var(--badge-green-text)' }}>Generate Ontology</span>
+                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Pick a connector, select tables, generate</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {genResult ? (
+                  /* ── Result view ──────────────────────────────────── */
+                  <div className="space-y-4">
+                    <div className="rounded border p-6 text-center" style={{ borderColor: 'var(--badge-green-border)', backgroundColor: 'var(--badge-green-bg)' }}>
+                      <div className="mb-2 text-3xl">&#x2713;</div>
+                      <div className="font-semibold text-sm" style={{ color: 'var(--badge-green-text)' }}>
+                        Ontology "{genResult.domain}" Generated
+                      </div>
+                      <div className="mt-1 text-xs" style={{ color: 'var(--text-secondary)' }}>
+                        {genResult.node_count} nodes, {genResult.total_fields} fields
+                        {' '}&#183;{' '}Saved to {genResult.stored_in}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setGenResult(null); setGenTables([]); setGenDomain(''); setGenDescription(''); }}
+                      className="rounded border px-3 py-1.5 text-[11px]"
+                      style={{ borderColor: 'var(--border)', color: 'var(--accent)' }}
+                    >
+                      Generate Another
+                    </button>
+                  </div>
+                ) : (
+                  /* ── Form view ──────────────────────────────────── */
+                  <div className="space-y-4">
+                    {/* Step 1: Pick Connector */}
+                    <div>
+                      <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>1. Select Connector</label>
+                      {connectors.length === 0 ? (
+                        <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>
+                          No connectors found. <button type="button" onClick={() => setSelectedItem('__connectors__')} className="underline" style={{ color: 'var(--accent)' }}>Add one first</button>
+                        </p>
+                      ) : (
+                        <select
+                          value={genConnector}
+                          onChange={(e) => { setGenConnector(e.target.value); setGenTables([]); setGenSelectedTables(new Set()); }}
+                          className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                          style={inputStyle}
+                        >
+                          <option value="">Choose a connector...</option>
+                          {connectors.map((c) => (
+                            <option key={c.name} value={c.name}>{c.name} ({c.db_type})</option>
+                          ))}
+                        </select>
+                      )}
+                    </div>
+
+                    {/* Load tables button */}
+                    {genConnector && genTables.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={handleIntrospect}
+                        disabled={genIntrospecting}
+                        className="rounded px-4 py-1.5 text-xs font-semibold"
+                        style={{ backgroundColor: 'var(--accent)', color: '#0f1117' }}
+                      >
+                        {genIntrospecting ? 'Loading tables...' : 'Load Tables'}
+                      </button>
+                    )}
+
+                    {/* Step 2: Select tables */}
+                    {genTables.length > 0 && (
+                      <div>
+                        <div className="flex items-center justify-between mb-1">
+                          <label className="text-[10px] uppercase tracking-widest" style={labelStyle}>2. Select Tables ({genSelectedTables.size}/{genTables.length})</label>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setGenSelectedTables(new Set(genTables.map(t => t.name)))}
+                              className="text-[10px] underline" style={{ color: 'var(--accent)' }}
+                            >All</button>
+                            <button
+                              type="button"
+                              onClick={() => setGenSelectedTables(new Set())}
+                              className="text-[10px] underline" style={{ color: 'var(--text-secondary)' }}
+                            >None</button>
+                          </div>
+                        </div>
+                        <div className="rounded border max-h-[200px] overflow-y-auto" style={{ borderColor: 'var(--border)' }}>
+                          {genTables.map((t) => (
+                            <label
+                              key={t.name}
+                              className="flex items-center gap-2 border-b px-3 py-1.5 cursor-pointer hover:bg-[var(--bg-elevated)]"
+                              style={{ borderColor: 'var(--border)' }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={genSelectedTables.has(t.name)}
+                                onChange={(e) => {
+                                  const next = new Set(genSelectedTables);
+                                  if (e.target.checked) next.add(t.name); else next.delete(t.name);
+                                  setGenSelectedTables(next);
+                                }}
+                              />
+                              <span className="font-mono text-xs" style={{ color: 'var(--text-primary)' }}>{t.name}</span>
+                              <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>({t.column_count} cols{t.row_count_estimate ? `, ~${t.row_count_estimate} rows` : ''})</span>
+                            </label>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Step 3: Domain + Generate */}
+                    {genTables.length > 0 && genSelectedTables.size > 0 && (
+                      <div className="space-y-3">
+                        <div>
+                          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>3. Domain Name</label>
+                          <input
+                            value={genDomain}
+                            onChange={(e) => setGenDomain(e.target.value)}
+                            placeholder="e.g. procurement, ecommerce, hr"
+                            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <div>
+                          <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Description (optional)</label>
+                          <input
+                            value={genDescription}
+                            onChange={(e) => setGenDescription(e.target.value)}
+                            placeholder="e.g. Procurement data from production DB"
+                            className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                            style={inputStyle}
+                          />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleGenerateOntology}
+                          disabled={genGenerating || !genDomain.trim()}
+                          className="rounded px-4 py-2 text-xs font-semibold bg-[#3dd68c] text-[#0f1117] hover:bg-[#32b577] disabled:opacity-50"
+                        >
+                          {genGenerating ? 'Generating ontology...' : `Generate Ontology (${genSelectedTables.size} tables)`}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </>
+          ) : isApiKeys ? (
+            /* ── API Keys panel ──────────────────────────────────── */
+            <>
+              <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
+                <span className="font-semibold text-sm" style={{ color: 'var(--badge-amber-text)' }}>API Keys</span>
+                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Manage LLM provider API keys</span>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* Add key form */}
+                {showAddKey ? (
+                  <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--badge-amber-border)', backgroundColor: 'var(--bg-secondary)' }}>
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>Add API Key</span>
+                      <button type="button" onClick={() => setShowAddKey(false)} className="text-xs hover:opacity-80" style={{ color: 'var(--text-secondary)' }}>Cancel</button>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Provider</label>
+                      <select
+                        value={newKeyProvider}
+                        onChange={(e) => setNewKeyProvider(e.target.value)}
+                        className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                        style={inputStyle}
+                      >
+                        <option value="anthropic">Anthropic (Claude)</option>
+                        <option value="openai">OpenAI (GPT)</option>
+                        <option value="google">Google (Gemini)</option>
+                        <option value="cohere">Cohere</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Display Name</label>
+                      <input
+                        value={newKeyName}
+                        onChange={(e) => setNewKeyName(e.target.value)}
+                        placeholder={`e.g. ${newKeyProvider} production`}
+                        className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>API Key</label>
+                      <input
+                        type="password"
+                        value={newKeyValue}
+                        onChange={(e) => setNewKeyValue(e.target.value)}
+                        placeholder="sk-ant-..."
+                        className="w-full rounded border px-2 py-1.5 text-sm font-mono focus:outline-none"
+                        style={inputStyle}
+                      />
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={handleSaveApiKey}
+                        disabled={!newKeyProvider.trim() || !newKeyValue.trim() || keySaving}
+                        className="rounded px-4 py-1.5 text-xs font-semibold transition-all"
+                        style={{
+                          backgroundColor: !newKeyProvider.trim() || !newKeyValue.trim() ? 'var(--bg-elevated)' : '#3dd68c',
+                          color: !newKeyProvider.trim() || !newKeyValue.trim() ? 'var(--text-secondary)' : '#0f1117',
+                          cursor: !newKeyProvider.trim() || !newKeyValue.trim() ? 'not-allowed' : 'pointer',
+                        }}
+                      >
+                        {keySaving ? 'Saving...' : 'Save Key'}
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setShowAddKey(true)}
+                    className="rounded border border-dashed px-4 py-2 text-xs transition-colors"
+                    style={{ borderColor: 'var(--border)', color: 'var(--badge-amber-text)' }}
+                  >
+                    + Add API Key
+                  </button>
+                )}
+
+                {/* Existing keys list */}
+                {apiKeysLoading ? (
+                  <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Loading...</p>
+                ) : apiKeys.length === 0 && !showAddKey ? (
+                  <div className="rounded border p-6 text-center" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No API keys configured</p>
+                    <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                      Add an API key to enable Agent Chat and LLM features.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {apiKeys.map((k) => (
+                      <div
+                        key={k.provider}
+                        className="flex items-center justify-between rounded border px-4 py-3"
+                        style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}
+                      >
+                        <div className="space-y-0.5">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-sm" style={{ color: 'var(--text-primary)' }}>
+                              {k.name}
+                            </span>
+                            <span
+                              className="rounded px-1.5 py-0.5 text-[9px] uppercase border"
+                              style={{ borderColor: 'var(--badge-green-border)', backgroundColor: 'var(--badge-green-bg)', color: 'var(--badge-green-text)' }}
+                            >
+                              {k.provider}
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-3">
+                            <span className="font-mono text-[11px]" style={{ color: 'var(--text-muted)' }}>
+                              {k.key_masked}
+                            </span>
+                            {k.created_at && (
+                              <span className="text-[10px]" style={{ color: 'var(--text-secondary)' }}>
+                                Added {new Date(k.created_at).toLocaleDateString()}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteApiKey(k.provider)}
+                          className="rounded px-2 py-1 text-[10px] border transition-colors"
+                          style={{ borderColor: 'var(--border)', color: 'var(--error)' }}
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {/* Info note */}
+                <div className="rounded border px-4 py-3 text-[11px] leading-relaxed" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+                  API keys are stored locally and injected as environment variables on server startup.
+                  They are used by Agent Chat and any LLM-powered features. Keys saved here take
+                  precedence over <code style={{ color: 'var(--accent)' }}>nexaql.yaml</code> configuration.
+                </div>
+              </div>
+            </>
+          ) : selectedItem === '__roles__' ? (
             /* Roles editor */
             <>
               <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>

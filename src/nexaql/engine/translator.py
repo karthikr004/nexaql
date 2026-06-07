@@ -598,7 +598,7 @@ def translate(ast: QueryAST, ontology: Any) -> TranslateResult:
     select_sep = ",\n  "
     lines.append("  " + select_sep.join(ctx.selects))
 
-    root_table = getattr(root_def, "table", root_node.name)
+    root_table = getattr(root_def, "table", None) or root_node.name
     lines.append(f"FROM {root_table} {root_alias}")
 
     for entry in ctx.joins.values():

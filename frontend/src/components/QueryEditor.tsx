@@ -3,6 +3,11 @@ import Editor from '@monaco-editor/react';
 import type * as MonacoType from 'monaco-editor';
 import type { NodeInfo } from '../types';
 
+interface ExampleQuery {
+  name: string;
+  query: string;
+}
+
 interface Props {
   value: string;
   onChange: (v: string) => void;
@@ -10,6 +15,7 @@ interface Props {
   insertText?: string;
   onInsertConsumed: () => void;
   ontologyNodes?: NodeInfo[];
+  examples?: ExampleQuery[];
   theme?: 'dark' | 'light';
 }
 
@@ -379,6 +385,7 @@ export default function QueryEditor({
   insertText,
   onInsertConsumed,
   ontologyNodes = [],
+  examples,
   theme = 'dark',
 }: Props) {
   const editorRef = useRef<MonacoType.editor.IStandaloneCodeEditor | null>(null);
@@ -410,7 +417,7 @@ export default function QueryEditor({
       // Dispose any previous registration, then register fresh
       completionRef.current?.dispose();
       completionRef.current = m.languages.registerCompletionItemProvider(LANG, {
-        triggerCharacters: ['{', '(', ' ', '\n', '@', ':'],
+        triggerCharacters: ['{', '(', ' ', '\n', '@', ':', '_'],
         provideCompletionItems(model, position) {
           const word = model.getWordUntilPosition(position);
 
@@ -498,7 +505,16 @@ export default function QueryEditor({
           const currentNode = nodes.find((n) => n.name === topName);
 
           // ── 3. Inside filter parens — filter keys + enum values ───────
-          if (isInsideFilterParens(textBefore) && currentNode) {
+          // When cursor is inside node(filter_args), the node hasn't opened a {
+          // yet, so getNodeStack won't find it. Extract from text before (.
+          let filterNode = currentNode;
+          if (!filterNode && isInsideFilterParens(textBefore)) {
+            const parenMatch = textBefore.match(/(\w+)\s*\([^)]*$/);
+            if (parenMatch) {
+              filterNode = nodes.find((n) => n.name === parenMatch[1]);
+            }
+          }
+          if (isInsideFilterParens(textBefore) && filterNode) {
             // Check if we're after a colon — suggest enum values for that field
             const fieldName = getFieldBeforeColon(textBefore);
             if (fieldName) {
@@ -523,12 +539,12 @@ export default function QueryEditor({
             }
 
             // Filter key suggestions — all fields as potential filter keys
-            for (const f of currentNode.fields) {
+            for (const f of filterNode.fields) {
               addSnippet(f.name, `${f.name}: \${1:value}`, K.Field, f.type, undefined, '2');
             }
 
             // Special filters
-            for (const sf of currentNode.specialFilters) {
+            for (const sf of filterNode.specialFilters) {
               addSnippet(sf.name, `${sf.name}: true`, K.Value, 'special filter', sf.description, '2');
             }
 
@@ -649,7 +665,7 @@ export default function QueryEditor({
       {/* Example query bar */}
       <div className="flex shrink-0 items-center gap-1.5 overflow-x-auto border-b px-3 py-2" style={{ backgroundColor: 'var(--bg-primary)', borderColor: 'var(--border)' }}>
         <span className="mr-1 shrink-0 text-[10px]" style={{ color: 'var(--text-muted)' }}>Examples:</span>
-        {EXAMPLE_QUERIES.map((q) => (
+        {(examples && examples.length > 0 ? examples : EXAMPLE_QUERIES).map((q) => (
           <button
             type="button"
             key={q.name}
