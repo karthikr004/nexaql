@@ -106,6 +106,98 @@ function CompactTable({
   );
 }
 
+// ── Syntax highlighter for NexaQL code blocks (single-pass) ─────────────────
+
+const _esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+const _KW = new Set(['query', 'mutation']);
+const _BOOL = new Set(['true', 'false', 'null']);
+const _TOKEN_RE = new RegExp(
+  [
+    /#[^\n]*/g.source,              // comments
+    /"[^"]*"/g.source,              // strings
+    /@\w+/g.source,                 // directives
+    /\b[a-z_]\w*\s*(?=:)/g.source,  // field key (lookahead colon)
+    /\b\w+\b/g.source,              // words
+    /\d+(?:\.\d+)?/g.source,        // numbers
+  ].join('|'),
+  'g',
+);
+
+function highlightNexaQL(code: string): string {
+  return _esc(code).replace(_TOKEN_RE, (tok) => {
+    if (tok.startsWith('#'))
+      return `<span style="color:var(--text-secondary);font-style:italic">${tok}</span>`;
+    if (tok.startsWith('"'))
+      return `<span style="color:#fb923c">${tok}</span>`;
+    if (tok.startsWith('@'))
+      return `<span style="color:#f97316">${tok}</span>`;
+    if (/^[a-z_]\w*$/.test(tok) && _KW.has(tok))
+      return `<span style="color:#a78bfa;font-weight:600">${tok}</span>`;
+    if (/^[a-z_]\w*$/.test(tok) && _BOOL.has(tok))
+      return `<span style="color:#a78bfa">${tok}</span>`;
+    if (/^[a-z_]\w*$/.test(tok))
+      return `<span style="color:var(--success)">${tok}</span>`;
+    if (/^\d/.test(tok))
+      return `<span style="color:#22d3ee">${tok}</span>`;
+    return tok;
+  });
+}
+
+// ── Formatted summary with code block support ────────────────────────────────
+
+function FormattedSummary({ text }: { text: string }) {
+  // Split on fenced code blocks: ```lang\n...\n```
+  const parts = text.split(/(```[\s\S]*?```)/g);
+
+  return (
+    <div className="space-y-2">
+      {parts.map((part, i) => {
+        const codeMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
+        if (codeMatch) {
+          const code = (codeMatch[2] ?? '').trim();
+          const isNexaql = /^(nexaql|graphql)?$/i.test(codeMatch[1] ?? '');
+          return (
+            <pre
+              key={i}
+              className="overflow-x-auto rounded border px-3 py-2 font-mono text-[11px] leading-relaxed"
+              style={{
+                borderColor: 'var(--border)',
+                backgroundColor: 'var(--bg-secondary)',
+                color: 'var(--text-primary)',
+              }}
+              {...(isNexaql
+                ? { dangerouslySetInnerHTML: { __html: highlightNexaQL(code) } }
+                : { children: code }
+              )}
+            />
+          );
+        }
+        // Regular text — render paragraphs, handle inline code with backticks
+        const trimmed = part.trim();
+        if (!trimmed) return null;
+        return (
+          <p key={i} className="text-[13px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+            {trimmed.split(/(`[^`]+`)/g).map((seg, j) => {
+              if (seg.startsWith('`') && seg.endsWith('`')) {
+                return (
+                  <code
+                    key={j}
+                    className="rounded px-1 py-0.5 font-mono text-[11px]"
+                    style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--accent)' }}
+                  >
+                    {seg.slice(1, -1)}
+                  </code>
+                );
+              }
+              return seg;
+            })}
+          </p>
+        );
+      })}
+    </div>
+  );
+}
+
 // ── Chat bubble ────────────────────────────────────────────────────────────────
 
 function ChatBubble({ turn }: { turn: ChatTurn }) {
@@ -139,7 +231,7 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
       </div>
       <div className="min-w-0 flex-1 space-y-2.5">
         {/* Summary */}
-        <p className="text-[13px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>{turn.summary}</p>
+        <FormattedSummary text={turn.summary} />
 
         {/* Error */}
         {turn.error && (

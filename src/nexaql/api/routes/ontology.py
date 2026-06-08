@@ -42,42 +42,35 @@ async def list_domains() -> JSONResponse:
     Reads from the nexaql_ontologies table via the saved connector.
     Falls back to scanning YAML files if no connector is configured.
     """
-    from nexaql.api.deps import _get_db_url_from_connectors, _get_active_domain
+    from nexaql.api.deps import _get_active_domain, _get_store_for_datasource
 
     active_domain = _get_active_domain()
     domains: list[dict[str, Any]] = []
 
-    db_url = _get_db_url_from_connectors()
-    if db_url:
-        # Load domains from DB
-        try:
-            from nexaql.ontology.store import PostgresStore
-            store = PostgresStore(db_url)
-            store_domains = await store.list_domains()
+    try:
+        store = _get_store_for_datasource()
+        store_domains = await store.list_domains()
 
-            for sd in store_domains:
-                domain_name = sd["domain"]
-                # Load the ontology to get description and node count
-                try:
-                    ont = await store.load(domain_name)
-                    description = ont.description
-                    node_count = len(ont.nodes)
-                except Exception:
-                    description = ""
-                    node_count = 0
+        for sd in store_domains:
+            domain_name = sd["domain"]
+            try:
+                ont = await store.load(domain_name)
+                description = ont.description
+                node_count = len(ont.nodes)
+            except Exception:
+                description = ""
+                node_count = 0
 
-                domains.append({
-                    "domain": domain_name,
-                    "description": description,
-                    "nodeCount": node_count,
-                    "active": domain_name == active_domain,
-                    "source": "database",
-                    "version": sd.get("latest_version"),
-                })
-        except Exception as e:
-            return JSONResponse({"error": f"Failed to list domains: {e}"}, status_code=500)
-    else:
-        # Fallback: scan YAML files (legacy, no connector configured)
+            domains.append({
+                "domain": domain_name,
+                "description": description,
+                "nodeCount": node_count,
+                "active": domain_name == active_domain,
+                "source": "database",
+                "version": sd.get("latest_version"),
+            })
+    except Exception:
+        # Fallback: scan YAML files (legacy, no DB configured)
         import glob
         ontology_dir = os.environ.get("NEXAQL_ONTOLOGY_DIR", "ontologies")
         cfg = get_config()
@@ -123,22 +116,16 @@ async def switch_domain(req: SwitchDomainRequest) -> JSONResponse:
     Updates nexaql.yaml and reloads all caches so subsequent
     queries use the new ontology.
     """
-    from nexaql.api.deps import _get_db_url_from_connectors
+    from nexaql.api.deps import _get_store_for_datasource
 
-    db_url = _get_db_url_from_connectors()
-
-    if db_url:
-        # Verify domain exists in DB
-        try:
-            from nexaql.ontology.store import PostgresStore
-            store = PostgresStore(db_url)
-            ont = await store.load(req.domain)
-        except KeyError:
-            return JSONResponse({"error": f"Domain '{req.domain}' not found in database"}, status_code=404)
-        except Exception as e:
-            return JSONResponse({"error": f"Failed to load domain: {e}"}, status_code=500)
-    else:
-        return JSONResponse({"error": "No connector configured"}, status_code=400)
+    # Verify domain exists in DB
+    try:
+        store = _get_store_for_datasource()
+        ont = await store.load(req.domain)
+    except KeyError:
+        return JSONResponse({"error": f"Domain '{req.domain}' not found in database"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to load domain: {e}"}, status_code=500)
 
     # Update nexaql.yaml to set the active domain
     try:

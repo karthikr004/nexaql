@@ -75,27 +75,56 @@ def _get_active_domain() -> str:
     return "default"
 
 
-def get_ontology(domain: str | None = None) -> Ontology:
-    """Load the ontology — from DB (via saved connector) or YAML file fallback.
+def _get_store_for_datasource():
+    """Get the right ontology store based on datasource type.
 
     Resolution order:
-    1. If a saved connector exists (connectors.json), load from the DB's
-       nexaql_ontologies table.
-    2. Otherwise, fall back to YAML path in config (legacy behavior).
+    1. Saved connector (connectors.json) → PostgresStore or DuckDBStore
+    2. Config datasource → detect type from URL/path
+    3. Fallback → DuckDBStore with default file
+    """
+    from nexaql.ontology.store import DuckDBStore, PostgresStore
+
+    # 1. Saved connector
+    db_url = _get_db_url_from_connectors()
+    if db_url:
+        if db_url.startswith("postgresql"):
+            return PostgresStore(db_url)
+        else:
+            return DuckDBStore(db_url)
+
+    # 2. Config datasource
+    try:
+        cfg = get_config()
+        if cfg.datasources:
+            ds = next(iter(cfg.datasources.values()))
+            if ds.type == "postgresql" and ds.url:
+                return PostgresStore(ds.url)
+            elif ds.type == "duckdb" and ds.path:
+                return DuckDBStore(ds.path)
+    except Exception:
+        pass
+
+    # 3. Fallback: local DuckDB
+    return DuckDBStore("nexaql.duckdb")
+
+
+def get_ontology(domain: str | None = None) -> Ontology:
+    """Load the ontology from the database (DuckDB or Postgres).
+
+    Falls back to YAML only if the DB store raises KeyError (no ontology
+    seeded yet), to support legacy setups during migration.
     """
     if domain is None:
         domain = _get_active_domain()
 
-    # Try loading from DB via saved connector
-    db_url = _get_db_url_from_connectors()
-    if db_url:
-        # Check cache
-        if domain in _store_ontology_cache:
-            return _store_ontology_cache[domain]
+    # Check cache
+    if domain in _store_ontology_cache:
+        return _store_ontology_cache[domain]
 
-        from nexaql.ontology.store import PostgresStore
-        store = PostgresStore(db_url)
+    store = _get_store_for_datasource()
 
+    try:
         try:
             loop = asyncio.get_running_loop()
         except RuntimeError:
@@ -112,10 +141,21 @@ def get_ontology(domain: str | None = None) -> Ontology:
 
         _store_ontology_cache[domain] = ont
         return ont
+    except (KeyError, FileNotFoundError):
+        pass
 
-    # Fallback: YAML file (legacy, no connectors configured)
-    cfg = get_config()
-    return load_ontology(cfg.ontology.path)
+    # Legacy fallback: YAML file (for existing setups not yet migrated)
+    try:
+        cfg = get_config()
+        if cfg.ontology.path:
+            return load_ontology(cfg.ontology.path)
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        f"No ontology found for domain '{domain}'. "
+        "Run 'nexaql install' to set up, or generate one from Admin UI."
+    )
 
 
 async def get_ontology_async(domain: str | None = None) -> Ontology:
@@ -123,21 +163,30 @@ async def get_ontology_async(domain: str | None = None) -> Ontology:
     if domain is None:
         domain = _get_active_domain()
 
-    # Try loading from DB via saved connector
-    db_url = _get_db_url_from_connectors()
-    if db_url:
-        if domain in _store_ontology_cache:
-            return _store_ontology_cache[domain]
+    if domain in _store_ontology_cache:
+        return _store_ontology_cache[domain]
 
-        from nexaql.ontology.store import PostgresStore
-        store = PostgresStore(db_url)
+    store = _get_store_for_datasource()
+
+    try:
         ont = await store.load(domain)
         _store_ontology_cache[domain] = ont
         return ont
+    except (KeyError, FileNotFoundError):
+        pass
 
-    # Fallback: YAML (sync, but fast with mtime cache)
-    cfg = get_config()
-    return load_ontology(cfg.ontology.path)
+    # Legacy fallback
+    try:
+        cfg = get_config()
+        if cfg.ontology.path:
+            return load_ontology(cfg.ontology.path)
+    except Exception:
+        pass
+
+    raise RuntimeError(
+        f"No ontology found for domain '{domain}'. "
+        "Run 'nexaql install' to set up, or generate one from Admin UI."
+    )
 
 
 def invalidate_ontology_cache(domain: str | None = None) -> None:

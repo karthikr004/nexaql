@@ -41,11 +41,12 @@ class DatasourceEntry(BaseModel):
 
 
 class LLMConfig(BaseModel):
-    provider: str = "anthropic"
+    provider: str = ""       # User must configure: ollama, openrouter, openai, etc.
     api_key: Optional[str] = None
-    model: str = "claude-sonnet-4-20250514"
+    base_url: Optional[str] = None  # custom endpoint override
+    model: str = ""          # User must configure: any OpenAI-compatible model
     max_tokens: int = 4096
-    summary_max_tokens: int = 1024
+    summary_max_tokens: int = 2048  # extra headroom for thinking models (Qwen, etc.)
 
 
 class ServerConfig(BaseModel):

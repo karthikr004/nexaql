@@ -212,6 +212,243 @@ class YamlStore(OntologyStore):
         return False
 
 
+# ── DuckDB Store (local / quick-start) ────────────────────────────────────────
+
+
+DUCKDB_DDL = """
+CREATE TABLE IF NOT EXISTS nexaql_ontologies (
+    id              INTEGER PRIMARY KEY DEFAULT nextval('nexaql_ontologies_id_seq'),
+    domain          TEXT NOT NULL,
+    version_num     INTEGER NOT NULL DEFAULT 1,
+    data            TEXT NOT NULL,
+    author          TEXT NOT NULL DEFAULT 'system',
+    note            TEXT,
+    is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+    created_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
+
+    UNIQUE(domain, version_num)
+);
+"""
+
+
+class DuckDBStore(OntologyStore):
+    """DuckDB-backed ontology store. Same schema as Postgres but using DuckDB.
+
+    Works with both file-based and in-memory DuckDB databases.
+    Ontology data is stored as JSON text (DuckDB doesn't have JSONB).
+    """
+
+    def __init__(self, db_path: str):
+        self._db_path = db_path
+        self._migrated = False
+
+    def _connect(self):
+        import duckdb
+        return duckdb.connect(self._db_path)
+
+    def _ensure_table(self, conn) -> None:
+        if self._migrated:
+            return
+        try:
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS nexaql_ontologies_id_seq START 1")
+        except Exception:
+            pass  # may already exist
+        conn.execute(DUCKDB_DDL)
+        self._migrated = True
+
+    async def load(self, domain: str) -> Ontology:
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            row = conn.execute(
+                "SELECT data FROM nexaql_ontologies WHERE domain = ? AND is_active = TRUE "
+                "ORDER BY version_num DESC LIMIT 1",
+                [domain],
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if row is None:
+            raise KeyError(f"No active ontology found for domain '{domain}'")
+        data = json.loads(row[0])
+        return Ontology(**data)
+
+    async def save(self, ontology: Ontology, author: str = "system", note: str | None = None) -> dict[str, Any]:
+        data = ontology_to_dict(ontology)
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            conn.begin()
+
+            row = conn.execute(
+                "SELECT COALESCE(MAX(version_num), 0) FROM nexaql_ontologies WHERE domain = ?",
+                [ontology.domain],
+            ).fetchone()
+            new_ver = (row[0] if row else 0) + 1
+
+            conn.execute(
+                "UPDATE nexaql_ontologies SET is_active = FALSE WHERE domain = ? AND is_active = TRUE",
+                [ontology.domain],
+            )
+
+            conn.execute(
+                "INSERT INTO nexaql_ontologies (domain, version_num, data, author, note, is_active) "
+                "VALUES (?, ?, ?, ?, ?, TRUE)",
+                [ontology.domain, new_ver, json.dumps(data), author, note],
+            )
+            conn.commit()
+
+            row = conn.execute(
+                "SELECT id, created_at FROM nexaql_ontologies WHERE domain = ? AND version_num = ?",
+                [ontology.domain, new_ver],
+            ).fetchone()
+        finally:
+            conn.close()
+
+        return {
+            "id": row[0],
+            "domain": ontology.domain,
+            "version": new_ver,
+            "author": author,
+            "created_at": str(row[1]),
+            "node_count": len(ontology.nodes),
+        }
+
+    async def _modify_and_save(self, domain: str, modify_fn, author: str = "system") -> Ontology:
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            conn.begin()
+
+            row = conn.execute(
+                "SELECT data, version_num FROM nexaql_ontologies WHERE domain = ? AND is_active = TRUE "
+                "ORDER BY version_num DESC LIMIT 1",
+                [domain],
+            ).fetchone()
+            if row is None:
+                raise KeyError(f"No active ontology for domain '{domain}'")
+
+            data = json.loads(row[0])
+            ont = Ontology(**data)
+            new_ver = row[1] + 1
+
+            modify_fn(ont)
+
+            conn.execute(
+                "UPDATE nexaql_ontologies SET is_active = FALSE WHERE domain = ? AND is_active = TRUE",
+                [domain],
+            )
+            new_data = ontology_to_dict(ont)
+            conn.execute(
+                "INSERT INTO nexaql_ontologies (domain, version_num, data, author, is_active) "
+                "VALUES (?, ?, ?, ?, TRUE)",
+                [domain, new_ver, json.dumps(new_data), author],
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        return ont
+
+    async def update_node(self, domain: str, node_name: str, node: OntologyNode, author: str = "system") -> Ontology:
+        def _modify(ont: Ontology):
+            ont.nodes[node_name] = node
+        return await self._modify_and_save(domain, _modify, author)
+
+    async def delete_node(self, domain: str, node_name: str, author: str = "system") -> Ontology:
+        def _modify(ont: Ontology):
+            if node_name not in ont.nodes:
+                raise KeyError(f"Node '{node_name}' not found")
+            del ont.nodes[node_name]
+        return await self._modify_and_save(domain, _modify, author)
+
+    async def add_node(self, domain: str, node_name: str, node: OntologyNode, author: str = "system") -> Ontology:
+        def _modify(ont: Ontology):
+            if node_name in ont.nodes:
+                raise KeyError(f"Node '{node_name}' already exists")
+            ont.nodes[node_name] = node
+        return await self._modify_and_save(domain, _modify, author)
+
+    async def list_domains(self) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            rows = conn.execute("""
+                SELECT domain,
+                       MAX(version_num) AS latest_version,
+                       MAX(created_at) AS updated_at,
+                       COUNT(*) AS total_versions
+                FROM nexaql_ontologies
+                GROUP BY domain
+                ORDER BY domain
+            """).fetchall()
+        finally:
+            conn.close()
+
+        return [
+            {
+                "domain": r[0],
+                "backend": "duckdb",
+                "latest_version": r[1],
+                "updated_at": str(r[2]),
+                "total_versions": r[3],
+            }
+            for r in rows
+        ]
+
+    async def list_versions(self, domain: str, limit: int = 20) -> list[dict[str, Any]]:
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            rows = conn.execute(
+                "SELECT id, version_num, author, note, is_active, created_at "
+                "FROM nexaql_ontologies WHERE domain = ? "
+                "ORDER BY version_num DESC LIMIT ?",
+                [domain, limit],
+            ).fetchall()
+        finally:
+            conn.close()
+
+        return [
+            {
+                "version_id": r[0],
+                "version_num": r[1],
+                "domain": domain,
+                "author": r[2],
+                "note": r[3],
+                "is_active": r[4],
+                "created_at": str(r[5]),
+            }
+            for r in rows
+        ]
+
+    async def load_version(self, domain: str, version_id: int) -> Ontology:
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            row = conn.execute(
+                "SELECT data FROM nexaql_ontologies WHERE id = ? AND domain = ?",
+                [version_id, domain],
+            ).fetchone()
+        finally:
+            conn.close()
+
+        if row is None:
+            raise KeyError(f"Version {version_id} not found for domain '{domain}'")
+        data = json.loads(row[0])
+        return Ontology(**data)
+
+    async def delete_domain(self, domain: str) -> bool:
+        conn = self._connect()
+        try:
+            self._ensure_table(conn)
+            before = conn.execute("SELECT COUNT(*) FROM nexaql_ontologies WHERE domain = ?", [domain]).fetchone()[0]
+            conn.execute("DELETE FROM nexaql_ontologies WHERE domain = ?", [domain])
+        finally:
+            conn.close()
+        return before > 0
+
+
 # ── PostgreSQL Store (production) ───────────────────────────────────────────
 
 
@@ -532,13 +769,15 @@ def get_store(
 ) -> OntologyStore:
     """Get or create the ontology store singleton.
 
-    Auto-detects backend from environment:
-    - ``NEXAQL_ONTOLOGY_STORE=postgres`` + ``NEXAQL_ONTOLOGY_DB`` → PostgresStore
-    - Otherwise → YamlStore
+    Auto-detects backend from environment or connection URL:
+    - ``postgresql://...`` → PostgresStore
+    - ``*.duckdb`` or ``:memory:`` → DuckDBStore
+    - Explicit: ``NEXAQL_ONTOLOGY_STORE=postgres|duckdb|yaml``
 
     Can also be called explicitly::
 
         store = get_store(backend="postgres", connection_url="postgresql://...")
+        store = get_store(backend="duckdb", connection_url="nexaql.duckdb")
     """
     global _store_instance
 
@@ -546,7 +785,17 @@ def get_store(
         return _store_instance
 
     if backend is None:
-        backend = os.environ.get("NEXAQL_ONTOLOGY_STORE", "yaml")
+        backend = os.environ.get("NEXAQL_ONTOLOGY_STORE", "")
+
+    # Auto-detect from connection URL
+    if not backend and connection_url:
+        if connection_url.startswith("postgresql"):
+            backend = "postgres"
+        elif connection_url.endswith(".duckdb") or connection_url == ":memory:":
+            backend = "duckdb"
+
+    if not backend:
+        backend = "yaml"
 
     if backend == "postgres":
         url = connection_url or os.environ.get("NEXAQL_ONTOLOGY_DB")
@@ -556,6 +805,9 @@ def get_store(
                 "Set NEXAQL_ONTOLOGY_DB or pass connection_url."
             )
         _store_instance = PostgresStore(url)
+    elif backend == "duckdb":
+        path = connection_url or os.environ.get("NEXAQL_ONTOLOGY_DB", "nexaql.duckdb")
+        _store_instance = DuckDBStore(path)
     else:
         _store_instance = YamlStore(ontology_dir)
 

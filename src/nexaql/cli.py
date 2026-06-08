@@ -44,11 +44,12 @@ datasources:
   #   url: postgresql://user:pass@localhost:5432/mydb
 
 llm:
-  provider: anthropic
-  api_key: ${ANTHROPIC_API_KEY}
-  model: claude-sonnet-4-20250514
+  # Configure your LLM provider. NexaQL works with any OpenAI-compatible API.
+  # See nexaql.yaml.example for all options.
+  provider: ""     # Set to: ollama, openrouter, or openai
+  model: ""        # Set to your chosen model
   max_tokens: 4096
-  summary_max_tokens: 1024
+  summary_max_tokens: 2048
 
 server:
   host: 0.0.0.0
@@ -133,13 +134,191 @@ def init(path: str, force: bool) -> None:
             click.echo(f"Created {os.path.relpath(dest)}")
 
     click.echo()
-    click.echo("Quick start (works immediately with sample data):")
-    click.echo("  nexaql serve")
+    click.echo("Quick start:")
+    click.echo("  nexaql install   # set up sample database + config")
+    click.echo("  nexaql serve     # start the server")
+
+
+# ── nexaql install ─────────────────────────────────────────────────────────
+
+
+DUCKDB_FILE = "nexaql.duckdb"
+
+
+@main.command()
+@click.option("--skip-sample", is_flag=True, help="Skip sample data seeding")
+@click.option("--config", "config_path", default="nexaql.yaml", help="Config file path")
+@click.option("--force", is_flag=True, help="Overwrite existing config and data")
+def install(skip_sample: bool, config_path: str, force: bool) -> None:
+    """Set up NexaQL: sample database + config.
+
+    This is the zero-to-running command. After install, configure your LLM
+    provider in nexaql.yaml, then run: nexaql serve
+
+    \b
+    What it does:
+      1. Creates nexaql.duckdb with sample e-commerce data
+      2. Seeds the sample ontology into the database
+      3. Generates nexaql.yaml config
+
+    \b
+    Examples:
+      nexaql install               # full setup with sample data
+      nexaql install --skip-sample # config only, bring your own database
+    """
+
     click.echo()
-    click.echo("To use your own database:")
-    click.echo("  1. Edit nexaql.yaml — update datasource and ontology path")
-    click.echo("  2. Set ANTHROPIC_API_KEY for agent chat (optional)")
-    click.echo("  3. nexaql serve")
+    click.echo("  NexaQL Installer")
+    click.echo("  ================")
+    click.echo()
+
+    # ── Step 1: Create DuckDB with sample data ────────────────────────────
+
+    click.echo(f"  [1/2] Setting up database: {DUCKDB_FILE}")
+
+    if not skip_sample:
+        import duckdb
+
+        db_exists = os.path.exists(DUCKDB_FILE) and not force
+        conn = duckdb.connect(DUCKDB_FILE)
+
+        if db_exists:
+            # Check if tables already exist
+            tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
+            if tables:
+                click.echo(f"         Database exists with {len(tables)} tables. Use --force to recreate.")
+            else:
+                db_exists = False
+
+        if not db_exists:
+            # Load and execute seed SQL
+            data_pkg = resources.files("nexaql.data")
+            seed_file = data_pkg.joinpath("sample_ecommerce_seed.sql")
+            with resources.as_file(seed_file) as seed_path:
+                seed_sql = seed_path.read_text()
+
+            # DuckDB can execute multiple statements
+            conn.execute(seed_sql)
+            tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
+            click.echo(f"         Seeded {len(tables)} tables: {', '.join(tables)}")
+
+        # Seed ontology into nexaql_ontologies table
+        click.echo("         Loading ontology into database...")
+
+        # Ensure ontology table exists
+        try:
+            conn.execute("CREATE SEQUENCE IF NOT EXISTS nexaql_ontologies_id_seq START 1")
+        except Exception:
+            pass
+
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS nexaql_ontologies (
+                id              INTEGER PRIMARY KEY DEFAULT nextval('nexaql_ontologies_id_seq'),
+                domain          TEXT NOT NULL,
+                version_num     INTEGER NOT NULL DEFAULT 1,
+                data            TEXT NOT NULL,
+                author          TEXT NOT NULL DEFAULT 'system',
+                note            TEXT,
+                is_active       BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
+                UNIQUE(domain, version_num)
+            )
+        """)
+
+        # Load sample ontology YAML and insert into DB
+        data_pkg = resources.files("nexaql.data")
+        ontology_file = data_pkg.joinpath("sample_ecommerce.yaml")
+        with resources.as_file(ontology_file) as ont_path:
+            import yaml
+            with open(ont_path) as f:
+                ont_data = yaml.safe_load(f)
+
+        domain = ont_data.get("domain", "ecommerce")
+
+        # Check if ontology already exists
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM nexaql_ontologies WHERE domain = ? AND is_active = TRUE",
+            [domain],
+        ).fetchone()[0]
+
+        if existing > 0 and not force:
+            click.echo(f"         Ontology '{domain}' already exists in database")
+        else:
+            if existing > 0:
+                conn.execute("DELETE FROM nexaql_ontologies WHERE domain = ?", [domain])
+
+            conn.execute(
+                "INSERT INTO nexaql_ontologies (domain, version_num, data, author, note, is_active) "
+                "VALUES (?, 1, ?, 'nexaql-install', 'Initial setup', TRUE)",
+                [domain, json.dumps(ont_data)],
+            )
+            click.echo(f"         Ontology '{domain}' loaded ({len(ont_data.get('nodes', {}))} nodes)")
+
+        conn.close()
+    else:
+        click.echo("         Skipping sample data (--skip-sample)")
+
+    # ── Step 2: Generate config ───────────────────────────────────────────
+
+    click.echo(f"  [2/2] Generating config: {config_path}")
+
+    if os.path.exists(config_path) and not force:
+        click.echo(f"         Config already exists. Use --force to overwrite.")
+    else:
+        install_config = f"""\
+# NexaQL configuration — generated by nexaql install
+ontology:
+  domain: ecommerce
+
+datasources:
+  default:
+    type: duckdb
+    path: {DUCKDB_FILE}
+
+llm:
+  # Configure your LLM provider. NexaQL works with any OpenAI-compatible API.
+  #
+  # Option 1: Ollama (local, free)
+  #   Install Ollama from https://ollama.com, then pull a model:
+  #     ollama pull qwen2.5-coder:7b
+  #   provider: ollama
+  #   model: qwen2.5-coder:7b
+  #
+  # Option 2: OpenRouter (cloud — Claude, GPT, Gemini, 200+ models)
+  #   provider: openrouter
+  #   api_key: ${{OPENROUTER_API_KEY}}
+  #   model: anthropic/claude-sonnet-4-20250514
+  #
+  # Option 3: OpenAI directly
+  #   provider: openai
+  #   api_key: ${{OPENAI_API_KEY}}
+  #   model: gpt-4o-mini
+  provider: ""
+  model: ""
+  max_tokens: 4096
+  summary_max_tokens: 2048
+
+server:
+  host: 0.0.0.0
+  port: 3717
+  cors_origins:
+    - "*"
+"""
+        with open(config_path, "w") as f:
+            f.write(install_config)
+        click.echo(f"         Created {config_path}")
+
+    # ── Done ──────────────────────────────────────────────────────────────
+
+    click.echo()
+    click.echo("  Setup complete!")
+    click.echo()
+    click.echo("  Next steps:")
+    click.echo("    1. Configure your LLM provider in nexaql.yaml")
+    click.echo("    2. nexaql serve")
+    click.echo()
+    click.echo(f"  Then open: http://localhost:3717")
+    click.echo()
 
 
 # ── nexaql query ───────────────────────────────────────────────────────────

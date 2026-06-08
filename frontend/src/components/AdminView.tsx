@@ -194,10 +194,26 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
   const [apiKeys, setApiKeys] = useState<ApiKeyInfo[]>([]);
   const [apiKeysLoading, setApiKeysLoading] = useState(false);
   const [newKeyName, setNewKeyName] = useState('');
-  const [newKeyProvider, setNewKeyProvider] = useState('anthropic');
+  const [newKeyProvider, setNewKeyProvider] = useState('openrouter');
   const [newKeyValue, setNewKeyValue] = useState('');
   const [keySaving, setKeySaving] = useState(false);
   const [showAddKey, setShowAddKey] = useState(false);
+
+  // LLM status (Ollama + current provider)
+  const [llmStatus, setLlmStatus] = useState<{
+    provider: string;
+    model: string;
+    base_url: string;
+    has_api_key: boolean;
+    ollama?: { running: boolean; models: string[]; has_default_model: boolean; default_model: string };
+  } | null>(null);
+
+  const fetchLlmStatus = useCallback(async () => {
+    try {
+      const res = await fetch('/api/llm/status');
+      if (res.ok) setLlmStatus(await res.json());
+    } catch { /* ignore */ }
+  }, []);
 
   // ── Fetch connectors ──────────────────────────────────────────────────────
 
@@ -255,7 +271,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
         setToast({ message: `API key for "${newKeyProvider}" saved`, type: 'success' });
         setShowAddKey(false);
         setNewKeyName('');
-        setNewKeyProvider('anthropic');
+        setNewKeyProvider('openrouter');
         setNewKeyValue('');
         fetchApiKeys();
       } else {
@@ -1859,7 +1875,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
 
           <button
             type="button"
-            onClick={() => { setSelectedItem('__api_keys__'); fetchApiKeys(); }}
+            onClick={() => { setSelectedItem('__api_keys__'); fetchApiKeys(); fetchLlmStatus(); }}
             className={`flex w-full items-center gap-2 border-b px-3 py-2.5 text-left transition-colors ${
               isApiKeys ? 'border-l-2 border-l-amber-500' : ''
             }`}
@@ -2273,13 +2289,100 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
               </div>
             </>
           ) : isApiKeys ? (
-            /* ── API Keys panel ──────────────────────────────────── */
+            /* ── LLM Configuration panel ──────────────────────────── */
             <>
               <div className="shrink-0 border-b px-4 py-2" style={{ borderColor: 'var(--border)' }}>
-                <span className="font-semibold text-sm" style={{ color: 'var(--badge-amber-text)' }}>API Keys</span>
-                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Manage LLM provider API keys</span>
+                <span className="font-semibold text-sm" style={{ color: 'var(--badge-amber-text)' }}>LLM Configuration</span>
+                <span className="ml-2 text-[10px]" style={{ color: 'var(--text-secondary)' }}>Model provider settings</span>
               </div>
               <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* ── Current LLM Status ── */}
+                {llmStatus && (
+                  <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>Active Provider</span>
+                      <span className="rounded px-1.5 py-0.5 text-[9px] uppercase border font-semibold"
+                        style={{
+                          borderColor: llmStatus.provider === 'ollama'
+                            ? (llmStatus.ollama?.running ? 'var(--badge-green-border)' : 'var(--badge-red-border, var(--error))')
+                            : 'var(--badge-blue-border, var(--accent))',
+                          backgroundColor: llmStatus.provider === 'ollama'
+                            ? (llmStatus.ollama?.running ? 'var(--badge-green-bg)' : 'var(--badge-red-bg, rgba(239,68,68,0.1))')
+                            : 'var(--badge-blue-bg, rgba(96,165,250,0.1))',
+                          color: llmStatus.provider === 'ollama'
+                            ? (llmStatus.ollama?.running ? 'var(--badge-green-text)' : 'var(--error)')
+                            : 'var(--accent)',
+                        }}
+                      >
+                        {llmStatus.provider}
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-2 text-[11px]">
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Model: </span>
+                        <span className="font-mono" style={{ color: 'var(--text-primary)' }}>{llmStatus.model}</span>
+                      </div>
+                      <div>
+                        <span style={{ color: 'var(--text-muted)' }}>Endpoint: </span>
+                        <span className="font-mono" style={{ color: 'var(--text-secondary)' }}>{llmStatus.base_url?.replace('https://', '').replace('http://', '') || 'default'}</span>
+                      </div>
+                    </div>
+                    {/* Ollama-specific status */}
+                    {llmStatus.provider === 'ollama' && llmStatus.ollama && (
+                      <div className="rounded border px-3 py-2 text-[11px]" style={{
+                        borderColor: llmStatus.ollama.running ? 'var(--badge-green-border)' : 'var(--border)',
+                        backgroundColor: llmStatus.ollama.running ? 'rgba(61,214,140,0.05)' : 'rgba(239,68,68,0.05)',
+                      }}>
+                        {llmStatus.ollama.running ? (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span style={{ color: 'var(--success)', fontSize: '8px' }}>&#x25CF;</span>
+                              <span style={{ color: 'var(--success)' }}>Ollama running</span>
+                              {llmStatus.ollama.has_default_model ? (
+                                <span style={{ color: 'var(--text-muted)' }}> — {llmStatus.ollama.default_model} ready</span>
+                              ) : (
+                                <span style={{ color: 'var(--badge-amber-text)' }}>
+                                  {' '}— run <code className="font-mono">ollama pull {llmStatus.ollama.default_model}</code>
+                                </span>
+                              )}
+                            </div>
+                            {llmStatus.ollama.models.length > 0 && (
+                              <div style={{ color: 'var(--text-muted)' }}>
+                                Installed: {llmStatus.ollama.models.slice(0, 5).join(', ')}
+                                {llmStatus.ollama.models.length > 5 && ` +${llmStatus.ollama.models.length - 5} more`}
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1.5">
+                              <span style={{ color: 'var(--error)', fontSize: '8px' }}>&#x25CF;</span>
+                              <span style={{ color: 'var(--error)' }}>Ollama not running</span>
+                            </div>
+                            <div style={{ color: 'var(--text-muted)' }}>
+                              Install from <a href="https://ollama.com" target="_blank" rel="noreferrer" style={{ color: 'var(--accent)' }}>ollama.com</a>, then run:{' '}
+                              <code className="font-mono" style={{ color: 'var(--accent)' }}>ollama pull {llmStatus.ollama.default_model}</code>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Cloud Provider Keys (via OpenRouter) ── */}
+                <div className="space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>Cloud Model Keys</span>
+                    <span className="text-[10px]" style={{ color: 'var(--text-muted)' }}>Optional — for Claude, GPT, Gemini, etc.</span>
+                  </div>
+                  <div className="rounded border px-3 py-2 text-[11px] leading-relaxed" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+                    NexaQL uses <strong style={{ color: 'var(--text-primary)' }}>Ollama</strong> (local) by default — no API key needed.
+                    To use cloud models, add an <strong style={{ color: 'var(--text-primary)' }}>OpenRouter</strong> key for access to Claude, GPT, Gemini, Llama, and 200+ models through a single API.
+                    Or add a direct provider key if you prefer.
+                  </div>
+                </div>
+
                 {/* Add key form */}
                 {showAddKey ? (
                   <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--badge-amber-border)', backgroundColor: 'var(--bg-secondary)' }}>
@@ -2295,10 +2398,10 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
                         style={inputStyle}
                       >
-                        <option value="anthropic">Anthropic (Claude)</option>
-                        <option value="openai">OpenAI (GPT)</option>
-                        <option value="google">Google (Gemini)</option>
-                        <option value="cohere">Cohere</option>
+                        <option value="openrouter">OpenRouter (Recommended — all models)</option>
+                        <option value="openai">OpenAI (direct)</option>
+                        <option value="anthropic">Anthropic (direct)</option>
+                        <option value="google">Google (direct)</option>
                       </select>
                     </div>
                     <div>
@@ -2317,7 +2420,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                         type="password"
                         value={newKeyValue}
                         onChange={(e) => setNewKeyValue(e.target.value)}
-                        placeholder="sk-ant-..."
+                        placeholder={newKeyProvider === 'openrouter' ? 'sk-or-...' : 'sk-...'}
                         className="w-full rounded border px-2 py-1.5 text-sm font-mono focus:outline-none"
                         style={inputStyle}
                       />
@@ -2353,12 +2456,7 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                 {apiKeysLoading ? (
                   <p className="text-xs" style={{ color: 'var(--text-secondary)' }}>Loading...</p>
                 ) : apiKeys.length === 0 && !showAddKey ? (
-                  <div className="rounded border p-6 text-center" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-                    <p className="text-sm" style={{ color: 'var(--text-secondary)' }}>No API keys configured</p>
-                    <p className="mt-1 text-[11px]" style={{ color: 'var(--text-muted)' }}>
-                      Add an API key to enable Agent Chat and LLM features.
-                    </p>
-                  </div>
+                  null
                 ) : (
                   <div className="space-y-2">
                     {apiKeys.map((k) => (
@@ -2403,11 +2501,15 @@ export default function AdminView({ onBack, onOntologyChanged }: AdminViewProps)
                   </div>
                 )}
 
-                {/* Info note */}
-                <div className="rounded border px-4 py-3 text-[11px] leading-relaxed" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
-                  API keys are stored locally and injected as environment variables on server startup.
-                  They are used by Agent Chat and any LLM-powered features. Keys saved here take
-                  precedence over <code style={{ color: 'var(--accent)' }}>nexaql.yaml</code> configuration.
+                {/* Architecture info */}
+                <div className="rounded border px-4 py-3 text-[11px] leading-relaxed space-y-1.5" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)', color: 'var(--text-secondary)' }}>
+                  <div><strong style={{ color: 'var(--text-primary)' }}>How it works:</strong></div>
+                  <div>&#x2022; <strong>Default:</strong> Ollama runs locally — free, offline, private. No key needed.</div>
+                  <div>&#x2022; <strong>Cloud:</strong> Add an OpenRouter key to access 200+ models (Claude, GPT, Gemini, Llama, etc.) through one API.</div>
+                  <div>&#x2022; <strong>Direct:</strong> Or add a provider key directly (OpenAI, Anthropic, Google).</div>
+                  <div style={{ color: 'var(--text-muted)', marginTop: '4px' }}>
+                    Keys are stored locally in <code style={{ color: 'var(--accent)' }}>api_keys.json</code> and never leave your machine.
+                  </div>
                 </div>
               </div>
             </>

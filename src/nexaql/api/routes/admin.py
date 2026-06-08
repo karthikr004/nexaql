@@ -19,19 +19,11 @@ router = APIRouter(tags=["admin"])
 
 
 async def _save_ontology_to_db(ontology: Ontology) -> None:
-    """Save ontology to the database via the active connector."""
-    from nexaql.api.deps import _get_db_url_from_connectors
-    db_url = _get_db_url_from_connectors()
-    if db_url:
-        from nexaql.ontology.store import PostgresStore
-        store = PostgresStore(db_url)
-        await store.save(ontology, author="admin")
-        invalidate_ontology_cache()
-    else:
-        # Fallback to YAML if no connector
-        from nexaql.ontology.writer import save_ontology
-        save_ontology(ontology, get_config().ontology.path)
-        invalidate_ontology_cache()
+    """Save ontology to the database via the active store."""
+    from nexaql.api.deps import _get_store_for_datasource
+    store = _get_store_for_datasource()
+    await store.save(ontology, author="admin")
+    invalidate_ontology_cache()
 
 
 # ── GET /admin/ontology ────────────────────────────────────────────────────
@@ -42,14 +34,9 @@ async def get_full_ontology(domain: str | None = None) -> JSONResponse:
     """Return the full ontology. If `domain` is specified, load that domain from DB."""
     try:
         if domain:
-            from nexaql.api.deps import _get_db_url_from_connectors
-            db_url = _get_db_url_from_connectors()
-            if db_url:
-                from nexaql.ontology.store import PostgresStore
-                store = PostgresStore(db_url)
-                ont = await store.load(domain)
-            else:
-                return JSONResponse({"error": "No connector configured"}, status_code=400)
+            from nexaql.api.deps import _get_store_for_datasource
+            store = _get_store_for_datasource()
+            ont = await store.load(domain)
         else:
             ont = get_ontology()
         return JSONResponse({

@@ -6,9 +6,26 @@ datasources:
     type: postgresql
     url: postgresql://user:password@localhost:5432/mydb
 llm:
-  provider: anthropic
-  api_key: ${ANTHROPIC_API_KEY}
-  model: claude-sonnet-4-20250514
+  # Choose your LLM provider and model.
+  # NexaQL works with any OpenAI-compatible API.
+  #
+  # Option 1: Ollama (local, free, no API key needed)
+  #   Install: https://ollama.com → pull any model you prefer
+  #   provider: ollama
+  #   model: qwen2.5-coder:7b     # or llama3.2, mistral, etc.
+  #
+  # Option 2: OpenRouter (cloud — Claude, GPT, Gemini, 200+ models, one API key)
+  #   provider: openrouter
+  #   api_key: ${OPENROUTER_API_KEY}
+  #   model: anthropic/claude-sonnet-4-20250514   # or openai/gpt-4o, google/gemini-2.0-flash, etc.
+  #
+  # Option 3: OpenAI directly
+  #   provider: openai
+  #   api_key: ${OPENAI_API_KEY}
+  #   model: gpt-4o-mini
+  #
+  provider: ""    # REQUIRED — set to: ollama, openrouter, or openai
+  model: ""       # REQUIRED — set to your chosen model name
   max_tokens: 4096
   summary_max_tokens: 1024
 server:

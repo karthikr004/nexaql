@@ -134,9 +134,10 @@ SECTION 2.9 — AGGREGATION RULES
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 RULE A — count() takes NO arguments.
-RULE B — Aggregation arguments MUST be field names on the CURRENT node only.
+RULE B — Aggregation arguments MUST be BARE field names on the CURRENT node only. NEVER use dot notation like sum(node.field) — always sum(field).
 RULE C — To aggregate a field on a LINKED node, start from the node that OWNS the field.
 RULE D — Scalar fields mixed with aggregations auto-become GROUP BY.
+RULE E — NEVER use node.field dot notation anywhere. Fields are always bare names.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 3 — ONTOLOGY
@@ -166,7 +167,47 @@ CONSTRAINTS:
   - Only use field names that appear under the correct node
   - Filter syntax: ALWAYS colon (:), NEVER equals (=)
   - Enum values: ALWAYS uppercase matching the ontology exactly
-  - @orderby can reference a calc() alias"""
+  - @orderby can reference a calc() alias
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+SECTION 5 — CRITICAL REMINDER
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+NEVER write SQL. NEVER use SELECT, FROM, WHERE, JOIN, or GROUP BY.
+You MUST use NexaQL graph syntax: query Name {{ node {{ fields }} }}
+
+EXAMPLE 1 — "top 5 suppliers by invoice amount":
+
+This query finds the top 5 suppliers ordered by total invoice count.
+```nexaql
+query TopSuppliers {{
+  suppliers @limit(5) @orderby(invoice_count, DESC) {{
+    name
+    invoice_count: count()
+  }}
+}}
+```
+
+EXAMPLE 2 — "contracts expiring within 30 days":
+
+This query finds contracts expiring in the next 30 days.
+```nexaql
+query ExpiringContracts {{
+  contracts(calc(end_date - CURRENT_DATE): {{gte: 0, lte: 30}}) @orderby(end_date, ASC) {{
+    title
+    end_date
+    status
+    suppliers {{
+      name
+    }}
+  }}
+}}
+```
+
+RULES:
+- NEVER use SQL (SELECT, FROM, WHERE, JOIN). ONLY use query Name {{ node {{ fields }} }}
+- NEVER use dot notation (node.field). Fields are always BARE names.
+- Every response MUST contain query Name {{ ... }}"""
 
 
 # ── Summary prompt ──────────────────────────────────────────────────────────

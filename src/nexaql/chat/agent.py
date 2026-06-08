@@ -1,8 +1,8 @@
 # Copyright (c) 2026-present NexaQL Contributors
 """NexaQL chat agent -- 3-step pipeline: generate -> execute -> summarize.
 
-Uses the Anthropic SDK to drive Claude for query generation and result
-summarization.
+Provider-agnostic: uses the unified LLM layer (chat/llm.py) which routes to
+Ollama (local), OpenRouter (cloud), or any OpenAI-compatible endpoint.
 """
 
 from __future__ import annotations
@@ -10,9 +10,8 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Optional
 
-import anthropic
-
 from nexaql.adapters.base import AdapterResult, QueryAdapter
+from nexaql.chat.llm import chat_completion
 from nexaql.chat.prompts import (
     build_summary_prompt,
     build_system_prompt,
@@ -42,23 +41,6 @@ class ChatResponse:
     error: str | None = None
 
 
-# ── Anthropic helpers ───────────────────────────────────────────────────────
-
-
-def _make_client(llm_config: LLMConfig) -> anthropic.Anthropic:
-    """Create an Anthropic client from config."""
-    return anthropic.Anthropic(api_key=llm_config.api_key)
-
-
-def _extract_text(response: Any) -> str:
-    """Extract text content from an Anthropic message response."""
-    parts = []
-    for block in response.content:
-        if block.type == "text":
-            parts.append(block.text)
-    return "".join(parts)
-
-
 # ── Step 1: Generate query ──────────────────────────────────────────────────
 
 
@@ -68,12 +50,11 @@ async def generate_query(
     ontology: Ontology,
     llm_config: LLMConfig,
 ) -> tuple[str | None, str]:
-    """Ask Claude to generate an NexaQL query from a natural-language question.
+    """Generate a NexaQL query from a natural-language question.
 
     Returns ``(query_text, explanation)`` where *query_text* may be ``None``
-    if Claude could not produce a valid query block.
+    if the LLM could not produce a valid query block.
     """
-    client = _make_client(llm_config)
     system_prompt = build_system_prompt(ontology)
 
     messages: list[dict[str, str]] = []
@@ -81,16 +62,14 @@ async def generate_query(
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": question})
 
-    response = client.messages.create(
-        model=llm_config.model,
-        max_tokens=llm_config.max_tokens,
+    response_text = chat_completion(
+        llm_config,
         system=system_prompt,
-        messages=messages,  # type: ignore[arg-type]
+        messages=messages,
+        max_tokens=llm_config.max_tokens,
     )
 
-    response_text = _extract_text(response)
     query_text = extract_nexaql_query(response_text)
-
     return query_text, response_text
 
 
@@ -129,7 +108,7 @@ async def execute_with_retry(
     question: str,
     explanation: str,
 ) -> tuple[AdapterResult | None, str | None, str]:
-    """Execute a query, retrying once with Claude if it fails.
+    """Execute a query, retrying once with the LLM if it fails.
 
     Returns ``(result, error, final_query_text)``.
     """
@@ -137,9 +116,8 @@ async def execute_with_retry(
     if result is not None:
         return result, None, query_text
 
-    # Retry: ask Claude to fix the query
+    # Retry: ask LLM to fix the query
     try:
-        client = _make_client(llm_config)
         system_prompt = build_system_prompt(ontology)
 
         retry_messages: list[dict[str, str]] = []
@@ -151,19 +129,22 @@ async def execute_with_retry(
             "role": "user",
             "content": (
                 f"The query you generated failed with this error:\n\n{error}\n\n"
-                "Remember: filters use COLON syntax (field: value), NEVER equals (=). "
-                "String values must be quoted. Please provide a corrected NexaQL query."
+                "Common mistakes to fix:\n"
+                "- NEVER use dot notation (node.field). Use edges instead: edge_name {{ field }}\n"
+                "- Filters use COLON syntax (field: value), NEVER equals (=)\n"
+                "- Aggregation arguments are BARE field names: sum(amount), NOT sum(node.amount)\n"
+                "- String values must be double-quoted\n"
+                "Please provide a corrected NexaQL query."
             ),
         })
 
-        retry_response = client.messages.create(
-            model=llm_config.model,
-            max_tokens=llm_config.max_tokens,
+        retry_text = chat_completion(
+            llm_config,
             system=system_prompt,
-            messages=retry_messages,  # type: ignore[arg-type]
+            messages=retry_messages,
+            max_tokens=llm_config.max_tokens,
         )
 
-        retry_text = _extract_text(retry_response)
         retry_query = extract_nexaql_query(retry_text)
 
         if retry_query:
@@ -188,18 +169,14 @@ async def summarize_results(
     row_count: int,
     llm_config: LLMConfig,
 ) -> str:
-    """Ask Claude to produce a natural-language summary of query results."""
-    client = _make_client(llm_config)
-
+    """Produce a natural-language summary of query results."""
     prompt = build_summary_prompt(question, query, rows, columns, row_count)
 
-    response = client.messages.create(
-        model=llm_config.model,
-        max_tokens=llm_config.summary_max_tokens,
+    return chat_completion(
+        llm_config,
         messages=[{"role": "user", "content": prompt}],
+        max_tokens=llm_config.summary_max_tokens,
     )
-
-    return _extract_text(response)
 
 
 # ── Full pipeline ───────────────────────────────────────────────────────────

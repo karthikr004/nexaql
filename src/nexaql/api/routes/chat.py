@@ -45,12 +45,21 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
 
     cfg = get_config()
 
-    # Check LLM API key before doing anything
-    if not cfg.llm.api_key:
+    # Check LLM is configured
+    if not cfg.llm.provider or not cfg.llm.model:
         return ChatResponseBody(
             error=(
-                "Agent Chat requires an LLM API key. "
-                "Set ANTHROPIC_API_KEY in your environment, or add it to nexaql.yaml under llm.api_key."
+                "LLM not configured. Set 'provider' and 'model' in nexaql.yaml "
+                "or configure via the Admin panel. Supported providers: ollama, openrouter, openai."
+            ),
+        )
+
+    # Cloud providers (openrouter, openai) require an API key; Ollama (local) does not
+    if cfg.llm.provider.lower() != "ollama" and not cfg.llm.api_key:
+        return ChatResponseBody(
+            error=(
+                f"Agent Chat with provider '{cfg.llm.provider}' requires an API key. "
+                "Add one in the Admin panel under API Keys, or switch to Ollama (local, no key needed)."
             ),
         )
 

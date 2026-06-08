@@ -6,98 +6,82 @@ interface Props {
   adapterType: string | null;
 }
 
-// ── Syntax highlighters ────────────────────────────────────────────────────────
+// ── Syntax highlighters (single-pass to avoid cascading regex bugs) ───────────
 
-// Process line by line to avoid cascading regex interference on HTML tags
+const _esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+
+const _NEXAQL_KW = new Set(['query', 'mutation']);
+const _NEXAQL_BOOL = new Set(['true', 'false', 'null']);
+
+// Single-pass: one regex matches ALL token types at once — no replacement ever
+// sees another replacement's HTML output.
+const _NEXAQL_TOKEN =
+  /#[^\n]*/g.source + '|' +          // comments
+  /"[^"]*"/g.source + '|' +          // strings
+  /@\w+/g.source + '|' +             // directives
+  /\b[a-z_]\w*\s*(?=:)/g.source + '|' + // field key (lookahead for colon)
+  /\b\w+\b/g.source + '|' +          // words (keywords, bools, identifiers)
+  /\d+(?:\.\d+)?/g.source;           // numbers
+const _NEXAQL_RE = new RegExp(_NEXAQL_TOKEN, 'g');
+
 function highlightNexaQL(code: string): string {
-  return code
-    .split('\n')
-    .map((rawLine) => {
-      // Escape HTML special chars in this line's text
-      let line = rawLine.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-      // Whole-line comments
-      if (/^\s*#/.test(line)) {
-        return `<span style="color: var(--text-secondary); font-style: italic">${line}</span>`;
-      }
-
-      // query/mutation keyword + query name (same line, single pass)
-      line = line.replace(
-        /\b(query|mutation)\b(\s+)(\w+)/g,
-        `<span style="color: #a78bfa; font-weight: 600">$1</span>$2<span style="color: var(--accent); font-weight: 600">$3</span>`,
-      );
-
-      // Directives @word
-      line = line.replace(/@(\w+)/g, `<span style="color: #f97316">@$1</span>`);
-
-      // Aggregation aliases / field aliases  word: (before any parens)
-      line = line.replace(/\b([a-z_]\w*)\s*:/g, `<span style="color: var(--success)">$1</span>:`);
-
-      // String values "..."
-      line = line.replace(/"([^"]*)"/g, `<span style="color: #fb923c">"$1"</span>`);
-
-      // Numbers
-      line = line.replace(/\b(\d+(?:\.\d+)?)\b/g, `<span style="color: #22d3ee">$1</span>`);
-
-      // Booleans / null
-      line = line.replace(/\b(true|false|null)\b/g, `<span style="color: #a78bfa">$1</span>`);
-
-      return line;
-    })
-    .join('\n');
+  return _esc(code).replace(_NEXAQL_RE, (tok) => {
+    if (tok.startsWith('#'))
+      return `<span style="color:var(--text-secondary);font-style:italic">${tok}</span>`;
+    if (tok.startsWith('"'))
+      return `<span style="color:#fb923c">${tok}</span>`;
+    if (tok.startsWith('@'))
+      return `<span style="color:#f97316">${tok}</span>`;
+    if (/^[a-z_]\w*$/.test(tok) && _NEXAQL_KW.has(tok))
+      return `<span style="color:#a78bfa;font-weight:600">${tok}</span>`;
+    if (/^[a-z_]\w*$/.test(tok) && _NEXAQL_BOOL.has(tok))
+      return `<span style="color:#a78bfa">${tok}</span>`;
+    // field key (matched by lookahead for colon)
+    if (/^[a-z_]\w*$/.test(tok))
+      return `<span style="color:var(--success)">${tok}</span>`;
+    if (/^\d/.test(tok))
+      return `<span style="color:#22d3ee">${tok}</span>`;
+    return tok;
+  });
 }
 
+const _SQL_KW = new Set([
+  'SELECT','FROM','WHERE','JOIN','LEFT','INNER','RIGHT','OUTER','CROSS',
+  'GROUP','ORDER','BY','HAVING','LIMIT','OFFSET','ON','AND','OR','NOT',
+  'IN','IS','NULL','AS','DISTINCT','COUNT','SUM','AVG','MIN','MAX',
+  'EXISTS','INTERVAL','CURRENT_DATE','TRUE','FALSE','CASE','WHEN','THEN',
+  'ELSE','END','BETWEEN','LIKE','ILIKE','UNION','ALL','INSERT','UPDATE',
+  'DELETE','SET','VALUES','INTO','CREATE','TABLE','INDEX','ALTER','DROP',
+  'DESC','ASC','COALESCE','CAST','OVER','PARTITION','ROWS','RANGE',
+]);
+
+const _SQL_TOKEN =
+  /'[^']*'/g.source + '|' +          // strings
+  /\b\d+(?:\.\d+)?\b/g.source + '|' + // numbers
+  /\b[A-Za-z_]\w*\b/g.source + '|' + // words
+  /[a-z]\w*\./g.source;              // table aliases (word.)
+const _SQL_RE = new RegExp(_SQL_TOKEN, 'g');
+
 function highlightSQL(sql: string): string {
-  const keywords = [
-    'SELECT',
-    'FROM',
-    'WHERE',
-    'JOIN',
-    'LEFT JOIN',
-    'INNER JOIN',
-    'GROUP BY',
-    'ORDER BY',
-    'HAVING',
-    'LIMIT',
-    'OFFSET',
-    'ON',
-    'AND',
-    'OR',
-    'NOT',
-    'IN',
-    'IS',
-    'NULL',
-    'AS',
-    'DISTINCT',
-    'COUNT',
-    'SUM',
-    'AVG',
-    'MIN',
-    'MAX',
-    'EXISTS',
-    'INTERVAL',
-    'CURRENT_DATE',
-    'TRUE',
-    'FALSE',
-  ];
-
-  let out = sql.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-  keywords.forEach((kw) => {
-    out = out.replace(new RegExp(`\\b${kw}\\b`, 'g'), `<span style="color: #a78bfa; font-weight: 600">${kw}</span>`);
+  return _esc(sql).replace(_SQL_RE, (tok) => {
+    if (tok.startsWith("'"))
+      return `<span style="color:#fb923c">${tok}</span>`;
+    if (/^\d/.test(tok))
+      return `<span style="color:#22d3ee">${tok}</span>`;
+    if (tok.endsWith('.'))
+      return `<span style="color:var(--text-muted)">${tok}</span>`;
+    if (_SQL_KW.has(tok.toUpperCase()))
+      return `<span style="color:#a78bfa;font-weight:600">${tok}</span>`;
+    return tok;
   });
-  out = out.replace(/'[^']*'/g, (m) => `<span style="color: #fb923c">${m}</span>`);
-  out = out.replace(/\b(\d+)\b/g, `<span style="color: #22d3ee">$1</span>`);
-  out = out.replace(/\b([a-z][a-z0-9]*)\./g, `<span style="color: var(--text-muted)">$1.</span>`);
-  return out;
 }
 
 function highlightURL(url: string): string {
-  const out = url.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  return out.replace(/^(GET|POST)\s+(.+)$/, (_, method, rest) => {
+  const safe = _esc(url);
+  return safe.replace(/^(GET|POST)\s+(.+)$/, (_, method, rest) => {
     const qIdx = rest.indexOf('?');
     if (qIdx === -1) {
-      return `<span style="color: #a78bfa; font-weight: 600">${method}</span> <span style="color: var(--accent)">${rest}</span>`;
+      return `<span style="color:#a78bfa;font-weight:600">${method}</span> <span style="color:var(--accent)">${rest}</span>`;
     }
     const path = rest.slice(0, qIdx);
     const params = rest
@@ -105,10 +89,10 @@ function highlightURL(url: string): string {
       .split('&amp;')
       .map((p: string) => {
         const [k, v] = p.split('=');
-        return `<span style="color: #22d3ee">${k}</span>=<span style="color: #fb923c">${v ?? ''}</span>`;
+        return `<span style="color:#22d3ee">${k}</span>=<span style="color:#fb923c">${v ?? ''}</span>`;
       })
-      .join(`<span style="color: var(--text-secondary)">&amp;</span>`);
-    return `<span style="color: #a78bfa; font-weight: 600">${method}</span> <span style="color: var(--accent)">${path}</span><span style="color: var(--text-secondary)">?</span>${params}`;
+      .join(`<span style="color:var(--text-secondary)">&amp;</span>`);
+    return `<span style="color:#a78bfa;font-weight:600">${method}</span> <span style="color:var(--accent)">${path}</span><span style="color:var(--text-secondary)">?</span>${params}`;
   });
 }
 

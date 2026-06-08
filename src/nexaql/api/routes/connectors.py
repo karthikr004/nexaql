@@ -104,6 +104,7 @@ def get_api_key(provider: str) -> str | None:
     env_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
     }
@@ -400,8 +401,14 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
 
     # Save ontology to the database (always DB, no YAML files)
     try:
-        from nexaql.ontology.store import PostgresStore
-        store = PostgresStore(connection_url)
+        from nexaql.ontology.store import get_store, reset_store
+        reset_store()  # clear cached store since we may have a new connection
+        if connection_url.startswith("postgresql"):
+            from nexaql.ontology.store import PostgresStore
+            store = PostgresStore(connection_url)
+        else:
+            from nexaql.ontology.store import DuckDBStore
+            store = DuckDBStore(connection_url)
         await store.save(ontology, author="admin-generate")
     except Exception as e:
         return JSONResponse({
@@ -515,6 +522,7 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
     env_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
     }
@@ -522,8 +530,35 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
     if env_var:
         os.environ[env_var] = req.key.strip()
 
-    # Reload config so llm.api_key picks up the new env var
+    # Also update nexaql.yaml to switch provider/model when a cloud key is saved
+    try:
+        import yaml as _yaml
+        from nexaql.chat.llm import DEFAULT_MODELS
+        config_path = os.environ.get("NEXAQL_CONFIG", "nexaql.yaml")
+        if os.path.exists(config_path):
+            with open(config_path) as f:
+                raw_config = _yaml.safe_load(f) or {}
+            llm_section = raw_config.get("llm", {})
+            # If saving an openrouter key, switch provider to openrouter
+            if provider_key == "openrouter":
+                llm_section["provider"] = "openrouter"
+                llm_section["api_key"] = f"${{OPENROUTER_API_KEY}}"
+                if llm_section.get("model", "").startswith("qwen3:"):
+                    llm_section["model"] = DEFAULT_MODELS.get("openrouter", "qwen/qwen3-4b:free")
+            raw_config["llm"] = llm_section
+            with open(config_path, "w") as f:
+                f.write("# NexaQL configuration — updated by Admin\n")
+                _yaml.dump(raw_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    except Exception:
+        pass
+
+    # Reload config + clear LLM client cache
     reload_config()
+    try:
+        from nexaql.chat.llm import invalidate_client_cache
+        invalidate_client_cache()
+    except Exception:
+        pass
 
     return JSONResponse({
         "status": "saved",
@@ -547,6 +582,7 @@ async def delete_api_key(provider: str) -> JSONResponse:
     env_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
     }

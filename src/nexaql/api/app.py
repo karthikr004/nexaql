@@ -21,6 +21,7 @@ def _load_api_keys_into_env() -> None:
     env_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
     }
@@ -65,6 +66,27 @@ def create_app() -> FastAPI:
     @app.get("/api/health")
     async def health() -> JSONResponse:
         return JSONResponse({"status": "ok"})
+
+    # ── LLM status endpoint ────────────────────────────────────────────────
+    @app.get("/api/llm/status")
+    async def llm_status() -> JSONResponse:
+        from nexaql.chat.llm import PROVIDER_BASE_URLS, check_ollama_status
+        current_cfg = get_config()
+        llm = current_cfg.llm
+        provider = llm.provider.lower()
+
+        result: dict = {
+            "provider": provider,
+            "model": llm.model,
+            "base_url": llm.base_url or PROVIDER_BASE_URLS.get(provider, ""),
+            "has_api_key": bool(llm.api_key),
+        }
+
+        # Check Ollama status if relevant
+        if provider == "ollama":
+            result["ollama"] = check_ollama_status()
+
+        return JSONResponse(result)
 
     # ── Serve frontend static files ───────────────────────────────────────
     # Check bundled static dir first (pip install), then local frontend/dist (dev)
