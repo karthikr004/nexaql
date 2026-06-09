@@ -4,6 +4,8 @@ interface Props {
   nexaqlQuery: string | null;
   queryPreview: string | null;
   adapterType: string | null;
+  intent: Record<string, unknown> | null;
+  generationMode: string | null;
 }
 
 // ── Syntax highlighters (single-pass to avoid cascading regex bugs) ───────────
@@ -76,6 +78,15 @@ function highlightSQL(sql: string): string {
   });
 }
 
+// Simple JSON syntax highlighting
+function highlightJSON(json: string): string {
+  return _esc(json)
+    .replace(/"([^"]+)"(?=\s*:)/g, '<span style="color:#22d3ee">"$1"</span>') // keys
+    .replace(/:\s*"([^"]*)"/g, ': <span style="color:#fb923c">"$1"</span>') // string values
+    .replace(/:\s*(\d+(?:\.\d+)?)/g, ': <span style="color:#a78bfa">$1</span>') // numbers
+    .replace(/:\s*(true|false|null)/g, ': <span style="color:#a78bfa;font-weight:600">$1</span>'); // booleans
+}
+
 function highlightURL(url: string): string {
   const safe = _esc(url);
   return safe.replace(/^(GET|POST)\s+(.+)$/, (_, method, rest) => {
@@ -101,6 +112,12 @@ const ADAPTER_LABELS: Record<string, { label: string; colorVar: string }> = {
   rest: { label: 'REST API', colorVar: '#a78bfa' },
   mysql: { label: 'MySQL', colorVar: '#f97316' },
   mongodb: { label: 'MongoDB', colorVar: 'var(--success)' },
+};
+
+const MODE_LABELS: Record<string, { label: string; color: string }> = {
+  intent: { label: 'Intent', color: 'var(--success)' },
+  raw: { label: 'Raw', color: '#f97316' },
+  raw_fallback: { label: 'Raw (fallback)', color: '#f97316' },
 };
 
 // ── CopyButton ─────────────────────────────────────────────────────────────────
@@ -131,104 +148,160 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
-// ── Component ──────────────────────────────────────────────────────────────────
+// ── Collapsible section ──────────────────────────────────────────────────────
 
-export default function ChatQueryPanel({ nexaqlQuery, queryPreview, adapterType }: Props) {
-  const adapterMeta: { label: string; colorVar: string } = (adapterType ? ADAPTER_LABELS[adapterType] : undefined) ?? {
-    label: adapterType ?? 'Query',
-    colorVar: 'var(--text-secondary)',
-  };
-
-  const isREST = adapterType === 'rest';
-
-  const nexaqlHighlighted = nexaqlQuery ? highlightNexaQL(nexaqlQuery) : null;
-  const previewHighlighted = queryPreview ? (isREST ? highlightURL(queryPreview) : highlightSQL(queryPreview)) : null;
+function Section({
+  title,
+  badge,
+  badgeColor,
+  copyText,
+  defaultOpen = true,
+  children,
+}: {
+  title: string;
+  badge?: string;
+  badgeColor?: string;
+  copyText?: string;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
 
   return (
-    <div className="flex h-full flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
-      {/* ── NexaQL Query ── */}
+    <div>
       <div
-        className="flex shrink-0 items-center justify-between border-b px-3 py-2"
+        className="flex shrink-0 items-center justify-between border-b px-3 py-2 cursor-pointer select-none"
         style={{ borderColor: 'var(--border)' }}
+        onClick={() => setOpen((o) => !o)}
       >
         <div className="flex items-center gap-2">
+          <span
+            className="text-[10px] transition-transform"
+            style={{ color: 'var(--text-secondary)', display: 'inline-block', transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
+          >
+            ▶
+          </span>
           <span
             className="font-semibold text-[10px] uppercase tracking-widest"
             style={{ color: 'var(--text-secondary)' }}
           >
-            NexaQL Query
+            {title}
           </span>
-          <span
-            className="rounded border px-1.5 py-0.5 text-[9px]"
-            style={{
-              borderColor: 'var(--border)',
-              backgroundColor: 'var(--bg-elevated)',
-              color: 'var(--accent)',
-            }}
-          >
-            generated
-          </span>
-        </div>
-        {nexaqlQuery && <CopyButton text={nexaqlQuery} />}
-      </div>
-
-      <div className="shrink-0 overflow-auto p-3" style={{ maxHeight: '45%' }}>
-        {nexaqlHighlighted ? (
-          <pre
-            className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
-            style={{ color: 'var(--text-primary)' }}
-            dangerouslySetInnerHTML={{ __html: nexaqlHighlighted }}
-          />
-        ) : (
-          <div className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
-            Send a message to generate a query
-          </div>
-        )}
-      </div>
-
-      {/* ── Divider ── */}
-      <div className="shrink-0 border-t" style={{ borderColor: 'var(--border)' }} />
-
-      {/* ── Translated preview ── */}
-      <div
-        className="flex shrink-0 items-center justify-between border-b px-3 py-2"
-        style={{ borderColor: 'var(--border)' }}
-      >
-        <div className="flex items-center gap-2">
-          <span
-            className="font-semibold text-[10px] uppercase tracking-widest"
-            style={{ color: 'var(--text-secondary)' }}
-          >
-            {isREST ? 'Request' : 'SQL'}
-          </span>
-          {adapterType && (
+          {badge && (
             <span
               className="rounded border px-1.5 py-0.5 text-[9px]"
               style={{
                 borderColor: 'var(--border)',
                 backgroundColor: 'var(--bg-elevated)',
-                color: adapterMeta.colorVar,
+                color: badgeColor ?? 'var(--accent)',
               }}
             >
-              {adapterMeta.label}
+              {badge}
             </span>
           )}
         </div>
-        {queryPreview && <CopyButton text={queryPreview} />}
-      </div>
-
-      <div className="flex-1 overflow-auto p-3">
-        {previewHighlighted ? (
-          <pre
-            className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
-            style={{ color: 'var(--text-primary)' }}
-            dangerouslySetInnerHTML={{ __html: previewHighlighted }}
-          />
-        ) : (
-          <div className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
-            {nexaqlQuery ? 'No translation available' : 'Translation will appear here'}
+        {copyText && open && (
+          <div onClick={(e) => e.stopPropagation()}>
+            <CopyButton text={copyText} />
           </div>
         )}
+      </div>
+      {open && children}
+    </div>
+  );
+}
+
+// ── Component ──────────────────────────────────────────────────────────────────
+
+export default function ChatQueryPanel({ nexaqlQuery, queryPreview, adapterType, intent, generationMode }: Props) {
+  const adapterMeta: { label: string; colorVar: string } = (adapterType ? ADAPTER_LABELS[adapterType] : undefined) ?? {
+    label: adapterType ?? 'Query',
+    colorVar: 'var(--text-secondary)',
+  };
+
+  const modeMeta = generationMode ? MODE_LABELS[generationMode] ?? { label: generationMode, color: 'var(--text-secondary)' } : null;
+
+  const isREST = adapterType === 'rest';
+
+  const nexaqlHighlighted = nexaqlQuery ? highlightNexaQL(nexaqlQuery) : null;
+  const previewHighlighted = queryPreview ? (isREST ? highlightURL(queryPreview) : highlightSQL(queryPreview)) : null;
+  const intentJSON = intent ? JSON.stringify(intent, null, 2) : null;
+  const intentHighlighted = intentJSON ? highlightJSON(intentJSON) : null;
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden" style={{ backgroundColor: 'var(--bg-primary)' }}>
+      <div className="flex-1 overflow-y-auto">
+
+        {/* ── LLM Intent JSON (Option B only) ── */}
+        {intentHighlighted && (
+          <Section
+            title="LLM Intent"
+            badge={modeMeta?.label}
+            badgeColor={modeMeta?.color}
+            copyText={intentJSON!}
+            defaultOpen={true}
+          >
+            <div className="overflow-auto p-3" style={{ maxHeight: '35%' }}>
+              <pre
+                className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+                style={{ color: 'var(--text-primary)' }}
+                dangerouslySetInnerHTML={{ __html: intentHighlighted }}
+              />
+            </div>
+          </Section>
+        )}
+
+        {/* ── Divider ── */}
+        {intentHighlighted && <div className="shrink-0 border-t" style={{ borderColor: 'var(--border)' }} />}
+
+        {/* ── NexaQL Query ── */}
+        <Section
+          title="NexaQL Query"
+          badge={!intentHighlighted ? (modeMeta?.label ?? 'generated') : 'generated'}
+          badgeColor={!intentHighlighted ? modeMeta?.color : 'var(--accent)'}
+          copyText={nexaqlQuery ?? undefined}
+          defaultOpen={true}
+        >
+          <div className="overflow-auto p-3" style={{ maxHeight: '35%' }}>
+            {nexaqlHighlighted ? (
+              <pre
+                className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+                style={{ color: 'var(--text-primary)' }}
+                dangerouslySetInnerHTML={{ __html: nexaqlHighlighted }}
+              />
+            ) : (
+              <div className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+                Send a message to generate a query
+              </div>
+            )}
+          </div>
+        </Section>
+
+        {/* ── Divider ── */}
+        <div className="shrink-0 border-t" style={{ borderColor: 'var(--border)' }} />
+
+        {/* ── Translated preview (SQL / REST) ── */}
+        <Section
+          title={isREST ? 'Request' : 'SQL'}
+          badge={adapterType ? adapterMeta.label : undefined}
+          badgeColor={adapterMeta.colorVar}
+          copyText={queryPreview ?? undefined}
+          defaultOpen={true}
+        >
+          <div className="overflow-auto p-3">
+            {previewHighlighted ? (
+              <pre
+                className="whitespace-pre-wrap font-mono text-[11px] leading-relaxed"
+                style={{ color: 'var(--text-primary)' }}
+                dangerouslySetInnerHTML={{ __html: previewHighlighted }}
+              />
+            ) : (
+              <div className="mt-4 text-center font-mono text-xs" style={{ color: 'var(--text-secondary)' }}>
+                {nexaqlQuery ? 'No translation available' : 'Translation will appear here'}
+              </div>
+            )}
+          </div>
+        </Section>
       </div>
     </div>
   );

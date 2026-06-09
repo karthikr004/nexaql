@@ -689,6 +689,8 @@ export default function Playground() {
               nexaqlQuery={lastChatTurn?.nexaqlQuery ?? null}
               queryPreview={lastChatTurn?.queryPreview ?? null}
               adapterType={lastChatTurn?.adapterType ?? null}
+              intent={lastChatTurn?.intent ?? null}
+              generationMode={lastChatTurn?.generationMode ?? null}
             />
           ) : (
             <SQLPreview

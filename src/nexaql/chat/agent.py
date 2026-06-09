@@ -1,18 +1,32 @@
 # Copyright (c) 2026-present NexaQL Contributors
 """NexaQL chat agent -- 3-step pipeline: generate -> execute -> summarize.
 
+Supports two modes:
+  - "intent" (Option B, default): LLM extracts structured JSON intent,
+    deterministic builder constructs NexaQL. Works with small/cheap models.
+  - "raw" (Option A, legacy): LLM generates raw NexaQL strings directly.
+    Requires larger models or fine-tuning for accuracy.
+
 Provider-agnostic: uses the unified LLM layer (chat/llm.py) which routes to
 Ollama (local), OpenRouter (cloud), or any OpenAI-compatible endpoint.
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 from nexaql.adapters.base import AdapterResult, QueryAdapter
+from nexaql.chat.intent import (
+    QueryIntent,
+    build_nexaql,
+    extract_intent_json,
+    parse_intent,
+)
 from nexaql.chat.llm import chat_completion
 from nexaql.chat.prompts import (
+    build_intent_system_prompt,
     build_summary_prompt,
     build_system_prompt,
     extract_nexaql_query,
@@ -22,6 +36,11 @@ from nexaql.engine.parser import ParseError, parse
 from nexaql.engine.types import ColumnMeta, NodeShape
 from nexaql.engine.validator import validate
 from nexaql.ontology import Ontology
+
+logger = logging.getLogger(__name__)
+
+# Generation mode type
+GenerationMode = Literal["intent", "raw"]
 
 
 # ── Response types ──────────────────────────────────────────────────────────
@@ -39,18 +58,67 @@ class ChatResponse:
     shape: NodeShape | None = None
     summary: str | None = None
     error: str | None = None
+    # New: expose the intent for debugging / UI display
+    intent: dict[str, Any] | None = None
+    generation_mode: str | None = None
 
 
-# ── Step 1: Generate query ──────────────────────────────────────────────────
+# ── Step 1a: Generate via intent extraction (Option B) ──────────────────────
 
 
-async def generate_query(
+async def generate_query_via_intent(
+    question: str,
+    history: list[dict[str, str]],
+    ontology: Ontology,
+    llm_config: LLMConfig,
+) -> tuple[str | None, str, dict[str, Any] | None]:
+    """Generate a NexaQL query via structured intent extraction.
+
+    The LLM outputs a JSON intent, and the deterministic builder constructs
+    the NexaQL query. This guarantees syntactic correctness.
+
+    Returns ``(query_text, llm_response, intent_dict)``.
+    """
+    system_prompt = build_intent_system_prompt(ontology)
+
+    messages: list[dict[str, str]] = []
+    for m in history:
+        messages.append({"role": m["role"], "content": m["content"]})
+    messages.append({"role": "user", "content": question})
+
+    response_text = chat_completion(
+        llm_config,
+        system=system_prompt,
+        messages=messages,
+        max_tokens=llm_config.max_tokens,
+    )
+
+    # Extract JSON intent from LLM response
+    intent_data = extract_intent_json(response_text)
+    if intent_data is None:
+        logger.warning("Failed to extract intent JSON from LLM response")
+        return None, response_text, None
+
+    try:
+        intent = parse_intent(intent_data)
+        query_text = build_nexaql(intent)
+        logger.info(f"Intent builder generated query: {query_text[:200]}")
+        return query_text, response_text, intent_data
+    except (KeyError, TypeError, ValueError) as e:
+        logger.warning(f"Failed to build query from intent: {e}")
+        return None, response_text, intent_data
+
+
+# ── Step 1b: Generate via raw NexaQL (Option A, legacy) ─────────────────────
+
+
+async def generate_query_raw(
     question: str,
     history: list[dict[str, str]],
     ontology: Ontology,
     llm_config: LLMConfig,
 ) -> tuple[str | None, str]:
-    """Generate a NexaQL query from a natural-language question.
+    """Generate a NexaQL query directly from the LLM (legacy mode).
 
     Returns ``(query_text, explanation)`` where *query_text* may be ``None``
     if the LLM could not produce a valid query block.
@@ -99,7 +167,69 @@ async def _try_execute(
         return None, str(e)
 
 
-async def execute_with_retry(
+async def execute_with_retry_intent(
+    query_text: str,
+    ontology: Ontology,
+    adapter: QueryAdapter,
+    llm_config: LLMConfig,
+    history: list[dict[str, str]],
+    question: str,
+    original_response: str,
+    intent_data: dict[str, Any] | None,
+) -> tuple[AdapterResult | None, str | None, str, dict[str, Any] | None]:
+    """Execute a query built from intent, retrying with corrected intent on failure.
+
+    Returns ``(result, error, final_query_text, final_intent)``.
+    """
+    result, error = await _try_execute(query_text, ontology, adapter)
+    if result is not None:
+        return result, None, query_text, intent_data
+
+    # Retry: ask LLM to fix the intent JSON
+    try:
+        system_prompt = build_intent_system_prompt(ontology)
+
+        retry_messages: list[dict[str, str]] = []
+        for m in history:
+            retry_messages.append({"role": m["role"], "content": m["content"]})
+        retry_messages.append({"role": "user", "content": question})
+        retry_messages.append({"role": "assistant", "content": original_response})
+        retry_messages.append({
+            "role": "user",
+            "content": (
+                f"The query built from your intent failed with this error:\n\n{error}\n\n"
+                "Please fix the JSON intent. Common issues:\n"
+                "- Use exact field names from the ontology\n"
+                "- Use exact node names from the ontology\n"
+                "- Only filter on fields marked as filterable\n"
+                "- Enum values must be UPPERCASE and match exactly\n"
+                "Respond with the corrected JSON only."
+            ),
+        })
+
+        retry_text = chat_completion(
+            llm_config,
+            system=system_prompt,
+            messages=retry_messages,
+            max_tokens=llm_config.max_tokens,
+        )
+
+        retry_intent_data = extract_intent_json(retry_text)
+        if retry_intent_data:
+            retry_intent = parse_intent(retry_intent_data)
+            retry_query = build_nexaql(retry_intent)
+
+            result2, error2 = await _try_execute(retry_query, ontology, adapter)
+            if result2 is not None:
+                return result2, None, retry_query, retry_intent_data
+            return None, error2, retry_query, retry_intent_data
+    except Exception:
+        pass  # keep original error
+
+    return None, error, query_text, intent_data
+
+
+async def execute_with_retry_raw(
     query_text: str,
     ontology: Ontology,
     adapter: QueryAdapter,
@@ -108,7 +238,7 @@ async def execute_with_retry(
     question: str,
     explanation: str,
 ) -> tuple[AdapterResult | None, str | None, str]:
-    """Execute a query, retrying once with the LLM if it fails.
+    """Execute a query, retrying once with the LLM if it fails (legacy mode).
 
     Returns ``(result, error, final_query_text)``.
     """
@@ -182,6 +312,17 @@ async def summarize_results(
 # ── Full pipeline ───────────────────────────────────────────────────────────
 
 
+def _get_generation_mode(llm_config: LLMConfig) -> GenerationMode:
+    """Determine which generation mode to use.
+
+    Checks llm_config for a 'generation_mode' attribute. Defaults to 'intent'.
+    """
+    mode = getattr(llm_config, "generation_mode", "intent")
+    if mode in ("intent", "raw"):
+        return mode
+    return "intent"
+
+
 async def ask(
     question: str,
     history: list[dict[str, str]],
@@ -209,8 +350,99 @@ async def ask(
     ChatResponse
         The complete response including query, results, and summary.
     """
+    mode = _get_generation_mode(llm_config)
+
+    if mode == "intent":
+        return await _ask_intent(question, history, ontology, adapter, llm_config)
+    else:
+        return await _ask_raw(question, history, ontology, adapter, llm_config)
+
+
+async def _ask_intent(
+    question: str,
+    history: list[dict[str, str]],
+    ontology: Ontology,
+    adapter: QueryAdapter | None,
+    llm_config: LLMConfig,
+) -> ChatResponse:
+    """Intent-based pipeline (Option B): extract → build → execute → summarize."""
+
+    # Step 1: Extract intent and build query
+    query_text, llm_response, intent_data = await generate_query_via_intent(
+        question, history, ontology, llm_config
+    )
+
+    if query_text is None:
+        # Fallback to raw mode if intent extraction fails
+        logger.warning("Intent extraction failed, falling back to raw mode")
+        response = await _ask_raw(question, history, ontology, adapter, llm_config)
+        response.generation_mode = "raw_fallback"
+        return response
+
+    # Step 2: Execute (with retry)
+    if adapter is None:
+        return ChatResponse(
+            explanation=llm_response,
+            nexaql_query=query_text,
+            summary=f"Generated query from intent (no datasource to execute).",
+            intent=intent_data,
+            generation_mode="intent",
+            error="No datasource configured -- cannot execute query",
+        )
+
+    exec_result, exec_error, final_query, final_intent = await execute_with_retry_intent(
+        query_text=query_text,
+        ontology=ontology,
+        adapter=adapter,
+        llm_config=llm_config,
+        history=history,
+        question=question,
+        original_response=llm_response,
+        intent_data=intent_data,
+    )
+
+    # Step 3: Summarize
+    summary = llm_response
+    if exec_result is not None and exec_error is None:
+        try:
+            summary = await summarize_results(
+                question=question,
+                query=final_query,
+                rows=exec_result.rows,
+                columns=exec_result.columns,
+                row_count=exec_result.row_count,
+                llm_config=llm_config,
+            )
+        except Exception:
+            pass
+
+    return ChatResponse(
+        explanation=llm_response,
+        nexaql_query=final_query,
+        query_preview=exec_result.query_preview if exec_result else None,
+        adapter_type=exec_result.adapter_type if exec_result else None,
+        rows=exec_result.rows if exec_result else [],
+        columns=exec_result.columns if exec_result else [],
+        row_count=exec_result.row_count if exec_result else 0,
+        shape=exec_result.shape if exec_result else None,
+        summary=summary,
+        error=exec_error,
+        intent=final_intent,
+        generation_mode="intent",
+    )
+
+
+async def _ask_raw(
+    question: str,
+    history: list[dict[str, str]],
+    ontology: Ontology,
+    adapter: QueryAdapter | None,
+    llm_config: LLMConfig,
+) -> ChatResponse:
+    """Raw NexaQL pipeline (Option A, legacy): generate → execute → summarize."""
+
     # Step 1: Generate query
-    query_text, explanation = await generate_query(
+    query_text, explanation = await generate_query_raw(
         question, history, ontology, llm_config
     )
 
@@ -219,6 +451,7 @@ async def ask(
             explanation=explanation,
             nexaql_query=None,
             summary=explanation,
+            generation_mode="raw",
         )
 
     # Step 2: Execute (with retry)
@@ -228,9 +461,10 @@ async def ask(
             nexaql_query=query_text,
             summary=explanation,
             error="No datasource configured -- cannot execute query",
+            generation_mode="raw",
         )
 
-    exec_result, exec_error, final_query = await execute_with_retry(
+    exec_result, exec_error, final_query = await execute_with_retry_raw(
         query_text=query_text,
         ontology=ontology,
         adapter=adapter,
@@ -253,7 +487,7 @@ async def ask(
                 llm_config=llm_config,
             )
         except Exception:
-            pass  # fall through to explanation text
+            pass
 
     return ChatResponse(
         explanation=explanation,
@@ -266,4 +500,5 @@ async def ask(
         shape=exec_result.shape if exec_result else None,
         summary=summary,
         error=exec_error,
+        generation_mode="raw",
     )

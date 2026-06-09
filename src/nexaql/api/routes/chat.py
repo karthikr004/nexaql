@@ -36,6 +36,9 @@ class ChatResponseBody(BaseModel):
     shape: Any | None = None
     summary: str | None = None
     error: str | None = None
+    # Pipeline trace fields for debugging
+    intent: dict[str, Any] | None = None
+    generationMode: str | None = None
 
 
 @router.post("/chat")
@@ -54,14 +57,20 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
             ),
         )
 
-    # Cloud providers (openrouter, openai) require an API key; Ollama (local) does not
+    # Cloud providers (openrouter, openai, anthropic) require an API key; Ollama (local) does not
     if cfg.llm.provider.lower() != "ollama" and not cfg.llm.api_key:
-        return ChatResponseBody(
-            error=(
-                f"Agent Chat with provider '{cfg.llm.provider}' requires an API key. "
-                "Add one in the Admin panel under API Keys, or switch to Ollama (local, no key needed)."
-            ),
-        )
+        # Try loading from api_keys.json
+        from nexaql.api.routes.connectors import get_api_key
+        saved_key = get_api_key(cfg.llm.provider)
+        if saved_key:
+            cfg.llm.api_key = saved_key
+        else:
+            return ChatResponseBody(
+                error=(
+                    f"Agent Chat with provider '{cfg.llm.provider}' requires an API key. "
+                    "Add one in the Admin panel under API Keys, or switch to Ollama (local, no key needed)."
+                ),
+            )
 
     ontology = get_ontology()
 
@@ -98,4 +107,6 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
         shape=result.shape,
         summary=result.summary,
         error=result.error,
+        intent=result.intent,
+        generationMode=result.generation_mode,
     )

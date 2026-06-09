@@ -1,14 +1,15 @@
 # Copyright (c) 2026-present NexaQL Contributors
 """Provider-agnostic LLM client layer.
 
-Uses the OpenAI SDK as a universal client. All providers are accessed through
-OpenAI-compatible chat completion APIs:
+Supported providers:
 
-  - Ollama (default, local):  http://localhost:11434/v1
-  - OpenRouter (cloud):       https://openrouter.ai/api/v1  → routes to Claude, GPT, Gemini, etc.
-  - OpenAI (direct):          https://api.openai.com/v1
+  - Ollama (local):       http://localhost:11434/v1  — free, private, no key needed
+  - OpenRouter (cloud):   https://openrouter.ai/api/v1  — one key for Claude, GPT, Gemini, etc.
+  - OpenAI (direct):      https://api.openai.com/v1
+  - Anthropic (direct):   Native SDK — use your Anthropic API key directly for Claude
 
-This keeps the codebase model-agnostic with zero provider-specific code.
+Ollama, OpenRouter, and OpenAI use the OpenAI SDK (OpenAI-compatible APIs).
+Anthropic uses its own SDK since its API format differs from OpenAI's.
 """
 
 from __future__ import annotations
@@ -28,7 +29,7 @@ _THINK_RE = re.compile(r"<think>[\s\S]*?</think>\s*", re.IGNORECASE)
 
 log = logging.getLogger(__name__)
 
-# ── Provider base URLs ────────────────────────────────────────────────────────
+# ── Provider base URLs (OpenAI-compatible providers only) ────────────────────
 
 PROVIDER_BASE_URLS: dict[str, str] = {
     "ollama": "http://localhost:11434/v1",
@@ -41,11 +42,12 @@ DEFAULT_MODELS: dict[str, str] = {
     "ollama": "",
     "openrouter": "",
     "openai": "",
+    "anthropic": "claude-sonnet-4-20250514",
 }
 
 # ── Client cache ──────────────────────────────────────────────────────────────
 
-_client_cache: dict[str, OpenAI] = {}
+_client_cache: dict[str, Any] = {}
 
 
 def _get_client(llm_config: LLMConfig) -> OpenAI:
@@ -71,6 +73,17 @@ def _get_client(llm_config: LLMConfig) -> OpenAI:
     return _client_cache[cache_key]
 
 
+def _get_anthropic_client(llm_config: LLMConfig):
+    """Get or create a cached Anthropic client."""
+    import anthropic
+
+    api_key = llm_config.api_key or "no-key"
+    cache_key = f"anthropic:{api_key[:8]}"
+    if cache_key not in _client_cache:
+        _client_cache[cache_key] = anthropic.Anthropic(api_key=api_key)
+    return _client_cache[cache_key]
+
+
 # ── Unified chat completion ───────────────────────────────────────────────────
 
 
@@ -83,16 +96,27 @@ def chat_completion(
 ) -> str:
     """Send a chat completion request and return the assistant text.
 
-    Works with ANY OpenAI-compatible provider: Ollama (local), OpenRouter
-    (cloud), OpenAI (direct), or any custom endpoint.
+    Supports all providers: Ollama, OpenRouter, OpenAI (via OpenAI SDK),
+    and Anthropic (via native Anthropic SDK).
     """
     if not llm_config.provider or not llm_config.model:
         raise RuntimeError(
             "LLM not configured. Set 'provider' and 'model' in nexaql.yaml "
-            "or configure via the Admin panel. Supported providers: ollama, openrouter, openai."
+            "or configure via the Admin panel. "
+            "Supported providers: ollama, openrouter, openai, anthropic."
         )
-    client = _get_client(llm_config)
+
+    provider = llm_config.provider.lower()
     tok = max_tokens or llm_config.max_tokens
+
+    # ── Anthropic: native SDK (not OpenAI-compatible) ────────────────────────
+    if provider == "anthropic":
+        return _chat_completion_anthropic(
+            llm_config, system=system, messages=messages, max_tokens=tok,
+        )
+
+    # ── All other providers: OpenAI SDK ──────────────────────────────────────
+    client = _get_client(llm_config)
 
     full_messages: list[dict[str, str]] = []
     if system:
@@ -107,6 +131,45 @@ def chat_completion(
 
     text = response.choices[0].message.content or ""
     # Strip thinking tags from models like Qwen3 that emit <think>...</think>
+    text = _THINK_RE.sub("", text).strip()
+    return text
+
+
+def _chat_completion_anthropic(
+    llm_config: LLMConfig,
+    *,
+    system: str | None = None,
+    messages: list[dict[str, str]],
+    max_tokens: int | None = None,
+) -> str:
+    """Chat completion via the native Anthropic SDK.
+
+    Anthropic's Messages API differs from OpenAI's:
+      - system prompt is a separate parameter, not a message
+      - response is a list of content blocks, not a single string
+    """
+    client = _get_anthropic_client(llm_config)
+    tok = max_tokens or llm_config.max_tokens or 4096
+
+    # Filter out system messages (Anthropic uses a separate `system` param)
+    user_messages = [m for m in messages if m.get("role") != "system"]
+
+    kwargs: dict[str, Any] = {
+        "model": llm_config.model,
+        "max_tokens": tok,
+        "messages": user_messages,
+    }
+    if system:
+        kwargs["system"] = system
+
+    response = client.messages.create(**kwargs)
+
+    # Extract text from content blocks
+    text = "".join(
+        block.text for block in response.content if block.type == "text"
+    )
+
+    # Strip thinking tags (some models may emit them)
     text = _THINK_RE.sub("", text).strip()
     return text
 

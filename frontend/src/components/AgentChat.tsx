@@ -301,6 +301,8 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
           summary: '',
           error: null,
           loading: true,
+          intent: null,
+          generationMode: null,
         },
       ]);
       setInput('');
@@ -336,6 +338,8 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
           shape: data.shape ?? null,
           summary: data.summary ?? data.explanation ?? '',
           error: data.error ?? null,
+          intent: data.intent ?? null,
+          generationMode: data.generationMode ?? null,
         };
 
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : completedTurn)));
@@ -354,6 +358,8 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
           shape: null,
           summary: `Error: ${String(e)}`,
           error: String(e),
+          intent: null,
+          generationMode: null,
         };
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : errTurn)));
         onTurnComplete?.(errTurn);

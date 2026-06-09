@@ -91,6 +91,9 @@ export interface ChatTurn {
   summary: string;
   error: string | null;
   loading: boolean;
+  // Pipeline trace
+  intent: Record<string, unknown> | null;
+  generationMode: string | null;
 }
 
 export interface HistoryEntry {

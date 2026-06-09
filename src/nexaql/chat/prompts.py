@@ -283,3 +283,94 @@ def extract_nexaql_query(text: str) -> str | None:
         return bare.group(1).strip()
 
     return None
+
+
+# ── Intent-based prompt (Option B) ──────────────────────────────────────────
+
+
+def build_intent_system_prompt(ontology: Ontology) -> str:
+    """Build a compact system prompt for structured intent extraction.
+
+    Instead of asking the LLM to generate NexaQL syntax, we ask it to output
+    a JSON object describing the query intent. A deterministic builder then
+    constructs the actual NexaQL. This makes the LLM task much simpler —
+    just entity/field/filter recognition — so small models work well.
+    """
+    from nexaql.ontology.prompt import ontology_to_prompt_text
+
+    ontology_text = ontology_to_prompt_text(ontology)
+
+    return f"""You are a query intent extractor. Given a natural language question about data, output a JSON object describing what data to fetch.
+
+ONTOLOGY (available nodes, fields, edges):
+{ontology_text}
+
+OUTPUT FORMAT — respond with ONLY a JSON object in a ```json code block:
+
+```json
+{{
+  "node": "node_name",
+  "fields": ["field1", "field2"],
+  "aggregations": [
+    {{"alias": "total_amount", "func": "sum", "field": "amount"}},
+    {{"alias": "record_count", "func": "count"}}
+  ],
+  "calcs": [
+    {{"alias": "days_left", "expr": "due_date - CURRENT_DATE"}}
+  ],
+  "filters": [
+    {{"field": "status", "op": "eq", "value": "ACTIVE"}},
+    {{"field": "amount", "op": "gt", "value": 1000}}
+  ],
+  "calc_filters": [
+    {{"expr": "due_date - CURRENT_DATE", "op": "lte", "value": 30}}
+  ],
+  "special_filters": {{"expiring_within_days": 30}},
+  "edges": [
+    {{
+      "name": "edge_name",
+      "fields": ["field1", "field2"],
+      "filters": [{{"field": "status", "op": "eq", "value": "ACTIVE"}}],
+      "limit": 5,
+      "edges": []
+    }}
+  ],
+  "order_by": [{{"field": "amount", "direction": "DESC"}}],
+  "limit": 10,
+  "distinct": false
+}}
+```
+
+RULES:
+1. "node" — REQUIRED. Must be an exact node name from the ontology.
+2. "fields" — List of scalar field names to return. Use exact names from the ontology. Omit if only aggregating.
+3. "aggregations" — For count/sum/avg/min/max. "field" is null for count(). "alias" is the output column name.
+4. "calcs" — For computed expressions like date math or arithmetic. "expr" uses bare field names.
+5. "filters" — Only use fields marked as filterable (marked with ⚡ in the ontology).
+   - ops: "eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null"
+   - String values must match exact case from ontology (enums are UPPERCASE).
+6. "calc_filters" — Filters on computed expressions, e.g. "days until expiry < 30".
+7. "special_filters" — Pre-defined filters from the ontology. Use exact names and appropriate values.
+8. "edges" — Nested related data. Each edge can have its own fields, filters, limit, and sub-edges.
+9. "order_by" — Sort results. "direction" is "ASC" or "DESC". Can reference aggregation aliases.
+10. "limit" / "distinct" — Optional. Omit if not needed.
+11. Only include keys that are needed. Omit empty arrays and null values.
+
+EXAMPLES:
+
+Q: "top 5 suppliers by total invoice amount"
+```json
+{{"node": "suppliers", "fields": ["name"], "aggregations": [{{"alias": "total_amount", "func": "sum", "field": "total_invoice_amount"}}], "order_by": [{{"field": "total_amount", "direction": "DESC"}}], "limit": 5}}
+```
+
+Q: "count of active contracts by status"
+```json
+{{"node": "contracts", "fields": ["status"], "aggregations": [{{"alias": "count", "func": "count"}}], "filters": [{{"field": "status", "op": "eq", "value": "ACTIVE"}}]}}
+```
+
+Q: "invoices expiring within 30 days with supplier name"
+```json
+{{"node": "invoices", "fields": ["invoice_number", "due_date", "amount"], "calc_filters": [{{"expr": "due_date - CURRENT_DATE", "op": "gte", "value": 0}}, {{"expr": "due_date - CURRENT_DATE", "op": "lte", "value": 30}}], "edges": [{{"name": "suppliers", "fields": ["name"]}}], "order_by": [{{"field": "due_date", "direction": "ASC"}}]}}
+```
+
+Respond with ONLY the JSON object in a ```json block. No explanation needed."""
