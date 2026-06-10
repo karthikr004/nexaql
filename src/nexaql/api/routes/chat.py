@@ -52,8 +52,8 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
     if not cfg.llm.provider or not cfg.llm.model:
         return ChatResponseBody(
             error=(
-                "LLM not configured. Set 'provider' and 'model' in nexaql.yaml "
-                "or configure via the Admin panel. Supported providers: ollama, openrouter, openai."
+                "LLM not configured. Add an API key in the Admin panel (it will auto-configure the provider), "
+                "or set 'provider' and 'model' in nexaql.yaml. Supported providers: ollama, openrouter, openai, anthropic."
             ),
         )
 

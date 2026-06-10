@@ -539,12 +539,34 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
             with open(config_path) as f:
                 raw_config = _yaml.safe_load(f) or {}
             llm_section = raw_config.get("llm", {})
-            # If saving an openrouter key, switch provider to openrouter
+            current_provider = llm_section.get("provider", "")
+            current_model = llm_section.get("model", "")
+
+            # Auto-configure provider/model when a cloud key is saved
+            # and LLM is not yet configured (or switching providers)
             if provider_key == "openrouter":
                 llm_section["provider"] = "openrouter"
                 llm_section["api_key"] = f"${{OPENROUTER_API_KEY}}"
-                if llm_section.get("model", "").startswith("qwen3:"):
-                    llm_section["model"] = DEFAULT_MODELS.get("openrouter", "qwen/qwen3-4b:free")
+                if not current_model or current_model.startswith("qwen3:"):
+                    llm_section["model"] = "anthropic/claude-sonnet-4-20250514"
+            elif provider_key == "anthropic":
+                # Only auto-switch if not already configured with another cloud provider
+                if not current_provider or current_provider == "ollama":
+                    llm_section["provider"] = "anthropic"
+                    llm_section["api_key"] = f"${{ANTHROPIC_API_KEY}}"
+                if not current_model or current_model.startswith("qwen3:"):
+                    llm_section["model"] = "claude-sonnet-4-20250514"
+            elif provider_key == "openai":
+                if not current_provider or current_provider == "ollama":
+                    llm_section["provider"] = "openai"
+                    llm_section["api_key"] = f"${{OPENAI_API_KEY}}"
+                if not current_model or current_model.startswith("qwen3:"):
+                    llm_section["model"] = "gpt-4o"
+
+            # Ensure generation_mode is set
+            if "generation_mode" not in llm_section:
+                llm_section["generation_mode"] = "intent"
+
             raw_config["llm"] = llm_section
             with open(config_path, "w") as f:
                 f.write("# NexaQL configuration — updated by Admin\n")
