@@ -36,6 +36,21 @@ nexaql serve
 
 Open http://localhost:3717 — a playground with sample e-commerce data loads instantly. No external database needed.
 
+### Connect Your Own Database
+
+```bash
+# Add a PostgreSQL connector via the Admin panel or API
+curl -X POST localhost:3717/api/connectors \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"mydb","type":"postgresql","config":{"url":"postgresql://user:pass@localhost:5432/mydb"}}'
+
+# Generate an ontology from it
+curl -X POST localhost:3717/api/connectors/generate-ontology \
+  -d '{"connector_name":"mydb","domain":"my_domain","output_schema_name":"main"}'
+```
+
+NexaQL introspects your database schema, detects relationships, enums, and PII fields, then generates a full ontology with default roles and access policies — ready to query.
+
 ## How It Works
 
 ### 1. Write a query (or let an agent generate one)
@@ -129,6 +144,20 @@ The analyst's query returns `name` but not `email` or `lifetime_value`. The mana
 - **8 SQL dialects** — PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, Presto, Spark, MSSQL
 - **Cross-source joins** — data from different databases joined in memory via DuckDB
 - **Pluggable adapters** — add new databases by implementing a simple interface
+
+### Admin Panel
+- **Domain management** — create, switch, and delete domains from the UI
+- **Schema management** — add schemas from connected databases, regenerate, or delete
+- **Ontology generation** — introspect any connected database and auto-generate ontology with nodes, edges, enums, and PII detection
+- **Duplicate prevention** — unique schema names per domain; add rejects duplicates, regenerate upserts
+- **Default roles & policies** — every generated ontology bootstraps with admin/analyst/manager roles and common access functions (owns_record, same_department, same_region)
+- **API Keys** — manage LLM provider keys (Anthropic, OpenAI, OpenRouter, Google); auto-detects active provider from saved keys
+- **Connector registry** — add/remove PostgreSQL, MySQL, DuckDB connections
+
+### BYOLLM (Bring Your Own LLM)
+- **No bundled LLM** — purely BYOLLM; bring Anthropic, OpenAI, OpenRouter, or Google keys
+- **Auto-configure** — saving an API key automatically switches the active provider and model
+- **Provider priority** — Anthropic → OpenAI → OpenRouter → Google
 
 ### Developer Experience
 - **Playground UI** — Monaco editor with syntax highlighting, schema explorer, SQL preview
@@ -247,6 +276,9 @@ nodes:
 ### Admin UI
 
 Click the ⚙ gear icon in the playground header to manage:
+- **Domains & Schemas** — organize ontologies by domain, add/delete schemas, switch active domain
+- **Connectors** — connect databases and generate ontologies from them
+- **API Keys** — configure LLM provider credentials
 - **Roles** — define valid role names
 - **Policy Functions** — create reusable access policies
 - **Per-node access** — visible_to, row policies, field-level PII/masking
@@ -265,6 +297,22 @@ Standard user context fields: `user_id`, `name`, `email`, `manager_id`, `region`
 
 ## Configuration
 
+All configuration lives in the bootstrap database (`~/.nexaql/nexaql.db`) and is managed through the Admin UI or API. No config files required.
+
+```bash
+# Add your LLM API key (enables agent chat)
+curl -X POST localhost:3717/api/api-keys \
+  -H 'Content-Type: application/json' \
+  -d '{"provider":"anthropic","name":"anthropic","key":"sk-ant-..."}'
+
+# Connect a database
+curl -X POST localhost:3717/api/connectors \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"prod","type":"postgresql","config":{"url":"postgresql://..."}}'
+```
+
+For advanced/legacy setups, a `nexaql.yaml` config file is also supported:
+
 ```yaml
 ontology:
   path: ./ontologies/my_schema.yaml
@@ -274,16 +322,6 @@ datasources:
     type: duckdb
     path: ":memory:"
     seed_file: ./ontologies/sample_seed.sql
-
-  # Or connect to your database:
-  # default:
-  #   type: postgresql
-  #   url: postgresql://user:pass@localhost:5432/mydb
-
-llm:
-  provider: anthropic
-  api_key: ${ANTHROPIC_API_KEY}
-  model: claude-sonnet-4-20250514
 
 server:
   host: 0.0.0.0
@@ -363,10 +401,11 @@ nexaql/
 │   ├── policy/           # RBAC, field security, RLS, PII masking
 │   ├── ontology/         # YAML schema + access policy loader
 │   ├── adapters/         # PostgreSQL, DuckDB (+ pluggable base)
-│   ├── api/              # FastAPI server
+│   ├── api/              # FastAPI server + admin panel routes
 │   ├── chat/             # NL → NexaQL agent pipeline
+│   ├── bootstrap.py      # DuckDB-backed state (domains, schemas, connectors, keys)
 │   └── cli.py            # CLI: serve, init, query
-├── frontend/             # React + Tailwind playground (bundled)
+├── frontend/             # React + Tailwind admin panel & playground
 └── ontologies/           # Sample schema + seed data
 ```
 

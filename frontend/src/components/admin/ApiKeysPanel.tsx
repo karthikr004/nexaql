@@ -1,5 +1,5 @@
 /**
- * API Keys + LLM Configuration panel.
+ * API Keys panel.
  */
 import { useState, useCallback, useEffect } from 'react';
 import { SectionHeader, inputStyle, labelStyle, type ToastData } from './shared';
@@ -12,14 +12,6 @@ export interface ApiKeyInfo {
   is_active: boolean;
 }
 
-interface LlmStatus {
-  provider: string;
-  model: string;
-  base_url: string;
-  has_api_key: boolean;
-  ollama?: { running: boolean; models: string[]; has_default_model: boolean; default_model: string };
-}
-
 interface Props {
   onToast: (t: ToastData) => void;
 }
@@ -27,9 +19,8 @@ interface Props {
 export default function ApiKeysPanel({ onToast }: Props) {
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [loading, setLoading] = useState(false);
-  const [llm, setLlm] = useState<LlmStatus | null>(null);
   const [showAdd, setShowAdd] = useState(false);
-  const [provider, setProvider] = useState('openrouter');
+  const [provider, setProvider] = useState('anthropic');
   const [name, setName] = useState('');
   const [keyVal, setKeyVal] = useState('');
   const [saving, setSaving] = useState(false);
@@ -42,14 +33,7 @@ export default function ApiKeysPanel({ onToast }: Props) {
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
 
-  const fetchLlm = useCallback(async () => {
-    try {
-      const res = await fetch('/api/llm/status');
-      if (res.ok) setLlm(await res.json());
-    } catch { /* ignore */ }
-  }, []);
-
-  useEffect(() => { fetchKeys(); fetchLlm(); }, [fetchKeys, fetchLlm]);
+  useEffect(() => { fetchKeys(); }, [fetchKeys]);
 
   const handleSave = useCallback(async () => {
     if (!provider.trim() || !keyVal.trim()) return;
@@ -63,15 +47,15 @@ export default function ApiKeysPanel({ onToast }: Props) {
       const body = await res.json();
       if (res.ok) {
         onToast({ message: `API key for "${provider}" saved`, type: 'success' });
-        setShowAdd(false); setName(''); setProvider('openrouter'); setKeyVal('');
-        fetchKeys(); fetchLlm();
+        setShowAdd(false); setName(''); setProvider('anthropic'); setKeyVal('');
+        fetchKeys();
       } else {
         onToast({ message: body.error || 'Failed to save', type: 'error' });
       }
     } catch (err) {
       onToast({ message: `Error: ${err}`, type: 'error' });
     } finally { setSaving(false); }
-  }, [name, provider, keyVal, fetchKeys, fetchLlm, onToast]);
+  }, [name, provider, keyVal, fetchKeys, onToast]);
 
   const handleDelete = useCallback(async (prov: string) => {
     try {
@@ -83,22 +67,8 @@ export default function ApiKeysPanel({ onToast }: Props) {
 
   return (
     <>
-      <SectionHeader title="LLM Configuration" subtitle="Model provider settings" />
+      <SectionHeader title="API Keys" subtitle="Manage LLM provider keys" />
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Active provider card */}
-        {llm && (
-          <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>Active Provider</span>
-              <span className="rounded px-1.5 py-0.5 text-[9px] uppercase border font-semibold" style={{ borderColor: 'var(--accent)', color: 'var(--accent)' }}>{llm.provider || 'none'}</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-[11px]">
-              <div><span style={{ color: 'var(--text-muted)' }}>Model: </span><span className="font-mono" style={{ color: 'var(--text-primary)' }}>{llm.model || '(not set)'}</span></div>
-              <div><span style={{ color: 'var(--text-muted)' }}>API Key: </span><span style={{ color: llm.has_api_key ? 'var(--badge-green-text)' : 'var(--error)' }}>{llm.has_api_key ? 'configured' : 'missing'}</span></div>
-            </div>
-          </div>
-        )}
-
         {/* Add key form */}
         {showAdd ? (
           <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--badge-amber-border)', backgroundColor: 'var(--bg-secondary)' }}>
@@ -109,10 +79,10 @@ export default function ApiKeysPanel({ onToast }: Props) {
             <div>
               <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Provider</label>
               <select value={provider} onChange={(e) => setProvider(e.target.value)} className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none" style={inputStyle}>
-                <option value="openrouter">OpenRouter (all models)</option>
-                <option value="anthropic">Anthropic (direct)</option>
-                <option value="openai">OpenAI (direct)</option>
-                <option value="google">Google (direct)</option>
+                <option value="anthropic">Anthropic</option>
+                <option value="openai">OpenAI</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="google">Google</option>
               </select>
             </div>
             <div>
