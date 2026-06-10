@@ -554,14 +554,12 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
             if not current_model or current_model.startswith("qwen3:"):
                 new_model = "anthropic/claude-sonnet-4-20250514"
         elif provider_key == "anthropic":
-            if not current_provider or current_provider == "ollama":
-                new_provider = "anthropic"
-            if not current_model or current_model.startswith("qwen3:"):
+            new_provider = "anthropic"
+            if not current_model or not current_model.startswith("claude"):
                 new_model = "claude-sonnet-4-20250514"
         elif provider_key == "openai":
-            if not current_provider or current_provider == "ollama":
-                new_provider = "openai"
-            if not current_model or current_model.startswith("qwen3:"):
+            new_provider = "openai"
+            if not current_model or not current_model.startswith("gpt"):
                 new_model = "gpt-4o"
 
         if new_provider != current_provider or new_model != current_model:
