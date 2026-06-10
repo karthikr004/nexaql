@@ -110,13 +110,39 @@ def load_config_from_bootstrap() -> NexaQLConfig:
     """
     from nexaql import bootstrap as bs
 
-    # LLM config
+    # LLM config — auto-detect provider from saved API keys
     llm_data = bs.get_active_llm_config()
+    provider = llm_data.get("provider", "") if llm_data else ""
+    api_key = bs.get_api_key(provider) if provider else None
+
+    # If configured provider has no key, find one that does
+    if not api_key and provider and provider.lower() != "ollama":
+        _provider_models = {
+            "anthropic": "claude-sonnet-4-20250514",
+            "openai": "gpt-4o",
+            "openrouter": "anthropic/claude-sonnet-4-20250514",
+            "google": "gemini-2.0-flash",
+        }
+        for candidate in _provider_models:
+            key = bs.get_api_key(candidate)
+            if key:
+                provider = candidate
+                api_key = key
+                break
+
     if llm_data:
-        api_key = bs.get_api_key(llm_data["provider"]) if llm_data.get("provider") else None
+        model = llm_data.get("model", "")
+        if provider != llm_data.get("provider", ""):
+            _fallback_models = {
+                "anthropic": "claude-sonnet-4-20250514",
+                "openai": "gpt-4o",
+                "openrouter": "anthropic/claude-sonnet-4-20250514",
+                "google": "gemini-2.0-flash",
+            }
+            model = _fallback_models.get(provider, model)
         llm = LLMConfig(
-            provider=llm_data.get("provider", ""),
-            model=llm_data.get("model", ""),
+            provider=provider,
+            model=model,
             max_tokens=llm_data.get("max_tokens", 4096),
             summary_max_tokens=llm_data.get("summary_max_tokens", 2048),
             generation_mode=llm_data.get("generation_mode", "intent"),

@@ -273,6 +273,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
+  const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -280,11 +281,45 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
 
+  useEffect(() => {
+    fetch('/api/api-keys')
+      .then((r) => r.json())
+      .then((data) => {
+        const keys = data.api_keys ?? [];
+        setApiKeyMissing(keys.length === 0);
+      })
+      .catch(() => {});
+  }, []);
+
   const sendMessage = useCallback(
     async (question: string) => {
       if (!question.trim() || loading) return;
 
       const turnId = `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+
+      // Quick-fail if no API key is configured
+      if (apiKeyMissing) {
+        const errTurn: ChatTurn = {
+          id: turnId,
+          question,
+          loading: false,
+          nexaqlQuery: null,
+          queryPreview: null,
+          adapterType: null,
+          rows: [],
+          columns: [],
+          rowCount: 0,
+          shape: null,
+          summary: '',
+          error: 'LLM API key not configured. Add one in the Admin panel under API Keys to enable Agent Chat.',
+          intent: null,
+          generationMode: null,
+        };
+        setTurns((prev) => [...prev, errTurn]);
+        setInput('');
+        onTurnComplete?.(errTurn);
+        return;
+      }
 
       setTurns((prev) => [
         ...prev,
@@ -318,11 +353,15 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
       ]);
 
       try {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 60000);
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question, history }),
+          signal: controller.signal,
         });
+        clearTimeout(timeout);
         const data = await res.json();
 
         const completedTurn: ChatTurn = {
@@ -345,6 +384,9 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : completedTurn)));
         onTurnComplete?.(completedTurn);
       } catch (e) {
+        const msg = e instanceof DOMException && e.name === 'AbortError'
+          ? 'Request timed out. The LLM provider may be unreachable — check your API key and network connection.'
+          : String(e);
         const errTurn: ChatTurn = {
           id: turnId,
           question,
@@ -356,8 +398,8 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
           columns: [],
           rowCount: 0,
           shape: null,
-          summary: `Error: ${String(e)}`,
-          error: String(e),
+          summary: '',
+          error: msg,
           intent: null,
           generationMode: null,
         };
@@ -367,7 +409,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
         setLoading(false);
       }
     },
-    [turns, loading, onTurnComplete],
+    [turns, loading, apiKeyMissing, onTurnComplete],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -383,6 +425,15 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
       <div className="flex-1 overflow-y-auto">
         {turns.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center gap-5 px-6">
+            {apiKeyMissing && (
+              <div
+                className="w-full max-w-md rounded border px-4 py-3 text-[12px] leading-relaxed"
+                style={{ borderColor: 'var(--error)', backgroundColor: 'var(--bg-error)', color: 'var(--error)' }}
+              >
+                <span className="font-semibold">LLM API key required.</span>{' '}
+                Add one in the <span className="font-semibold">Admin panel → API Keys</span> tab to enable Agent Chat.
+              </div>
+            )}
             <div className="text-center">
               <div className="mb-2 text-2xl">⬡</div>
               <p className="font-medium text-sm" style={{ color: 'var(--text-primary)' }}>Ask anything about your data</p>

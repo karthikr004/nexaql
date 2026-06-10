@@ -1,8 +1,8 @@
 # NexaQL
 
-**The query language built for AI agents.** One unified syntax to deterministically query, join, and aggregate data across any database — with built-in privacy enforcement.
+**The query language built for AI agents.** One unified syntax to deterministically query, join, and aggregate data across any database - with built-in privacy enforcement.
 
-NexaQL is not a GraphQL wrapper. It's a standalone query engine that translates natural language questions into a single, deterministic query representation, then compiles that into the native dialect of whatever database holds the data — PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, or any SQL engine. Data living across different databases? NexaQL joins it in memory. Sensitive fields? The policy engine strips or masks them before results leave the server.
+NexaQL is not a GraphQL wrapper. It's a standalone query engine that translates natural language questions into a single, deterministic query representation, then compiles that into the native dialect of whatever database holds the data - PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, or any SQL engine. Data living across different databases? NexaQL joins it in memory. Sensitive fields? The policy engine strips or masks them before results leave the server.
 
 ```
 "Which customers spent the most last quarter?"
@@ -20,9 +20,9 @@ NexaQL is not a GraphQL wrapper. It's a standalone query engine that translates 
 
 | Problem | How NexaQL solves it |
 |---------|----------------------|
-| Agents generate unreliable SQL | NexaQL is a constrained, deterministic intermediate language — the agent generates NexaQL (not raw SQL), and the engine compiles it to correct, optimized SQL |
+| Agents generate unreliable SQL | NexaQL is a constrained, deterministic intermediate language - the agent generates NexaQL (not raw SQL), and the engine compiles it to correct, optimized SQL |
 | Data scattered across databases | One query can traverse and join data from PostgreSQL, MySQL, DuckDB in a single request |
-| No access control on agent queries | Built-in RBAC, field-level security, row-level security, and PII masking — enforced at the engine level, invisible to the agent |
+| No access control on agent queries | Built-in RBAC, field-level security, row-level security, and PII masking - enforced at the engine level, invisible to the agent |
 | Schema drift breaks queries | Ontology-driven validation catches errors before execution, not after |
 | Every database has different SQL | NexaQL compiles to 8 SQL dialects from one syntax |
 
@@ -34,7 +34,7 @@ nexaql init
 nexaql serve
 ```
 
-Open http://localhost:3717 — a playground with sample e-commerce data loads instantly. No external database needed.
+Open http://localhost:3717 - a playground with sample e-commerce data loads instantly. No external database needed.
 
 ### Connect Your Own Database
 
@@ -49,7 +49,7 @@ curl -X POST localhost:3717/api/connectors/generate-ontology \
   -d '{"connector_name":"mydb","domain":"my_domain","output_schema_name":"main"}'
 ```
 
-NexaQL introspects your database schema, detects relationships, enums, and PII fields, then generates a full ontology with default roles and access policies — ready to query.
+NexaQL introspects your database schema, detects relationships, enums, and PII fields, then generates a full ontology with default roles and access policies - ready to query.
 
 ## How It Works
 
@@ -113,57 +113,57 @@ customer:
       visible_to: [manager, admin]   # analysts can't see spend data
 ```
 
-The analyst's query returns `name` but not `email` or `lifetime_value`. The manager sees all fields but with masked emails. The admin sees everything. **The agent doesn't need to know about access control — the engine handles it.**
+The analyst's query returns `name` but not `email` or `lifetime_value`. The manager sees all fields but with masked emails. The admin sees everything. **The agent doesn't need to know about access control - the engine handles it.**
 
 ## Features
 
 > **Full grammar reference with 20+ examples**: [docs/grammar.md](docs/grammar.md)
 
 ### Query Language
-- **Filters** — equality, comparison (`gt`, `lt`, `gte`, `lte`), `like`, `in`, `not_in`, null checks
-- **Edge traversals** — traverse relationships across tables with automatic join resolution
-- **Aggregations** — `sum()`, `avg()`, `min()`, `max()`, `count()` with automatic GROUP BY
-- **Computed fields** — `calc(quantity * unit_price)` with cross-entity references
-- **Directives** — `@limit`, `@offset`, `@orderby`, `@distinct`
-- **Special filters** — named, reusable WHERE clauses defined in the ontology
+- **Filters** - equality, comparison (`gt`, `lt`, `gte`, `lte`), `like`, `in`, `not_in`, null checks
+- **Edge traversals** - traverse relationships across tables with automatic join resolution
+- **Aggregations** - `sum()`, `avg()`, `min()`, `max()`, `count()` with automatic GROUP BY
+- **Computed fields** - `calc(quantity * unit_price)` with cross-entity references
+- **Directives** - `@limit`, `@offset`, `@orderby`, `@distinct`
+- **Special filters** - named, reusable WHERE clauses defined in the ontology
 
 ### Privacy & Access Control
-- **Node-level RBAC** — control which roles can access which tables
-- **Field-level security** — strip sensitive columns based on user role
-- **Row-level security (RLS)** — auto-inject WHERE clauses based on user attributes (region, department, etc.)
-- **PII masking** — mask emails, phones, names in query results (5 strategies)
-- **Policy-in-ontology** — access rules live alongside schema definitions
+- **Node-level RBAC** - control which roles can access which tables
+- **Field-level security** - strip sensitive columns based on user role
+- **Row-level security (RLS)** - auto-inject WHERE clauses based on user attributes (region, department, etc.)
+- **PII masking** - mask emails, phones, names in query results (5 strategies)
+- **Policy-in-ontology** - access rules live alongside schema definitions
 
 ### Agent Integration
-- **Deterministic translation** — natural language → NexaQL → SQL, no hallucinated queries
-- **Auto-retry** — if the generated query fails validation, the agent corrects it
-- **Result summarization** — agent generates a natural language summary of query results
-- **Ontology-aware prompts** — the agent knows your schema, field types, and available filters
+- **Deterministic translation** - natural language → NexaQL → SQL, no hallucinated queries
+- **Auto-retry** - if the generated query fails validation, the agent corrects it
+- **Result summarization** - agent generates a natural language summary of query results
+- **Ontology-aware prompts** - the agent knows your schema, field types, and available filters
 
 ### Multi-Database
-- **8 SQL dialects** — PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, Presto, Spark, MSSQL
-- **Cross-source joins** — data from different databases joined in memory via DuckDB
-- **Pluggable adapters** — add new databases by implementing a simple interface
+- **8 SQL dialects** - PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, Presto, Spark, MSSQL
+- **Cross-source joins** - data from different databases joined in memory via DuckDB
+- **Pluggable adapters** - add new databases by implementing a simple interface
 
 ### Admin Panel
-- **Domain management** — create, switch, and delete domains from the UI
-- **Schema management** — add schemas from connected databases, regenerate, or delete
-- **Ontology generation** — introspect any connected database and auto-generate ontology with nodes, edges, enums, and PII detection
-- **Duplicate prevention** — unique schema names per domain; add rejects duplicates, regenerate upserts
-- **Default roles & policies** — every generated ontology bootstraps with admin/analyst/manager roles and common access functions (owns_record, same_department, same_region)
-- **API Keys** — manage LLM provider keys (Anthropic, OpenAI, OpenRouter, Google); auto-detects active provider from saved keys
-- **Connector registry** — add/remove PostgreSQL, MySQL, DuckDB connections
+- **Domain management** - create, switch, and delete domains from the UI
+- **Schema management** - add schemas from connected databases, regenerate, or delete
+- **Ontology generation** - introspect any connected database and auto-generate ontology with nodes, edges, enums, and PII detection
+- **Duplicate prevention** - unique schema names per domain; add rejects duplicates, regenerate upserts
+- **Default roles & policies** - every generated ontology bootstraps with admin/analyst/manager roles and common access functions (owns_record, same_department, same_region)
+- **API Keys** - manage LLM provider keys (Anthropic, OpenAI, OpenRouter, Google); auto-detects active provider from saved keys
+- **Connector registry** - add/remove PostgreSQL, MySQL, DuckDB connections
 
 ### BYOLLM (Bring Your Own LLM)
-- **No bundled LLM** — purely BYOLLM; bring Anthropic, OpenAI, OpenRouter, or Google keys
-- **Auto-configure** — saving an API key automatically switches the active provider and model
-- **Provider priority** — Anthropic → OpenAI → OpenRouter → Google
+- **No bundled LLM** - purely BYOLLM; bring Anthropic, OpenAI, OpenRouter, or Google keys
+- **Auto-configure** - saving an API key automatically switches the active provider and model
+- **Provider priority** - Anthropic → OpenAI → OpenRouter → Google
 
 ### Developer Experience
-- **Playground UI** — Monaco editor with syntax highlighting, schema explorer, SQL preview
-- **Role switcher** — test access control live in the playground
-- **CLI** — `nexaql query`, `nexaql serve`, `nexaql init`
-- **Zero config** — ships with sample data, works after `pip install`
+- **Playground UI** - Monaco editor with syntax highlighting, schema explorer, SQL preview
+- **Role switcher** - test access control live in the playground
+- **CLI** - `nexaql query`, `nexaql serve`, `nexaql init`
+- **Zero config** - ships with sample data, works after `pip install`
 
 ## Query Syntax Reference
 
@@ -182,7 +182,7 @@ order(total_amount_gt: 100)
 # Special filters (defined in ontology)
 order(large_order: 500)
 
-# Calc filters — computed conditions across entities
+# Calc filters - computed conditions across entities
 order_item(calc(quantity * unit_price): { gt: 500 })
 ```
 
@@ -229,7 +229,7 @@ order_item(calc(quantity * unit_price): { gt: 500 })
 
 ## Access Control
 
-NexaQL enforces privacy at the query engine level — RBAC, field-level security, row-level security, and PII masking.
+NexaQL enforces privacy at the query engine level - RBAC, field-level security, row-level security, and PII masking.
 
 > **Full access control guide**: [docs/access-control.md](docs/access-control.md)
 
@@ -276,12 +276,12 @@ nodes:
 ### Admin UI
 
 Click the ⚙ gear icon in the playground header to manage:
-- **Domains & Schemas** — organize ontologies by domain, add/delete schemas, switch active domain
-- **Connectors** — connect databases and generate ontologies from them
-- **API Keys** — configure LLM provider credentials
-- **Roles** — define valid role names
-- **Policy Functions** — create reusable access policies
-- **Per-node access** — visible_to, row policies, field-level PII/masking
+- **Domains & Schemas** - organize ontologies by domain, add/delete schemas, switch active domain
+- **Connectors** - connect databases and generate ontologies from them
+- **API Keys** - configure LLM provider credentials
+- **Roles** - define valid role names
+- **Policy Functions** - create reusable access policies
+- **Per-node access** - visible_to, row policies, field-level PII/masking
 
 ### User Context
 
