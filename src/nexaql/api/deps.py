@@ -1,9 +1,14 @@
 # Copyright (c) 2026-present NexaQL Contributors
-"""FastAPI dependencies for NexaQL API routes."""
+"""FastAPI dependencies for NexaQL API routes.
+
+Uses the bootstrap database (~/.nexaql/nexaql.db) as the primary config source.
+Falls back to nexaql.yaml for legacy setups.
+"""
 
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from functools import lru_cache
 from typing import Any
@@ -19,20 +24,20 @@ from nexaql.ontology import Ontology, load_ontology
 
 @lru_cache(maxsize=1)
 def get_config() -> NexaQLConfig:
-    """Load and cache the ``nexaql.yaml`` configuration.
+    """Load and cache configuration.
 
-    The config path is resolved from the ``NEXAQL_CONFIG`` environment
-    variable, falling back to ``nexaql.yaml`` in the current directory.
+    Resolution order:
+    1. Bootstrap DB (~/.nexaql/nexaql.db)
+    2. nexaql.yaml (legacy fallback)
     """
     path = os.environ.get("NEXAQL_CONFIG", "nexaql.yaml")
     return load_config(path)
 
 
 def reload_config() -> NexaQLConfig:
-    """Clear the config cache and reload from disk.
+    """Clear the config cache and reload.
 
-    Call this after the config file has been updated (e.g., by the
-    datasource wizard writing a new datasource entry).
+    Call this after the bootstrap DB or config file has been updated.
     """
     get_config.cache_clear()
     return get_config()
@@ -42,10 +47,31 @@ def reload_config() -> NexaQLConfig:
 
 
 def _get_db_url_from_connectors() -> str | None:
-    """Get the DB URL from saved connectors (connectors.json).
+    """Get the DB URL from the bootstrap database connectors.
 
-    Returns the first connector's URL, or None if no connectors exist.
+    Checks the active domain's schemas first (to get the right connector),
+    then falls back to the first connector.
     """
+    try:
+        from nexaql import bootstrap as bs
+
+        # Try active domain's connector first
+        active_domain = bs.get_active_domain()
+        if active_domain:
+            schemas = bs.list_schemas(active_domain)
+            if schemas:
+                connector = bs.get_connector_by_id(schemas[0]["connector_id"])
+                if connector and connector.get("url"):
+                    return connector["url"]
+
+        # Fall back to first connector
+        connectors = bs.list_connectors()
+        if connectors:
+            return connectors[0].get("url")
+    except Exception:
+        pass
+
+    # Legacy fallback: connectors.json
     try:
         from nexaql.api.routes.connectors import get_active_db_url
         return get_active_db_url()
@@ -60,14 +86,20 @@ _store_ontology_cache: dict[str, Ontology] = {}
 
 
 def _get_active_domain() -> str:
-    """Get the active domain name from config or default."""
+    """Get the active domain name from bootstrap DB or config."""
+    try:
+        from nexaql import bootstrap as bs
+        domain = bs.get_active_domain()
+        if domain:
+            return domain
+    except Exception:
+        pass
+
     try:
         cfg = get_config()
-        # Check for domain in ontology config (new style)
         ont_cfg = cfg.ontology
         if hasattr(ont_cfg, 'domain') and ont_cfg.domain:
             return ont_cfg.domain
-        # Fall back to extracting from path (legacy)
         if hasattr(ont_cfg, 'path') and ont_cfg.path:
             return os.path.splitext(os.path.basename(ont_cfg.path))[0]
     except Exception:
@@ -79,13 +111,14 @@ def _get_store_for_datasource():
     """Get the right ontology store based on datasource type.
 
     Resolution order:
-    1. Saved connector (connectors.json) → PostgresStore or DuckDBStore
-    2. Config datasource → detect type from URL/path
-    3. Fallback → DuckDBStore with default file
+    1. Bootstrap DB connector for the active domain
+    2. Saved connector (connectors.json legacy)
+    3. Config datasource
+    4. Fallback: DuckDB with default file
     """
     from nexaql.ontology.store import DuckDBStore, PostgresStore
 
-    # 1. Saved connector
+    # 1. Bootstrap DB connector
     db_url = _get_db_url_from_connectors()
     if db_url:
         if db_url.startswith("postgresql"):
@@ -109,11 +142,49 @@ def _get_store_for_datasource():
     return DuckDBStore("nexaql.duckdb")
 
 
-def get_ontology(domain: str | None = None) -> Ontology:
-    """Load the ontology from the database (DuckDB or Postgres).
+def _try_bootstrap_ontology(domain: str) -> Ontology | None:
+    """Try to load ontology from the bootstrap database (schema-per-ontology model)."""
+    try:
+        from nexaql import bootstrap as bs
 
-    Falls back to YAML only if the DB store raises KeyError (no ontology
-    seeded yet), to support legacy setups during migration.
+        ont_data = bs.get_domain_ontology(domain)
+        if ont_data and ont_data.get("nodes"):
+            # Convert bootstrap ontology format to Ontology model
+            # Build a dict compatible with Ontology(**data)
+            return load_ontology_from_dict(ont_data)
+    except Exception:
+        pass
+    return None
+
+
+def load_ontology_from_dict(data: dict) -> Ontology:
+    """Load an Ontology object from a bootstrap ontology dict."""
+    from nexaql.ontology import Ontology
+
+    # The bootstrap format has: domain, description, nodes, node_to_connector,
+    # and optionally roles and access_functions from the original YAML.
+    ont_dict: dict = {
+        "domain": data.get("domain", ""),
+        "description": data.get("description", ""),
+        "version": data.get("version", "1.0"),
+        "nodes": data.get("nodes", {}),
+    }
+    # Pass through optional top-level keys if present
+    if data.get("roles"):
+        ont_dict["roles"] = data["roles"]
+    if data.get("access_functions"):
+        ont_dict["access_functions"] = data["access_functions"]
+    return Ontology(**ont_dict)
+
+
+def get_ontology(domain: str | None = None) -> Ontology:
+    """Load the ontology for a domain.
+
+    Resolution order:
+    1. In-memory cache
+    2. Bootstrap DB (schema-per-ontology model)
+    3. Database store (nexaql_ontologies table)
+    4. YAML file (legacy fallback)
     """
     if domain is None:
         domain = _get_active_domain()
@@ -122,6 +193,13 @@ def get_ontology(domain: str | None = None) -> Ontology:
     if domain in _store_ontology_cache:
         return _store_ontology_cache[domain]
 
+    # 1. Try bootstrap DB (new schema-per-ontology model)
+    ont = _try_bootstrap_ontology(domain)
+    if ont:
+        _store_ontology_cache[domain] = ont
+        return ont
+
+    # 2. Try database store (nexaql_ontologies table — existing model)
     store = _get_store_for_datasource()
 
     try:
@@ -144,7 +222,7 @@ def get_ontology(domain: str | None = None) -> Ontology:
     except (KeyError, FileNotFoundError):
         pass
 
-    # Legacy fallback: YAML file (for existing setups not yet migrated)
+    # 3. Legacy fallback: YAML file
     try:
         cfg = get_config()
         if cfg.ontology.path:
@@ -154,18 +232,25 @@ def get_ontology(domain: str | None = None) -> Ontology:
 
     raise RuntimeError(
         f"No ontology found for domain '{domain}'. "
-        "Run 'nexaql install' to set up, or generate one from Admin UI."
+        "Add a connector and generate an ontology from the Admin panel."
     )
 
 
 async def get_ontology_async(domain: str | None = None) -> Ontology:
-    """Async version of get_ontology — preferred in async FastAPI routes."""
+    """Async version of get_ontology."""
     if domain is None:
         domain = _get_active_domain()
 
     if domain in _store_ontology_cache:
         return _store_ontology_cache[domain]
 
+    # 1. Try bootstrap DB
+    ont = _try_bootstrap_ontology(domain)
+    if ont:
+        _store_ontology_cache[domain] = ont
+        return ont
+
+    # 2. Try database store
     store = _get_store_for_datasource()
 
     try:
@@ -175,7 +260,7 @@ async def get_ontology_async(domain: str | None = None) -> Ontology:
     except (KeyError, FileNotFoundError):
         pass
 
-    # Legacy fallback
+    # 3. Legacy fallback
     try:
         cfg = get_config()
         if cfg.ontology.path:
@@ -185,15 +270,12 @@ async def get_ontology_async(domain: str | None = None) -> Ontology:
 
     raise RuntimeError(
         f"No ontology found for domain '{domain}'. "
-        "Run 'nexaql install' to set up, or generate one from Admin UI."
+        "Add a connector and generate an ontology from the Admin panel."
     )
 
 
 def invalidate_ontology_cache(domain: str | None = None) -> None:
-    """Clear the ontology cache (both YAML and store).
-
-    Call this after modifying the ontology to ensure fresh data.
-    """
+    """Clear the ontology cache."""
     if domain:
         _store_ontology_cache.pop(domain, None)
     else:
@@ -210,15 +292,16 @@ _adapter_cache: dict[str, QueryAdapter] = {}
 
 
 def get_adapter_for_datasource(datasource_name: str | None = None) -> QueryAdapter:
-    """Get or create a :class:`QueryAdapter` from the config's datasource entry.
+    """Get or create a QueryAdapter.
 
-    Adapters are cached so in-memory DuckDB databases retain seeded data.
-    If *datasource_name* is ``None`` the first datasource in the config is used.
+    Resolves from bootstrap DB connectors first, then config datasources.
     """
     cfg = get_config()
 
     if not cfg.datasources:
-        raise ValueError("No datasources configured in nexaql.yaml")
+        raise ValueError(
+            "No datasources configured. Add a connector in the Admin panel."
+        )
 
     if datasource_name is None:
         datasource_name = next(iter(cfg.datasources))

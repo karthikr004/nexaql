@@ -16,8 +16,12 @@ from nexaql.api.routes import admin, chat, connectors, datasource, execute, onto
 
 
 def _load_api_keys_into_env() -> None:
-    """Load saved API keys into environment on startup."""
-    from nexaql.api.routes.connectors import _load_api_keys
+    """Load saved API keys into environment on startup.
+
+    Reads from the bootstrap database (~/.nexaql/nexaql.db).
+    """
+    from nexaql import bootstrap as bs
+
     env_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
@@ -25,10 +29,11 @@ def _load_api_keys_into_env() -> None:
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
     }
-    for provider, info in _load_api_keys().items():
-        env_var = env_map.get(provider.lower())
-        if env_var and info.get("key") and not os.environ.get(env_var):
-            os.environ[env_var] = info["key"]
+    for provider, env_var in env_map.items():
+        if not os.environ.get(env_var):
+            key = bs.get_api_key(provider)
+            if key:
+                os.environ[env_var] = key
 
 
 def create_app() -> FastAPI:
@@ -95,6 +100,16 @@ def create_app() -> FastAPI:
 
     static_dir = bundled_static if bundled_static.is_dir() else local_dist
     if static_dir.is_dir():
+        index_html = static_dir / "index.html"
+
+        # SPA catch-all: serve index.html for client-side routes
+        # Must be registered before the static mount so /admin/... paths are caught
+        from starlette.responses import FileResponse
+
+        @app.get("/admin/{rest:path}")
+        async def spa_admin_catchall(rest: str):
+            return FileResponse(str(index_html))
+
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
 
     return app

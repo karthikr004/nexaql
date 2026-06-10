@@ -59,9 +59,9 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
 
     # Cloud providers (openrouter, openai, anthropic) require an API key; Ollama (local) does not
     if cfg.llm.provider.lower() != "ollama" and not cfg.llm.api_key:
-        # Try loading from api_keys.json
-        from nexaql.api.routes.connectors import get_api_key
-        saved_key = get_api_key(cfg.llm.provider)
+        # Try loading from bootstrap DB
+        from nexaql import bootstrap as bs
+        saved_key = bs.get_api_key(cfg.llm.provider)
         if saved_key:
             cfg.llm.api_key = saved_key
         else:

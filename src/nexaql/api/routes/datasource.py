@@ -223,27 +223,30 @@ async def connect_datasource(req: ConnectRequest) -> JSONResponse:
                 "error": f"Failed to save ontology: {e}",
             }, status_code=500)
 
-    # Update nexaql.yaml config on disk so it persists across restarts
+    # Save connector + schema to bootstrap DB
     try:
-        import yaml as _yaml
-        config_path = _os.environ.get("NEXAQL_CONFIG", "nexaql.yaml")
-        with open(config_path) as f:
-            raw_config = _yaml.safe_load(f) or {}
+        from nexaql import bootstrap as bs
 
-        raw_config["ontology"] = {"path": output_path}
-        raw_config["datasources"] = {
-            "default": {
-                "type": gen._db_type,
-                **({"url": req.connection_url} if gen._db_type != "duckdb" else {"path": req.connection_url}),
-            }
-        }
+        # Ensure connector exists in bootstrap DB
+        connector_id = bs.save_connector(
+            name=f"ds-{req.domain}",
+            type=gen._db_type,
+            url=req.connection_url,
+        )
 
-        with open(config_path, "w") as f:
-            f.write("# NexaQL configuration — updated by Data Source Wizard\n")
-            _yaml.dump(raw_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        # Save ontology as schema in bootstrap DB
+        ontology_dict = ontology.model_dump(exclude_none=True)
+        bs.save_schema(
+            domain_name=req.domain,
+            schema_name=req.schema_name if hasattr(req, 'schema_name') else "public",
+            connector_id=connector_id,
+            ontology_json=ontology_dict,
+        )
 
+        # Set as active domain
+        bs.set_active_domain(req.domain)
     except Exception:
-        pass  # Non-fatal — in-memory update still works
+        pass  # Non-fatal — ontology is saved in DB store
 
     # Reload config + clear adapter/ontology caches
     try:
@@ -288,30 +291,27 @@ async def connect_datasource(req: ConnectRequest) -> JSONResponse:
 async def get_current_datasource() -> JSONResponse:
     """Return info about the currently configured datasource."""
     try:
+        from nexaql import bootstrap as bs
+        import re
+
         cfg = get_config()
         ont = get_ontology()
 
         datasources = {}
         for name, ds in cfg.datasources.items():
-            # Mask credentials in URL
             url = ds.url or ds.path or "unknown"
             if "://" in str(url):
-                # Mask password: postgresql://user:PASSWORD@host → postgresql://user:***@host
-                import re
                 url = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", str(url))
-
-            datasources[name] = {
-                "type": ds.type,
-                "url": url,
-            }
+            datasources[name] = {"type": ds.type, "url": url}
 
         return JSONResponse({
-            "ontology_path": cfg.ontology.path,
+            "active_domain": bs.get_active_domain(),
             "datasources": datasources,
             "domain": ont.domain,
             "description": ont.description,
             "node_count": len(ont.nodes),
             "nodes": list(ont.nodes.keys()),
+            "source": "bootstrap_db",
         })
     except Exception as e:
         return JSONResponse({

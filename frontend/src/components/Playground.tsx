@@ -76,8 +76,27 @@ export default function Playground() {
   const [isRunning, setIsRunning] = useState(false);
   const [isIdle, setIsIdle] = useState(true);
 
-  // Top-level view: playground or admin
-  const [view, setView] = useState<'playground' | 'admin'>('playground');
+  // Top-level view: playground or admin — derived from URL on mount
+  const initialView = typeof window !== 'undefined' && window.location.pathname.startsWith('/admin') ? 'admin' : 'playground';
+  const [view, setView] = useState<'playground' | 'admin'>(initialView);
+
+  // Sync view ↔ URL path + handle browser back/forward
+  const navigate = useCallback((newView: 'playground' | 'admin', path?: string) => {
+    setView(newView);
+    const url = newView === 'admin' ? (path ?? '/admin') : '/';
+    if (window.location.pathname !== url) {
+      window.history.pushState(null, '', url);
+    }
+  }, []);
+
+  useEffect(() => {
+    const onPopState = () => {
+      const isAdmin = window.location.pathname.startsWith('/admin');
+      setView(isAdmin ? 'admin' : 'playground');
+    };
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // Data source wizard modal
   const [showWizard, setShowWizard] = useState(false);
@@ -389,7 +408,7 @@ export default function Playground() {
   if (view === 'admin') {
     return (
       <Suspense fallback={<div className="flex h-screen items-center justify-center text-sm" style={{ backgroundColor: 'var(--bg-primary)', color: 'var(--text-secondary)' }}>Loading admin...</div>}>
-        <AdminView onBack={() => setView('playground')} onOntologyChanged={reloadOntology} />
+        <AdminView onBack={() => navigate('playground')} onOntologyChanged={reloadOntology} />
       </Suspense>
     );
   }
@@ -558,7 +577,7 @@ export default function Playground() {
           {/* Admin gear icon */}
           <button
             type="button"
-            onClick={() => setView('admin')}
+            onClick={() => navigate('admin')}
             className="rounded border p-1.5 transition-colors"
             style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-elevated)', color: 'var(--text-secondary)' }}
             title="Settings & Admin"

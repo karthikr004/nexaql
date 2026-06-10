@@ -31,19 +31,32 @@ async def _save_ontology_to_db(ontology: Ontology) -> None:
 
 @router.get("/admin/ontology")
 async def get_full_ontology(domain: str | None = None) -> JSONResponse:
-    """Return the full ontology. If `domain` is specified, load that domain from DB."""
-    try:
-        if domain:
-            from nexaql.api.deps import _get_store_for_datasource
-            store = _get_store_for_datasource()
-            ont = await store.load(domain)
-        else:
-            ont = get_ontology()
+    """Return the full ontology from the bootstrap database only.
+
+    If no bootstrap DB ontology exists, returns an empty ontology shell
+    so the admin UI renders a clean slate.
+    """
+    from nexaql import bootstrap as bs
+    from nexaql.api.deps import _try_bootstrap_ontology
+
+    target_domain = domain or bs.get_active_domain() or "default"
+
+    # Bootstrap DB only — no fallback to connected DBs or YAML
+    ont = _try_bootstrap_ontology(target_domain)
+    if ont:
         return JSONResponse({
             "ontology": ont.model_dump(exclude_none=True),
         })
-    except Exception as e:
-        return JSONResponse({"error": str(e)}, status_code=500)
+
+    # No bootstrap ontology — return empty shell
+    return JSONResponse({
+        "ontology": {
+            "version": "1.0",
+            "domain": target_domain,
+            "description": "",
+            "nodes": {},
+        },
+    })
 
 
 # ── GET /admin/roles ──────────────────────────────────────────────────────
@@ -209,6 +222,122 @@ async def delete_node(node_name: str) -> JSONResponse:
         return JSONResponse({"success": True})
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
+
+
+# ── POST /admin/ontology/node/{node_name}/regenerate ─────────────────────────
+
+
+class RegenerateNodeRequest(BaseModel):
+    domain: str | None = None
+    """Domain to regenerate the node in (defaults to active domain)."""
+
+
+@router.post("/admin/ontology/node/{node_name}/regenerate")
+async def regenerate_node(node_name: str, req: RegenerateNodeRequest | None = None) -> JSONResponse:
+    """Regenerate a single node by re-introspecting its source table.
+
+    This fetches the latest column/FK info from the connected database
+    and replaces the node definition in the ontology, preserving all other nodes.
+    """
+    import json as _json
+    import traceback
+
+    from nexaql import bootstrap as bs
+    from nexaql.ontology.generator import OntologyGenerator
+
+    domain = (req.domain if req else None) or bs.get_active_domain() or "default"
+
+    # 1. Load existing ontology
+    try:
+        ont = get_ontology(domain)
+    except Exception as e:
+        return JSONResponse({"error": f"Cannot load ontology for domain '{domain}': {e}"}, status_code=404)
+
+    if node_name not in ont.nodes:
+        return JSONResponse({"error": f"Node '{node_name}' not found in domain '{domain}'"}, status_code=404)
+
+    old_node = ont.nodes[node_name]
+    table_name = old_node.table or node_name
+
+    # 2. Find the connector for this domain
+    schemas = bs.list_schemas(domain)
+    if not schemas:
+        return JSONResponse({"error": f"No schemas found for domain '{domain}'"}, status_code=404)
+
+    connector = bs.get_connector_by_id(schemas[0]["connector_id"])
+    if not connector or not connector.get("url"):
+        return JSONResponse({"error": "No connector URL found for this domain"}, status_code=400)
+
+    connection_url = connector["url"]
+
+    # 3. Generate ontology for just this one table
+    try:
+        gen = OntologyGenerator(connection_url=connection_url)
+
+        # Determine schema name (DuckDB uses 'main', PostgreSQL uses 'public')
+        db_schema = "main" if gen._db_type == "duckdb" else "public"
+
+        regenerated = await gen.generate(
+            schema=db_schema,
+            domain=domain,
+            description=ont.description or "",
+            include_tables=[table_name],
+        )
+    except Exception as e:
+        return JSONResponse({
+            "error": f"Regeneration failed for table '{table_name}': {e}",
+            "details": traceback.format_exc().split("\n")[-3:],
+        }, status_code=500)
+
+    # 4. Find the regenerated node (may be named differently from the table)
+    regen_nodes = regenerated.nodes
+    if not regen_nodes:
+        return JSONResponse({"error": f"Table '{table_name}' not found in database"}, status_code=404)
+
+    # Pick the first (and only) regenerated node
+    regen_node_name, regen_node = next(iter(regen_nodes.items()))
+
+    # 5. Merge: replace only this node, preserve everything else
+    #    Keep manually-set access controls, roles, etc. from old node
+    #    but update fields and edges from the fresh introspection
+    if old_node.visible_to and not regen_node.visible_to:
+        regen_node.visible_to = old_node.visible_to
+    if old_node.row_policies and not regen_node.row_policies:
+        regen_node.row_policies = old_node.row_policies
+
+    # Preserve PII/mask_with flags from old fields if the field still exists
+    for fname, fdef in regen_node.fields.items():
+        old_field = old_node.fields.get(fname)
+        if old_field:
+            if old_field.pii and not fdef.pii:
+                fdef.pii = old_field.pii
+            if old_field.mask_with and not fdef.mask_with:
+                fdef.mask_with = old_field.mask_with
+            if old_field.visible_to and not fdef.visible_to:
+                fdef.visible_to = old_field.visible_to
+
+    ont.nodes[node_name] = regen_node
+
+    # 6. Save back to bootstrap DB
+    try:
+        ontology_dict = ont.model_dump(exclude_none=True)
+        bs.save_schema(
+            domain_name=domain,
+            schema_name=schemas[0]["name"],
+            connector_id=schemas[0]["connector_id"],
+            ontology_json=ontology_dict,
+        )
+        invalidate_ontology_cache(domain)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to save: {e}"}, status_code=500)
+
+    return JSONResponse({
+        "success": True,
+        "node": node_name,
+        "table": table_name,
+        "field_count": len(regen_node.fields),
+        "edge_count": len(regen_node.edges) if regen_node.edges else 0,
+    })
 
 
 # ── POST /admin/validate-policy ──────────────────────────────────────────────

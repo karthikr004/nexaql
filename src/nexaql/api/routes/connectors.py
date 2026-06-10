@@ -1,6 +1,8 @@
 # Copyright (c) 2026-present NexaQL Contributors
 """Connector management — save, test, and manage named database connections.
 
+All data is stored in the bootstrap database (~/.nexaql/nexaql.db).
+
 Endpoints:
     GET    /api/connectors              — list all saved connectors
     POST   /api/connectors              — save a new connector
@@ -15,35 +17,30 @@ from __future__ import annotations
 import json
 import os
 import traceback
-from datetime import datetime, timezone
 from typing import Any, Optional
 
 from fastapi import APIRouter
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from nexaql import bootstrap as bs
 from nexaql.api.deps import _adapter_cache, get_config, reload_config
 from nexaql.ontology.generator import OntologyGenerator
 
 router = APIRouter(tags=["connectors"])
 
-# ── Connector storage (JSON file) ─────────────────────────────────────────
+
+# ── Legacy compat: connectors.json fallback (read-only, for migration) ──────
 
 CONNECTORS_FILE = os.environ.get("NEXAQL_CONNECTORS_FILE", "connectors.json")
 
 
 def _load_connectors() -> dict[str, dict[str, Any]]:
-    """Load saved connectors from disk."""
+    """Load saved connectors from disk (legacy, for migration only)."""
     if not os.path.exists(CONNECTORS_FILE):
         return {}
     with open(CONNECTORS_FILE) as f:
         return json.load(f)
-
-
-def _save_connectors(connectors: dict[str, dict[str, Any]]) -> None:
-    """Persist connectors to disk."""
-    with open(CONNECTORS_FILE, "w") as f:
-        json.dump(connectors, f, indent=2, default=str)
 
 
 def _mask_url(url: str) -> str:
@@ -53,36 +50,35 @@ def _mask_url(url: str) -> str:
 
 
 def get_active_db_url() -> str | None:
-    """Get the connection URL of the first (or active) saved connector.
+    """Get the connection URL of the active connector.
 
-    This is used by the ontology store to know which DB to read/write from.
-    Returns None if no connectors are saved.
+    Uses bootstrap DB first, falls back to connectors.json.
     """
-    connectors = _load_connectors()
-    if not connectors:
-        return None
-    # Return the first connector's URL
-    first = next(iter(connectors.values()))
-    return first.get("connection_url")
+    # Bootstrap DB
+    try:
+        active_domain = bs.get_active_domain()
+        if active_domain:
+            schemas = bs.list_schemas(active_domain)
+            if schemas:
+                connector = bs.get_connector_by_id(schemas[0]["connector_id"])
+                if connector and connector.get("url"):
+                    return connector["url"]
+
+        connectors = bs.list_connectors()
+        if connectors:
+            return connectors[0].get("url")
+    except Exception:
+        pass
+
+    # Legacy fallback
+    legacy = _load_connectors()
+    if legacy:
+        first = next(iter(legacy.values()))
+        return first.get("connection_url")
+    return None
 
 
-# ── API Key storage (JSON file) ──────────────────────────────────────────
-
-API_KEYS_FILE = os.environ.get("NEXAQL_API_KEYS_FILE", "api_keys.json")
-
-
-def _load_api_keys() -> dict[str, dict[str, Any]]:
-    """Load saved API keys from disk."""
-    if not os.path.exists(API_KEYS_FILE):
-        return {}
-    with open(API_KEYS_FILE) as f:
-        return json.load(f)
-
-
-def _save_api_keys(keys: dict[str, dict[str, Any]]) -> None:
-    """Persist API keys to disk."""
-    with open(API_KEYS_FILE, "w") as f:
-        json.dump(keys, f, indent=2, default=str)
+# ── API Key helpers ──────────────────────────────────────────────────────────
 
 
 def _mask_key(key: str) -> str:
@@ -93,25 +89,11 @@ def _mask_key(key: str) -> str:
 
 
 def get_api_key(provider: str) -> str | None:
-    """Get the API key for a provider. Used by chat/LLM routes.
+    """Get the API key for a provider.
 
-    Checks saved keys first, then falls back to environment variables.
+    Checks bootstrap DB first, then falls back to environment variables.
     """
-    keys = _load_api_keys()
-    if provider in keys:
-        return keys[provider].get("key")
-    # Fallback: check common env vars
-    env_map = {
-        "anthropic": "ANTHROPIC_API_KEY",
-        "openai": "OPENAI_API_KEY",
-        "openrouter": "OPENROUTER_API_KEY",
-        "google": "GOOGLE_API_KEY",
-        "cohere": "COHERE_API_KEY",
-    }
-    env_var = env_map.get(provider.lower())
-    if env_var:
-        return os.environ.get(env_var)
-    return None
+    return bs.get_api_key(provider)
 
 
 # ── Request / response models ─────────────────────────────────────────────
@@ -142,7 +124,11 @@ class GenerateOntologyRequest(BaseModel):
     connector_name: str
     """Name of the saved connector to use."""
     schema_name: str = "public"
-    """Schema to introspect."""
+    """Database schema to introspect (e.g. 'public', 'main')."""
+    output_schema_name: Optional[str] = None
+    """Name to save the schema under in the bootstrap DB. Defaults to connector_name."""
+    replace: bool = True
+    """If true, replace existing schema with the same name. If false, reject duplicates."""
     include_tables: Optional[list[str]] = None
     """If set, only include these tables."""
     exclude_tables: Optional[list[str]] = None
@@ -161,18 +147,16 @@ class GenerateOntologyRequest(BaseModel):
 @router.get("/connectors")
 async def list_connectors() -> JSONResponse:
     """List all saved connectors (URLs are masked)."""
-    connectors = _load_connectors()
+    connectors = bs.list_connectors()
     result = []
-    for name, data in connectors.items():
+    for c in connectors:
         result.append({
-            "name": name,
-            "connection_url_masked": _mask_url(data["connection_url"]),
-            "db_type": data.get("db_type", "unknown"),
-            "schema_name": data.get("schema_name", "public"),
-            "description": data.get("description", ""),
-            "created_at": data.get("created_at", ""),
-            "last_tested": data.get("last_tested"),
-            "last_test_ok": data.get("last_test_ok"),
+            "id": c["id"],
+            "name": c["name"],
+            "connection_url_masked": _mask_url(c.get("url", "")),
+            "db_type": c.get("type", "unknown"),
+            "description": "",
+            "created_at": c.get("created_at", ""),
         })
     return JSONResponse({"connectors": result, "count": len(result)})
 
@@ -183,7 +167,6 @@ async def list_connectors() -> JSONResponse:
 @router.post("/connectors")
 async def save_connector(req: SaveConnectorRequest) -> JSONResponse:
     """Save a new named connector. Tests the connection first."""
-    # Validate name
     name = req.name.strip()
     if not name:
         return JSONResponse({"error": "Connector name is required"}, status_code=400)
@@ -209,23 +192,16 @@ async def save_connector(req: SaveConnectorRequest) -> JSONResponse:
             "details": traceback.format_exc().split("\n")[-3:],
         }, status_code=400)
 
-    # Save
-    connectors = _load_connectors()
-    now = datetime.now(timezone.utc).isoformat()
-    connectors[name] = {
-        "connection_url": req.connection_url,
-        "db_type": gen._db_type,
-        "schema_name": req.schema_name,
-        "description": req.description,
-        "table_count": len(tables),
-        "created_at": now,
-        "last_tested": now,
-        "last_test_ok": True,
-    }
-    _save_connectors(connectors)
+    # Save to bootstrap DB
+    connector_id = bs.save_connector(
+        name=name,
+        type=gen._db_type,
+        url=req.connection_url,
+    )
 
     return JSONResponse({
         "status": "saved",
+        "id": connector_id,
         "name": name,
         "db_type": gen._db_type,
         "table_count": len(tables),
@@ -239,29 +215,18 @@ async def save_connector(req: SaveConnectorRequest) -> JSONResponse:
 @router.post("/connectors/test")
 async def test_connector(req: TestConnectorRequest) -> JSONResponse:
     """Test a saved connector by name."""
-    connectors = _load_connectors()
-    if req.name not in connectors:
+    connector = bs.get_connector(req.name)
+    if connector is None:
         return JSONResponse({"error": f"Connector '{req.name}' not found"}, status_code=404)
 
-    data = connectors[req.name]
     try:
-        gen = OntologyGenerator(connection_url=data["connection_url"])
-        tables, fks = await gen.introspect(schema=data.get("schema_name", "public"))
+        gen = OntologyGenerator(connection_url=connector["url"])
+        tables, fks = await gen.introspect(schema="public")
     except Exception as e:
-        # Update test status
-        data["last_tested"] = datetime.now(timezone.utc).isoformat()
-        data["last_test_ok"] = False
-        _save_connectors(connectors)
         return JSONResponse({
             "status": "failed",
             "error": str(e),
         }, status_code=400)
-
-    # Update test status
-    data["last_tested"] = datetime.now(timezone.utc).isoformat()
-    data["last_test_ok"] = True
-    data["table_count"] = len(tables)
-    _save_connectors(connectors)
 
     return JSONResponse({
         "status": "ok",
@@ -275,13 +240,15 @@ async def test_connector(req: TestConnectorRequest) -> JSONResponse:
 
 @router.delete("/connectors/{name}")
 async def delete_connector(name: str) -> JSONResponse:
-    """Delete a saved connector."""
-    connectors = _load_connectors()
-    if name not in connectors:
+    """Delete a saved connector. Fails if referenced by schemas."""
+    try:
+        deleted = bs.delete_connector(name)
+    except ValueError as e:
+        return JSONResponse({"error": str(e)}, status_code=409)
+
+    if not deleted:
         return JSONResponse({"error": f"Connector '{name}' not found"}, status_code=404)
 
-    del connectors[name]
-    _save_connectors(connectors)
     return JSONResponse({"status": "deleted", "name": name})
 
 
@@ -291,15 +258,19 @@ async def delete_connector(name: str) -> JSONResponse:
 @router.post("/connectors/{name}/introspect")
 async def introspect_connector(name: str, req: IntrospectRequest | None = None) -> JSONResponse:
     """Introspect tables from a saved connector."""
-    connectors = _load_connectors()
-    if name not in connectors:
+    connector = bs.get_connector(name)
+    if connector is None:
         return JSONResponse({"error": f"Connector '{name}' not found"}, status_code=404)
 
-    data = connectors[name]
-    schema = req.schema_name if req else data.get("schema_name", "public")
+    schema = req.schema_name if req else "public"
+
+    # DuckDB uses 'main' as its default schema, not 'public'
+    db_type = connector.get("type", "")
+    if db_type == "duckdb" and schema == "public":
+        schema = "main"
 
     try:
-        gen = OntologyGenerator(connection_url=data["connection_url"])
+        gen = OntologyGenerator(connection_url=connector["url"])
         tables, foreign_keys = await gen.introspect(schema=schema)
     except Exception as e:
         return JSONResponse({
@@ -353,29 +324,34 @@ async def introspect_connector(name: str, req: IntrospectRequest | None = None) 
 async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
     """Generate an ontology from a saved connector.
 
-    This is the decoupled ontology generation endpoint. It uses a saved
-    connector (by name) rather than a raw connection URL.
+    Saves the ontology into the bootstrap DB (schema-per-ontology model)
+    and also into the target database's nexaql_ontologies table for backward compat.
     """
-    connectors = _load_connectors()
-    if req.connector_name not in connectors:
+    connector = bs.get_connector(req.connector_name)
+    if connector is None:
         return JSONResponse(
             {"error": f"Connector '{req.connector_name}' not found"},
             status_code=404,
         )
 
-    conn_data = connectors[req.connector_name]
-    connection_url = conn_data["connection_url"]
+    connection_url = connector["url"]
+    connector_id = connector["id"]
 
     try:
         gen = OntologyGenerator(connection_url=connection_url)
     except ValueError as e:
         return JSONResponse({"error": str(e)}, status_code=400)
 
+    # DuckDB uses 'main' as its default schema, not 'public'
+    gen_schema = req.schema_name
+    if gen._db_type == "duckdb" and gen_schema == "public":
+        gen_schema = "main"
+
     # Generate ontology
     try:
         description = req.description or f"Auto-generated from {gen._db_type} database"
         ontology = await gen.generate(
-            schema=req.schema_name,
+            schema=gen_schema,
             domain=req.domain,
             description=description,
             include_tables=req.include_tables,
@@ -399,10 +375,73 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
         elif hasattr(ds, "path"):
             ds.path = connection_url
 
-    # Save ontology to the database (always DB, no YAML files)
+    # Save to bootstrap DB
+    save_name = req.output_schema_name or req.connector_name
+    try:
+        # Check for duplicate when replace=False (i.e. "Add Schema")
+        if not req.replace:
+            existing = bs.get_schema(req.domain, save_name)
+            if existing:
+                return JSONResponse(
+                    {"error": f"Schema '{save_name}' already exists in domain '{req.domain}'. Use a different name or regenerate the existing schema."},
+                    status_code=409,
+                )
+
+        ontology_dict = ontology.model_dump(exclude_none=True)
+
+        # Bootstrap default roles and access functions if not already present
+        if "roles" not in ontology_dict or not ontology_dict["roles"]:
+            ontology_dict["roles"] = {
+                "admin": {"description": "Full access to all data"},
+                "analyst": {"description": "Read-only access for reporting and analytics"},
+                "manager": {"description": "Access scoped to their department or region"},
+            }
+        if "access_functions" not in ontology_dict or not ontology_dict["access_functions"]:
+            ontology_dict["access_functions"] = {
+                "owns_record": {
+                    "description": "User owns the record (created_by or user_id matches)",
+                    "sql": "{field} = {user.id}",
+                    "requires": ["id"],
+                },
+                "same_department": {
+                    "description": "User belongs to the same department",
+                    "sql": "{field} = {user.department}",
+                    "requires": ["department"],
+                },
+                "same_region": {
+                    "description": "User is in the same region",
+                    "sql": "{field} = {user.region}",
+                    "requires": ["region"],
+                },
+            }
+
+        bs.save_schema(
+            domain_name=req.domain,
+            schema_name=save_name,
+            connector_id=connector_id,
+            ontology_json=ontology_dict,
+        )
+
+        # Update domain description
+        domain = bs.get_domain(req.domain)
+        if domain:
+            bs._get_conn().execute(
+                "UPDATE domains SET description = ? WHERE name = ?",
+                [description, req.domain],
+            )
+
+        # Set as active domain
+        bs.set_active_domain(req.domain)
+    except Exception as e:
+        return JSONResponse({
+            "error": f"Failed to save ontology to bootstrap DB: {e}",
+            "details": traceback.format_exc().split("\n")[-3:],
+        }, status_code=500)
+
+    # Also save to the target database for backward compat
     try:
         from nexaql.ontology.store import get_store, reset_store
-        reset_store()  # clear cached store since we may have a new connection
+        reset_store()
         if connection_url.startswith("postgresql"):
             from nexaql.ontology.store import PostgresStore
             store = PostgresStore(connection_url)
@@ -410,33 +449,8 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
             from nexaql.ontology.store import DuckDBStore
             store = DuckDBStore(connection_url)
         await store.save(ontology, author="admin-generate")
-    except Exception as e:
-        return JSONResponse({
-            "error": f"Failed to save ontology to database: {e}",
-            "details": traceback.format_exc().split("\n")[-3:],
-        }, status_code=500)
-
-    # Update nexaql.yaml config — set datasource so queries work
-    try:
-        import yaml as _yaml
-        config_path = os.environ.get("NEXAQL_CONFIG", "nexaql.yaml")
-        with open(config_path) as f:
-            raw_config = _yaml.safe_load(f) or {}
-
-        # Set active domain (used by deps.get_ontology to know which domain to load)
-        raw_config["ontology"] = {"domain": req.domain}
-        raw_config["datasources"] = {
-            "default": {
-                "type": gen._db_type,
-                **({"url": connection_url} if gen._db_type != "duckdb" else {"path": connection_url}),
-            }
-        }
-
-        with open(config_path, "w") as f:
-            f.write("# NexaQL configuration — updated by Admin\n")
-            _yaml.dump(raw_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
     except Exception:
-        pass
+        pass  # Non-fatal — bootstrap DB is the source of truth
 
     # Reload config + clear caches
     try:
@@ -460,11 +474,12 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
 
     return JSONResponse({
         "status": "generated",
-        "stored_in": "database",
-        "storage_detail": f"nexaql_ontologies table in {gen._db_type}",
+        "stored_in": "bootstrap_db",
+        "storage_detail": f"~/.nexaql/nexaql.db + {gen._db_type}",
         "domain": req.domain,
         "db_type": gen._db_type,
         "connector_name": req.connector_name,
+        "connector_id": connector_id,
         "nodes": node_summary,
         "node_count": len(ontology.nodes),
         "total_fields": sum(len(n.fields) for n in ontology.nodes.values()),
@@ -487,15 +502,15 @@ class SaveApiKeyRequest(BaseModel):
 @router.get("/api-keys")
 async def list_api_keys() -> JSONResponse:
     """List all saved API keys (values masked)."""
-    keys = _load_api_keys()
+    keys = bs.list_api_keys()
     result = []
-    for provider, info in keys.items():
+    for k in keys:
         result.append({
-            "provider": provider,
-            "name": info.get("name", provider),
-            "key_masked": _mask_key(info.get("key", "")),
-            "created_at": info.get("created_at", ""),
-            "is_active": info.get("is_active", True),
+            "provider": k["provider"],
+            "name": k.get("name", k["provider"]),
+            "key_masked": _mask_key(k.get("key", "")),
+            "created_at": k.get("created_at", ""),
+            "is_active": True,
         })
     return JSONResponse({"api_keys": result})
 
@@ -506,19 +521,12 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
     if not req.provider.strip() or not req.key.strip():
         return JSONResponse({"error": "Provider and key are required"}, status_code=400)
 
-    keys = _load_api_keys()
     provider_key = req.provider.strip().lower()
 
-    keys[provider_key] = {
-        "name": req.name.strip(),
-        "key": req.key.strip(),
-        "provider": provider_key,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "is_active": True,
-    }
-    _save_api_keys(keys)
+    # Save to bootstrap DB
+    bs.save_api_key(provider=provider_key, name=req.name.strip(), key=req.key.strip())
 
-    # Inject into environment so LLM config picks it up immediately
+    # Inject into environment so LLM picks it up immediately
     env_map = {
         "anthropic": "ANTHROPIC_API_KEY",
         "openai": "OPENAI_API_KEY",
@@ -530,47 +538,38 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
     if env_var:
         os.environ[env_var] = req.key.strip()
 
-    # Also update nexaql.yaml to switch provider/model when a cloud key is saved
+    # Auto-configure LLM provider/model when a cloud key is saved
     try:
-        import yaml as _yaml
         from nexaql.chat.llm import DEFAULT_MODELS
-        config_path = os.environ.get("NEXAQL_CONFIG", "nexaql.yaml")
-        if os.path.exists(config_path):
-            with open(config_path) as f:
-                raw_config = _yaml.safe_load(f) or {}
-            llm_section = raw_config.get("llm", {})
-            current_provider = llm_section.get("provider", "")
-            current_model = llm_section.get("model", "")
 
-            # Auto-configure provider/model when a cloud key is saved
-            # and LLM is not yet configured (or switching providers)
-            if provider_key == "openrouter":
-                llm_section["provider"] = "openrouter"
-                llm_section["api_key"] = f"${{OPENROUTER_API_KEY}}"
-                if not current_model or current_model.startswith("qwen3:"):
-                    llm_section["model"] = "anthropic/claude-sonnet-4-20250514"
-            elif provider_key == "anthropic":
-                # Only auto-switch if not already configured with another cloud provider
-                if not current_provider or current_provider == "ollama":
-                    llm_section["provider"] = "anthropic"
-                    llm_section["api_key"] = f"${{ANTHROPIC_API_KEY}}"
-                if not current_model or current_model.startswith("qwen3:"):
-                    llm_section["model"] = "claude-sonnet-4-20250514"
-            elif provider_key == "openai":
-                if not current_provider or current_provider == "ollama":
-                    llm_section["provider"] = "openai"
-                    llm_section["api_key"] = f"${{OPENAI_API_KEY}}"
-                if not current_model or current_model.startswith("qwen3:"):
-                    llm_section["model"] = "gpt-4o"
+        llm_cfg = bs.get_active_llm_config()
+        current_provider = llm_cfg["provider"] if llm_cfg else ""
+        current_model = llm_cfg["model"] if llm_cfg else ""
 
-            # Ensure generation_mode is set
-            if "generation_mode" not in llm_section:
-                llm_section["generation_mode"] = "intent"
+        new_provider = current_provider
+        new_model = current_model
 
-            raw_config["llm"] = llm_section
-            with open(config_path, "w") as f:
-                f.write("# NexaQL configuration — updated by Admin\n")
-                _yaml.dump(raw_config, f, default_flow_style=False, sort_keys=False, allow_unicode=True)
+        if provider_key == "openrouter":
+            new_provider = "openrouter"
+            if not current_model or current_model.startswith("qwen3:"):
+                new_model = "anthropic/claude-sonnet-4-20250514"
+        elif provider_key == "anthropic":
+            if not current_provider or current_provider == "ollama":
+                new_provider = "anthropic"
+            if not current_model or current_model.startswith("qwen3:"):
+                new_model = "claude-sonnet-4-20250514"
+        elif provider_key == "openai":
+            if not current_provider or current_provider == "ollama":
+                new_provider = "openai"
+            if not current_model or current_model.startswith("qwen3:"):
+                new_model = "gpt-4o"
+
+        if new_provider != current_provider or new_model != current_model:
+            bs.save_llm_config(
+                provider=new_provider,
+                model=new_model,
+                generation_mode="intent",
+            )
     except Exception:
         pass
 
@@ -593,12 +592,9 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
 @router.delete("/api-keys/{provider}")
 async def delete_api_key(provider: str) -> JSONResponse:
     """Delete a saved API key."""
-    keys = _load_api_keys()
-    if provider not in keys:
+    deleted = bs.delete_api_key(provider)
+    if not deleted:
         return JSONResponse({"error": f"API key for '{provider}' not found"}, status_code=404)
-
-    del keys[provider]
-    _save_api_keys(keys)
 
     # Remove from environment
     env_map = {

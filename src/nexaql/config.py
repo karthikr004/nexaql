@@ -102,13 +102,104 @@ def _substitute_env(value: Any) -> Any:
 # ── Public API ───────────────────────────────────────────────────────────────
 
 
-def load_config(path: str = "nexaql.yaml") -> NexaQLConfig:
-    """Load an ``nexaql.yaml`` configuration file.
+def load_config_from_bootstrap() -> NexaQLConfig:
+    """Load configuration from the bootstrap DuckDB database.
 
-    Environment variable references of the form ``${VAR}`` in string values
-    are expanded before Pydantic validation.
+    This is the primary config loader. Falls back to nexaql.yaml only if
+    the bootstrap DB has no LLM config (legacy/first-run scenario).
     """
+    from nexaql import bootstrap as bs
+
+    # LLM config
+    llm_data = bs.get_active_llm_config()
+    if llm_data:
+        api_key = bs.get_api_key(llm_data["provider"]) if llm_data.get("provider") else None
+        llm = LLMConfig(
+            provider=llm_data.get("provider", ""),
+            model=llm_data.get("model", ""),
+            max_tokens=llm_data.get("max_tokens", 4096),
+            summary_max_tokens=llm_data.get("summary_max_tokens", 2048),
+            generation_mode=llm_data.get("generation_mode", "intent"),
+            api_key=api_key,
+        )
+    else:
+        llm = LLMConfig()
+
+    # Server config
+    srv_data = bs.get_server_config()
+    server = ServerConfig(
+        host=srv_data.get("host", "0.0.0.0"),
+        port=srv_data.get("port", 3717),
+        cors_origins=srv_data.get("cors_origins", ["*"]),
+    )
+
+    # Active domain
+    active_domain = srv_data.get("active_domain")
+    ontology = OntologyConfig(domain=active_domain)
+
+    # Build datasources from connectors linked to active domain schemas
+    datasources: dict[str, DatasourceEntry] = {}
+    if active_domain:
+        schemas = bs.list_schemas(active_domain)
+        seen_connectors: set[int] = set()
+        for schema in schemas:
+            cid = schema["connector_id"]
+            if cid in seen_connectors:
+                continue
+            seen_connectors.add(cid)
+            conn_data = bs.get_connector_by_id(cid)
+            if conn_data:
+                ds_name = conn_data["name"]
+                ds_type = conn_data.get("type", "postgresql")
+                ds_url = conn_data.get("url", "")
+                if ds_type == "duckdb":
+                    datasources[ds_name] = DatasourceEntry(type=ds_type, path=ds_url)
+                else:
+                    datasources[ds_name] = DatasourceEntry(type=ds_type, url=ds_url)
+
+    # If no datasources from bootstrap, try first connector
+    if not datasources:
+        connectors = bs.list_connectors()
+        if connectors:
+            c = connectors[0]
+            ds_type = c.get("type", "postgresql")
+            ds_url = c.get("url", "")
+            if ds_type == "duckdb":
+                datasources[c["name"]] = DatasourceEntry(type=ds_type, path=ds_url)
+            else:
+                datasources[c["name"]] = DatasourceEntry(type=ds_type, url=ds_url)
+
+    return NexaQLConfig(
+        ontology=ontology,
+        datasources=datasources,
+        llm=llm,
+        server=server,
+    )
+
+
+def load_config(path: str = "nexaql.yaml") -> NexaQLConfig:
+    """Load configuration -- bootstrap DB first, YAML fallback.
+
+    Tries the bootstrap DuckDB database first. If it has no meaningful
+    config (no LLM, no connectors), falls back to loading nexaql.yaml
+    and migrates its data into the bootstrap DB.
+    """
+    # Try bootstrap DB first
+    try:
+        cfg = load_config_from_bootstrap()
+        if cfg.llm.provider or cfg.datasources:
+            return cfg
+    except Exception:
+        pass
+
+    # Fallback: load from YAML (legacy)
     abs_path = os.path.abspath(path)
+    if not os.path.exists(abs_path):
+        try:
+            return load_config_from_bootstrap()
+        except Exception:
+            return NexaQLConfig(ontology=OntologyConfig())
+
     with open(abs_path) as f:
         raw = yaml.safe_load(f)
 
