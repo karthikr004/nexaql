@@ -182,11 +182,13 @@ def install(skip_sample: bool, config_path: str, force: bool) -> None:
     if not skip_sample:
         import duckdb
 
-        db_exists = os.path.exists(DUCKDB_FILE) and not force
+        if force and os.path.exists(DUCKDB_FILE):
+            os.remove(DUCKDB_FILE)
+
+        db_exists = os.path.exists(DUCKDB_FILE)
         conn = duckdb.connect(DUCKDB_FILE)
 
         if db_exists:
-            # Check if tables already exist
             tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
             if tables:
                 click.echo(f"         Database exists with {len(tables)} tables. Use --force to recreate.")
