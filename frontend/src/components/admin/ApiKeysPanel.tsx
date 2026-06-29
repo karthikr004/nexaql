@@ -1,5 +1,5 @@
 /**
- * API Keys panel.
+ * API Keys panel with model selector.
  */
 import { useState, useCallback, useEffect } from 'react';
 import { SectionHeader, inputStyle, labelStyle, type ToastData } from './shared';
@@ -11,6 +11,18 @@ export interface ApiKeyInfo {
   created_at: string;
   is_active: boolean;
 }
+
+interface LLMConfig {
+  provider: string;
+  model: string;
+}
+
+const MODEL_SUGGESTIONS: Record<string, string[]> = {
+  anthropic: ['claude-sonnet-4-6', 'claude-haiku-4-5-20251001', 'claude-opus-4-6'],
+  openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1'],
+  openrouter: ['anthropic/claude-sonnet-4-6', 'openai/gpt-4o', 'google/gemini-2.0-flash'],
+  google: ['gemini-2.0-flash', 'gemini-2.5-pro'],
+};
 
 interface Props {
   onToast: (t: ToastData) => void;
@@ -25,6 +37,11 @@ export default function ApiKeysPanel({ onToast }: Props) {
   const [keyVal, setKeyVal] = useState('');
   const [saving, setSaving] = useState(false);
 
+  // LLM model config
+  const [llmConfig, setLlmConfig] = useState<LLMConfig>({ provider: '', model: '' });
+  const [modelInput, setModelInput] = useState('');
+  const [savingModel, setSavingModel] = useState(false);
+
   const fetchKeys = useCallback(async () => {
     setLoading(true);
     try {
@@ -33,7 +50,18 @@ export default function ApiKeysPanel({ onToast }: Props) {
     } catch { /* ignore */ } finally { setLoading(false); }
   }, []);
 
-  useEffect(() => { fetchKeys(); }, [fetchKeys]);
+  const fetchLLMConfig = useCallback(async () => {
+    try {
+      const res = await fetch('/api/llm-config');
+      if (res.ok) {
+        const cfg = await res.json();
+        setLlmConfig(cfg);
+        setModelInput(cfg.model || '');
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  useEffect(() => { fetchKeys(); fetchLLMConfig(); }, [fetchKeys, fetchLLMConfig]);
 
   const handleSave = useCallback(async () => {
     if (!provider.trim() || !keyVal.trim()) return;
@@ -49,21 +77,46 @@ export default function ApiKeysPanel({ onToast }: Props) {
         onToast({ message: `API key for "${provider}" saved`, type: 'success' });
         setShowAdd(false); setName(''); setProvider('anthropic'); setKeyVal('');
         fetchKeys();
+        fetchLLMConfig();
       } else {
         onToast({ message: body.error || 'Failed to save', type: 'error' });
       }
     } catch (err) {
       onToast({ message: `Error: ${err}`, type: 'error' });
     } finally { setSaving(false); }
-  }, [name, provider, keyVal, fetchKeys, onToast]);
+  }, [name, provider, keyVal, fetchKeys, fetchLLMConfig, onToast]);
+
+  const handleSaveModel = useCallback(async () => {
+    if (!modelInput.trim()) return;
+    setSavingModel(true);
+    try {
+      const res = await fetch('/api/llm-config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: modelInput.trim() }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        onToast({ message: `Model updated to "${modelInput.trim()}"`, type: 'success' });
+        fetchLLMConfig();
+      } else {
+        onToast({ message: body.error || 'Failed to update model', type: 'error' });
+      }
+    } catch (err) {
+      onToast({ message: `Error: ${err}`, type: 'error' });
+    } finally { setSavingModel(false); }
+  }, [modelInput, fetchLLMConfig, onToast]);
 
   const handleDelete = useCallback(async (prov: string) => {
     try {
       const res = await fetch(`/api/api-keys/${encodeURIComponent(prov)}`, { method: 'DELETE' });
-      if (res.ok) { onToast({ message: `Deleted "${prov}" key`, type: 'success' }); fetchKeys(); }
+      if (res.ok) { onToast({ message: `Deleted "${prov}" key`, type: 'success' }); fetchKeys(); fetchLLMConfig(); }
       else { const b = await res.json(); onToast({ message: b.error || 'Delete failed', type: 'error' }); }
     } catch (err) { onToast({ message: `Error: ${err}`, type: 'error' }); }
-  }, [fetchKeys, onToast]);
+  }, [fetchKeys, fetchLLMConfig, onToast]);
+
+  const suggestions = MODEL_SUGGESTIONS[llmConfig.provider] || [];
+  const modelChanged = modelInput.trim() !== (llmConfig.model || '');
 
   return (
     <>
@@ -118,6 +171,58 @@ export default function ApiKeysPanel({ onToast }: Props) {
                 <button type="button" onClick={() => handleDelete(k.provider)} className="rounded px-2 py-1 text-[10px] border" style={{ borderColor: 'var(--border)', color: 'var(--error)' }}>Delete</button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* Model selector */}
+        {llmConfig.provider && (
+          <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+            <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>Active Model</span>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>
+                Model ({llmConfig.provider})
+              </label>
+              <div className="flex gap-2">
+                <input
+                  value={modelInput}
+                  onChange={(e) => setModelInput(e.target.value)}
+                  placeholder="e.g. claude-sonnet-4-6"
+                  className="flex-1 rounded border px-2 py-1.5 text-sm font-mono focus:outline-none"
+                  style={inputStyle}
+                  list="model-suggestions"
+                />
+                <datalist id="model-suggestions">
+                  {suggestions.map((m) => <option key={m} value={m} />)}
+                </datalist>
+                <button
+                  type="button"
+                  onClick={handleSaveModel}
+                  disabled={savingModel || !modelInput.trim() || !modelChanged}
+                  className="rounded px-4 py-1.5 text-xs font-semibold bg-[#3dd68c] text-[#0f1117] hover:bg-[#32b577] disabled:opacity-50"
+                >
+                  {savingModel ? 'Saving...' : 'Update'}
+                </button>
+              </div>
+              {suggestions.length > 0 && (
+                <div className="flex flex-wrap gap-1.5 mt-2">
+                  {suggestions.map((m) => (
+                    <button
+                      key={m}
+                      type="button"
+                      onClick={() => setModelInput(m)}
+                      className="rounded px-2 py-0.5 text-[10px] font-mono border hover:opacity-80"
+                      style={{
+                        borderColor: modelInput === m ? 'var(--badge-green-border)' : 'var(--border)',
+                        backgroundColor: modelInput === m ? 'var(--badge-green-bg)' : 'transparent',
+                        color: modelInput === m ? 'var(--badge-green-text)' : 'var(--text-secondary)',
+                      }}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           </div>
         )}
 

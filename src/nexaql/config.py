@@ -118,9 +118,9 @@ def load_config_from_bootstrap() -> NexaQLConfig:
     # If configured provider has no key, find one that does
     if not api_key and provider and provider.lower() != "ollama":
         _provider_models = {
-            "anthropic": "claude-sonnet-4-20250514",
+            "anthropic": "claude-sonnet-4-6",
             "openai": "gpt-4o",
-            "openrouter": "anthropic/claude-sonnet-4-20250514",
+            "openrouter": "anthropic/claude-sonnet-4-6",
             "google": "gemini-2.0-flash",
         }
         for candidate in _provider_models:
@@ -134,9 +134,9 @@ def load_config_from_bootstrap() -> NexaQLConfig:
         model = llm_data.get("model", "")
         if provider != llm_data.get("provider", ""):
             _fallback_models = {
-                "anthropic": "claude-sonnet-4-20250514",
+                "anthropic": "claude-sonnet-4-6",
                 "openai": "gpt-4o",
-                "openrouter": "anthropic/claude-sonnet-4-20250514",
+                "openrouter": "anthropic/claude-sonnet-4-6",
                 "google": "gemini-2.0-flash",
             }
             model = _fallback_models.get(provider, model)

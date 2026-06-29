@@ -19,8 +19,56 @@ router = APIRouter(tags=["admin"])
 
 
 async def _save_ontology_to_db(ontology: Ontology) -> None:
-    """Save ontology to the database via the active store."""
+    """Save ontology to both the bootstrap DB and the active store."""
+    import json as _json
+    from nexaql import bootstrap as bs
     from nexaql.api.deps import _get_store_for_datasource
+
+    domain = ontology.domain or bs.get_active_domain() or "default"
+
+    # ── Update bootstrap DB (primary read path) ──────────────────────
+    schemas = bs.list_schemas(domain)
+    if schemas:
+        # Build node→schema mapping from existing data
+        node_schema_map: dict[str, dict] = {}
+        for schema in schemas:
+            try:
+                ont_data = _json.loads(schema["ontology_json"]) if isinstance(schema["ontology_json"], str) else schema["ontology_json"]
+            except (ValueError, TypeError):
+                ont_data = {}
+            for node_name in ont_data.get("nodes", {}):
+                node_schema_map[node_name] = schema
+
+        ont_dict = ontology.model_dump(exclude_none=True)
+        all_nodes = ont_dict.get("nodes", {})
+        top_level = {k: v for k, v in ont_dict.items() if k != "nodes"}
+
+        # Group updated nodes back into their schemas
+        schema_nodes: dict[int, dict[str, Any]] = {}
+        for node_name, node_def in all_nodes.items():
+            src_schema = node_schema_map.get(node_name, schemas[0])
+            sid = src_schema["id"]
+            if sid not in schema_nodes:
+                schema_nodes[sid] = {}
+            schema_nodes[sid][node_name] = node_def
+
+        # Also include schemas that had no matching nodes (keep their data)
+        for schema in schemas:
+            sid = schema["id"]
+            if sid not in schema_nodes:
+                schema_nodes[sid] = {}
+
+        for schema in schemas:
+            sid = schema["id"]
+            updated_ont = {**top_level, "nodes": schema_nodes.get(sid, {})}
+            bs.save_schema(
+                domain_name=domain,
+                schema_name=schema["name"],
+                connector_id=schema["connector_id"],
+                ontology_json=updated_ont,
+            )
+
+    # ── Also save to the store (secondary path) ─────────────────────
     store = _get_store_for_datasource()
     await store.save(ontology, author="admin")
     invalidate_ontology_cache()

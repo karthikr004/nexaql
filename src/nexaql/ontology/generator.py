@@ -459,7 +459,30 @@ class OntologyGenerator:
                     row_count_estimate=row_count,
                 ))
 
-            return tables, []  # DuckDB doesn't have FKs in information_schema
+            # Foreign keys via duckdb_constraints()
+            fks: list[ForeignKey] = []
+            try:
+                fk_rows = conn.execute(
+                    "SELECT table_name, constraint_column_names, "
+                    "constraint_name, referenced_table, referenced_column_names "
+                    "FROM duckdb_constraints() "
+                    f"WHERE constraint_type = 'FOREIGN KEY' AND schema_name = '{schema}'"
+                ).fetchall()
+                for row in fk_rows:
+                    tname, from_cols, cname, ref_table, ref_cols = row
+                    if from_cols and ref_cols:
+                        for fc, rc in zip(from_cols, ref_cols):
+                            fks.append(ForeignKey(
+                                from_table=tname,
+                                from_column=fc,
+                                to_table=ref_table,
+                                to_column=rc,
+                                constraint_name=cname or f"{tname}_{fc}_fkey",
+                            ))
+            except Exception:
+                pass
+
+            return tables, fks
         finally:
             conn.close()
 
@@ -757,6 +780,30 @@ class OntologyGenerator:
                         table=fk.to_table,
                         alias_key=alias,
                         condition=f"{alias}.{fk.to_column} = {node_name[0]}0.{fk.from_column}",
+                    )],
+                )
+
+            # Build reverse edges (referenced table → referencing table)
+            for fk in reverse_fk.get(table.name, []):
+                source_node = table_to_node.get(fk.from_table)
+                if not source_node:
+                    continue
+
+                # Pluralize: customers → orders (one-to-many)
+                rev_name = source_node
+                if rev_name in fields or rev_name in edges:
+                    rev_name = f"{rev_name}_list"
+
+                alias = f"{source_node[0]}1"
+
+                edges[rev_name] = OntologyEdge(
+                    node=source_node,
+                    description=f"{source_node.replace('_', ' ').title()} referencing this {node_name}",
+                    join_type="LEFT JOIN",
+                    join_steps=[JoinStep(
+                        table=fk.from_table,
+                        alias_key=alias,
+                        condition=f"{alias}.{fk.from_column} = {node_name[0]}0.{fk.to_column}",
                     )],
                 )
 

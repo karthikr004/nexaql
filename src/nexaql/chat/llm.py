@@ -42,7 +42,7 @@ DEFAULT_MODELS: dict[str, str] = {
     "ollama": "",
     "openrouter": "",
     "openai": "",
-    "anthropic": "claude-sonnet-4-20250514",
+    "anthropic": "claude-sonnet-4-6",
 }
 
 # ── Client cache ──────────────────────────────────────────────────────────────

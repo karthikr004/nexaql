@@ -552,11 +552,11 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
         if provider_key == "openrouter":
             new_provider = "openrouter"
             if not current_model or current_model.startswith("qwen3:"):
-                new_model = "anthropic/claude-sonnet-4-20250514"
+                new_model = "anthropic/claude-sonnet-4-6"
         elif provider_key == "anthropic":
             new_provider = "anthropic"
             if not current_model or not current_model.startswith("claude"):
-                new_model = "claude-sonnet-4-20250514"
+                new_model = "claude-sonnet-4-6"
         elif provider_key == "openai":
             new_provider = "openai"
             if not current_model or not current_model.startswith("gpt"):
@@ -609,3 +609,49 @@ async def delete_api_key(provider: str) -> JSONResponse:
     reload_config()
 
     return JSONResponse({"status": "deleted", "provider": provider})
+
+
+# ── LLM Config endpoints ──────────────────────────────────────────────────
+
+
+@router.get("/llm-config")
+async def get_llm_config() -> JSONResponse:
+    """Get current LLM provider and model configuration."""
+    cfg = bs.get_active_llm_config()
+    if not cfg:
+        return JSONResponse({"provider": "", "model": ""})
+    return JSONResponse({
+        "provider": cfg.get("provider", ""),
+        "model": cfg.get("model", ""),
+        "max_tokens": cfg.get("max_tokens", 4096),
+        "generation_mode": cfg.get("generation_mode", "intent"),
+    })
+
+
+class UpdateLLMConfigRequest(BaseModel):
+    model: str
+
+
+@router.put("/llm-config")
+async def update_llm_config(req: UpdateLLMConfigRequest) -> JSONResponse:
+    """Update the active LLM model."""
+    if not req.model.strip():
+        return JSONResponse({"error": "Model is required"}, status_code=400)
+
+    cfg = bs.get_active_llm_config()
+    provider = cfg["provider"] if cfg else "anthropic"
+
+    bs.save_llm_config(
+        provider=provider,
+        model=req.model.strip(),
+        generation_mode=cfg.get("generation_mode", "intent") if cfg else "intent",
+    )
+
+    reload_config()
+    try:
+        from nexaql.chat.llm import invalidate_client_cache
+        invalidate_client_cache()
+    except Exception:
+        pass
+
+    return JSONResponse({"status": "updated", "provider": provider, "model": req.model.strip()})
