@@ -203,7 +203,14 @@ async def execute_with_retry_intent(
                 "- Use exact node names from the ontology\n"
                 "- Only filter on fields marked as filterable\n"
                 "- Enum values must be UPPERCASE and match exactly\n"
-                "Respond with the corrected JSON only."
+                + (
+                    "- AGGREGATION PLACEMENT: The field in an aggregation MUST exist on the node where the aggregation appears. "
+                    "If the field belongs to a related node, move the aggregation INSIDE that edge. "
+                    "Example: to sum(quantity) where quantity is on order_items, place the aggregation inside the order_items edge, NOT at the top-level node.\n"
+                    if "not found on" in str(error).lower() or "unknown field" in str(error).lower()
+                    else ""
+                )
+                + "Respond with the corrected JSON only."
             ),
         })
 

@@ -345,14 +345,19 @@ RULES:
 1. "node" — REQUIRED. Must be an exact node name from the ontology.
 2. "fields" — List of scalar field names to return. Use exact names from the ontology. Omit if only aggregating.
 3. "aggregations" — For count/sum/avg/min/max. "field" is null for count(). "alias" is the output column name.
+   CRITICAL: The "field" in an aggregation MUST exist on the node where the aggregation appears.
+   - Top-level aggregations can ONLY use fields from the top-level "node".
+   - To aggregate a field from a related node, put the aggregation INSIDE that edge — NEVER at the top level.
+   - WRONG: {{"node": "product", "aggregations": [{{"alias": "total_qty", "func": "sum", "field": "quantity"}}]}} (quantity is on order_items, not product)
+   - RIGHT: {{"node": "product", "edges": [{{"name": "order_items", "aggregations": [{{"alias": "total_qty", "func": "sum", "field": "quantity"}}]}}]}}
 4. "calcs" — For computed expressions like date math or arithmetic. "expr" uses bare field names.
 5. "filters" — Only use fields marked as filterable (marked with ⚡ in the ontology).
    - ops: "eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null"
    - String values must match exact case from ontology (enums are UPPERCASE).
 6. "calc_filters" — Filters on computed expressions, e.g. "days until expiry < 30".
 7. "special_filters" — Pre-defined filters from the ontology. Use exact names and appropriate values.
-8. "edges" — Nested related data. Each edge can have its own fields, filters, limit, and sub-edges.
-9. "order_by" — Sort results. "direction" is "ASC" or "DESC". Can reference aggregation aliases.
+8. "edges" — Nested related data. Each edge can have its own fields, filters, aggregations, limit, and sub-edges.
+9. "order_by" — Sort results. "direction" is "ASC" or "DESC". Can reference aggregation aliases (including those from edges).
 10. "limit" / "distinct" — Optional. Omit if not needed.
 11. Only include keys that are needed. Omit empty arrays and null values.
 
@@ -371,6 +376,16 @@ Q: "count of active contracts by status"
 Q: "invoices expiring within 30 days with supplier name"
 ```json
 {{"node": "invoices", "fields": ["invoice_number", "due_date", "amount"], "calc_filters": [{{"expr": "due_date - CURRENT_DATE", "op": "gte", "value": 0}}, {{"expr": "due_date - CURRENT_DATE", "op": "lte", "value": 30}}], "edges": [{{"name": "suppliers", "fields": ["name"]}}], "order_by": [{{"field": "due_date", "direction": "ASC"}}]}}
+```
+
+Q: "top 5 most ordered products" (EDGE AGGREGATION — quantity is on order_items, not product)
+```json
+{{"node": "product", "fields": ["id", "name", "sku"], "edges": [{{"name": "order_items", "aggregations": [{{"alias": "total_ordered", "func": "sum", "field": "quantity"}}]}}], "order_by": [{{"field": "total_ordered", "direction": "DESC"}}], "limit": 5}}
+```
+
+Q: "customers with their total order count"
+```json
+{{"node": "customer", "fields": ["name", "email"], "edges": [{{"name": "orders", "aggregations": [{{"alias": "order_count", "func": "count"}}]}}], "order_by": [{{"field": "order_count", "direction": "DESC"}}]}}
 ```
 
 Respond with ONLY the JSON object in a ```json block. No explanation needed."""
