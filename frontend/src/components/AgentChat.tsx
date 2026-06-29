@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import Markdown from 'react-markdown';
 import type { ChatTurn, ColumnMeta } from '../types';
 
 // ── Compact inline results table ───────────────────────────────────────────────
@@ -143,57 +144,57 @@ function highlightNexaQL(code: string): string {
   });
 }
 
-// ── Formatted summary with code block support ────────────────────────────────
+// ── Formatted summary with markdown rendering ────────────────────────────────
 
 function FormattedSummary({ text }: { text: string }) {
-  // Split on fenced code blocks: ```lang\n...\n```
-  const parts = text.split(/(```[\s\S]*?```)/g);
-
   return (
-    <div className="space-y-2">
-      {parts.map((part, i) => {
-        const codeMatch = part.match(/^```(\w*)\n?([\s\S]*?)```$/);
-        if (codeMatch) {
-          const code = (codeMatch[2] ?? '').trim();
-          const isNexaql = /^(nexaql|graphql)?$/i.test(codeMatch[1] ?? '');
-          return (
-            <pre
-              key={i}
-              className="overflow-x-auto rounded border px-3 py-2 font-mono text-[11px] leading-relaxed"
-              style={{
-                borderColor: 'var(--border)',
-                backgroundColor: 'var(--bg-secondary)',
-                color: 'var(--text-primary)',
-              }}
-              {...(isNexaql
-                ? { dangerouslySetInnerHTML: { __html: highlightNexaQL(code) } }
-                : { children: code }
-              )}
-            />
-          );
-        }
-        // Regular text — render paragraphs, handle inline code with backticks
-        const trimmed = part.trim();
-        if (!trimmed) return null;
-        return (
-          <p key={i} className="text-[13px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
-            {trimmed.split(/(`[^`]+`)/g).map((seg, j) => {
-              if (seg.startsWith('`') && seg.endsWith('`')) {
-                return (
-                  <code
-                    key={j}
-                    className="rounded px-1 py-0.5 font-mono text-[11px]"
-                    style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--accent)' }}
-                  >
-                    {seg.slice(1, -1)}
-                  </code>
-                );
-              }
-              return seg;
-            })}
-          </p>
-        );
-      })}
+    <div className="prose-chat text-[13px] leading-relaxed" style={{ color: 'var(--text-primary)' }}>
+      <Markdown
+        components={{
+          h1: ({ children }) => <h1 className="text-base font-bold mt-3 mb-1.5" style={{ color: 'var(--text-primary)' }}>{children}</h1>,
+          h2: ({ children }) => <h2 className="text-sm font-bold mt-2.5 mb-1" style={{ color: 'var(--text-primary)' }}>{children}</h2>,
+          h3: ({ children }) => <h3 className="text-[13px] font-semibold mt-2 mb-1" style={{ color: 'var(--text-primary)' }}>{children}</h3>,
+          p: ({ children }) => <p className="mb-1.5">{children}</p>,
+          strong: ({ children }) => <strong className="font-semibold" style={{ color: 'var(--text-primary)' }}>{children}</strong>,
+          em: ({ children }) => <em>{children}</em>,
+          ul: ({ children }) => <ul className="list-disc pl-4 mb-1.5 space-y-0.5">{children}</ul>,
+          ol: ({ children }) => <ol className="list-decimal pl-4 mb-1.5 space-y-0.5">{children}</ol>,
+          li: ({ children }) => <li>{children}</li>,
+          code: ({ className, children }) => {
+            const isBlock = className?.includes('language-');
+            if (isBlock) {
+              const lang = className?.replace('language-', '') ?? '';
+              const code = String(children).trim();
+              const isNexaql = /^(nexaql|graphql)?$/i.test(lang);
+              return (
+                <pre
+                  className="overflow-x-auto rounded border px-3 py-2 font-mono text-[11px] leading-relaxed my-1.5"
+                  style={{
+                    borderColor: 'var(--border)',
+                    backgroundColor: 'var(--bg-secondary)',
+                    color: 'var(--text-primary)',
+                  }}
+                  {...(isNexaql
+                    ? { dangerouslySetInnerHTML: { __html: highlightNexaQL(code) } }
+                    : { children: code }
+                  )}
+                />
+              );
+            }
+            return (
+              <code
+                className="rounded px-1 py-0.5 font-mono text-[11px]"
+                style={{ backgroundColor: 'var(--bg-secondary)', color: 'var(--accent)' }}
+              >
+                {children}
+              </code>
+            );
+          },
+          pre: ({ children }) => <>{children}</>,
+        }}
+      >
+        {text}
+      </Markdown>
     </div>
   );
 }
