@@ -213,26 +213,17 @@ def _enforce_node(
             if field_def is not None:
                 field_visible = getattr(field_def, "visible_to", None)
                 if field_visible is not None and not has_role(user, field_visible):
-                    warnings.append(
-                        f"Field '{scalar.name}' on '{node.name}' hidden from user "
-                        f"'{user.user_id}' (requires roles {field_visible})"
-                    )
-                    continue  # skip this field
-
-                # PII masking — only if user doesn't have full visible_to access
-                # (admin with visible_to match sees unmasked; analyst who can see
-                # the field but it's PII gets masking applied)
-                mask_with = getattr(field_def, "mask_with", None)
-                pii = getattr(field_def, "pii", False)
-                if pii and mask_with:
-                    # Check if user has the highest tier of access (visible_to includes their role)
-                    # If visible_to is set and user matches, they get unmasked access
-                    # If visible_to is not set (all), PII masking still applies unless user has "*"
-                    field_visible = getattr(field_def, "visible_to", None)
-                    user_has_direct_access = field_visible is not None and has_role(user, field_visible)
-                    if not user_has_direct_access:
+                    mask_with = getattr(field_def, "mask_with", None)
+                    pii = getattr(field_def, "pii", False)
+                    if pii and mask_with:
                         alias = f"{node.name}__{scalar.name}"
                         masked_fields.append(MaskRule(column_alias=alias, strategy=mask_with))
+                    else:
+                        warnings.append(
+                            f"Field '{scalar.name}' on '{node.name}' hidden from user "
+                            f"'{user.user_id}' (requires roles {field_visible})"
+                        )
+                        continue
 
             filtered_fields.append(fld)
 

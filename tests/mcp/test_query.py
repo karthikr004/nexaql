@@ -88,14 +88,52 @@ class TestQueryAccessControl:
         assert "customer__email" in col_names
 
     @pytest.mark.asyncio
-    async def test_analyst_email_stripped(self):
+    async def test_analyst_email_hashed(self):
         result = await query(
             nexaql_query="{ customer @limit(1) { id name email } }",
-            user_context={"user_id": "analyst1", "roles": ["analyst"]},
+            user_context={"user_id": "analyst1", "roles": ["analyst"], "region": "US-EAST"},
         )
         assert result.get("error") is None
         col_names = [c["name"] for c in result["columns"]]
-        assert "customer__email" not in col_names
+        assert "customer__email" in col_names
+        email_val = str(result["rows"][0].get("customer__email", ""))
+        assert "@" not in email_val, f"Expected hashed email, got raw: {email_val}"
+
+    @pytest.mark.asyncio
+    async def test_analyst_phone_redacted(self):
+        result = await query(
+            nexaql_query="{ customer @limit(1) { id name phone } }",
+            user_context={"user_id": "analyst1", "roles": ["analyst"], "region": "US-EAST"},
+        )
+        assert result.get("error") is None
+        col_names = [c["name"] for c in result["columns"]]
+        assert "customer__phone" in col_names
+        phone_val = str(result["rows"][0].get("customer__phone", ""))
+        assert phone_val == "[REDACTED]" or "***" in phone_val
+
+    @pytest.mark.asyncio
+    async def test_manager_sees_raw_email(self):
+        result = await query(
+            nexaql_query="{ customer @limit(1) { id name email } }",
+            user_context={"user_id": "mgr1", "roles": ["manager"], "region": "US-EAST"},
+        )
+        assert result.get("error") is None
+        col_names = [c["name"] for c in result["columns"]]
+        assert "customer__email" in col_names
+        email_val = str(result["rows"][0].get("customer__email", ""))
+        assert "@" in email_val, f"Manager (in visible_to) should see raw email, got: {email_val}"
+
+    @pytest.mark.asyncio
+    async def test_admin_sees_raw_email(self):
+        result = await query(
+            nexaql_query="{ customer @limit(1) { id name email } }",
+            user_context={"user_id": "admin1", "roles": ["admin"]},
+        )
+        assert result.get("error") is None
+        col_names = [c["name"] for c in result["columns"]]
+        assert "customer__email" in col_names
+        email_val = str(result["rows"][0].get("customer__email", ""))
+        assert "@" in email_val, f"Admin should see raw email, got: {email_val}"
 
     @pytest.mark.asyncio
     async def test_default_admin_when_no_context(self):
@@ -160,7 +198,7 @@ class TestSqlPreview:
         assert admin_result.get("error") is None
         assert analyst_result.get("error") is None
         assert "email" in admin_result["sql"].lower()
-        assert "email" not in analyst_result["sql"].lower()
+        assert "email" in analyst_result["sql"].lower()
 
     @pytest.mark.asyncio
     async def test_invalid_query(self):

@@ -81,15 +81,17 @@ class TestAgentChatDevMode:
         assert "{" in result["nexaql_query"]
 
     @pytest.mark.asyncio
-    async def test_analyst_pii_stripped(self):
+    async def test_analyst_pii_masked(self):
         result = await ask(
             question="show me 2 customers with their email and name",
-            user_context={"user_id": "analyst1", "roles": ["analyst"]},
+            user_context={"user_id": "analyst1", "roles": ["analyst"], "region": "US-EAST"},
         )
         assert result.get("error") is None
-        if result.get("columns"):
-            col_names = [c["name"] for c in result["columns"]]
-            assert "customer__email" not in col_names
+        if result.get("rows"):
+            for row in result["rows"]:
+                email_val = row.get("customer__email")
+                if email_val is not None:
+                    assert "@" not in str(email_val), f"Expected masked email, got: {email_val}"
 
     @pytest.mark.asyncio
     async def test_domain_switch(self):
@@ -160,18 +162,20 @@ class TestAgentChatJWTMode:
         assert result["row_count"] >= 1
 
     @pytest.mark.asyncio
-    async def test_analyst_jwt_pii_stripped(self, jwt_secret, make_token):
+    async def test_analyst_jwt_pii_masked(self, jwt_secret, make_token):
         await configure_auth(auth_mode="jwt", auth_secret=jwt_secret)
         _invalidate_cache()
-        token = make_token({"sub": "bob", "roles": ["analyst"]})
+        token = make_token({"sub": "bob", "roles": ["analyst"], "region": "US-EAST"})
         result = await ask(
             question="show 2 customers with name and email",
             auth_token=token,
         )
         assert result.get("error") is None
-        if result.get("columns"):
-            col_names = [c["name"] for c in result["columns"]]
-            assert "customer__email" not in col_names
+        if result.get("rows"):
+            for row in result["rows"]:
+                email_val = row.get("customer__email")
+                if email_val is not None:
+                    assert "@" not in str(email_val), f"Expected masked email, got: {email_val}"
 
     @pytest.mark.asyncio
     async def test_ask_no_token_in_jwt_mode(self, jwt_secret):

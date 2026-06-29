@@ -76,14 +76,18 @@ class TestJWTAcceptance:
         assert result["row_count"] == 3
 
     @pytest.mark.asyncio
-    async def test_analyst_token_strips_fields(self, analyst_token):
+    async def test_analyst_token_masks_pii(self, make_token):
+        token = make_token({"sub": "bob", "roles": ["analyst"], "region": "US-EAST"})
         result = await query(
             nexaql_query="{ customer @limit(1) { id name email } }",
-            auth_token=analyst_token,
+            auth_token=token,
         )
         assert result.get("error") is None
         col_names = [c["name"] for c in result["columns"]]
-        assert "customer__email" not in col_names
+        assert "customer__email" in col_names
+        if result["rows"]:
+            email_val = str(result["rows"][0].get("customer__email", ""))
+            assert "@" not in email_val, f"Expected masked email, got: {email_val}"
 
     @pytest.mark.asyncio
     async def test_jwt_user_id_from_sub(self, make_token):
