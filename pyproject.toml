@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexaql"
-version = "0.7.9"
+version = "0.8.0"
 description = "The query language built for AI agents - deterministic queries across any database with built-in privacy"
 readme = "README.md"
 license = "Apache-2.0"
@@ -30,6 +30,8 @@ dependencies = [
     "anthropic>=0.30",
     "httpx>=0.27",
     "click>=8.0",
+    "mcp>=1.0",
+    "pyjwt>=2.0",
 ]
 
 [project.optional-dependencies]

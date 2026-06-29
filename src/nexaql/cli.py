@@ -466,6 +466,29 @@ def status() -> None:
     bs.close()
 
 
+# ── nexaql mcp ────────────────────────────────────────────────────────────
+
+
+@main.command()
+@click.option("--transport", type=click.Choice(["stdio", "streamable-http"]), default="stdio",
+              help="MCP transport mode (stdio for Claude Desktop, streamable-http for web)")
+@click.option("--port", default=8080, type=int, help="Port for streamable-http transport")
+def mcp(transport: str, port: int) -> None:
+    """Start the NexaQL MCP server for AI agent integration.
+
+    Examples:
+
+        nexaql mcp                          # stdio (Claude Desktop)
+        nexaql mcp --transport streamable-http  # HTTP server
+    """
+    from nexaql.mcp_server import mcp as mcp_app
+
+    if transport == "streamable-http":
+        mcp_app.run(transport="streamable-http", port=port)
+    else:
+        mcp_app.run(transport="stdio")
+
+
 # ── nexaql generate ────────────────────────────────────────────────────────
 
 

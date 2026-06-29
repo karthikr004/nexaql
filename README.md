@@ -135,10 +135,13 @@ The analyst's query returns `name` but not `email` or `lifetime_value`. The mana
 - **Policy-in-ontology** - access rules live alongside schema definitions
 
 ### Agent Integration
+- **MCP server** - Model Context Protocol connector for Claude Desktop, Cursor, and any MCP-compatible AI agent
+- **11 tools + 3 resources** - ask, query, validate, describe ontology, SQL preview, auth configuration, and more
 - **Deterministic translation** - natural language → NexaQL → SQL, no hallucinated queries
 - **Auto-retry** - if the generated query fails validation, the agent corrects it
 - **Result summarization** - agent generates a natural language summary of query results
 - **Ontology-aware prompts** - the agent knows your schema, field types, and available filters
+- **JWT authentication** - tamper-proof user identity for production deployments
 
 ### Multi-Database
 - **8 SQL dialects** - PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, Presto, Spark, MSSQL
@@ -295,6 +298,83 @@ curl -H 'X-User-Context: {"user_id":"alice","roles":["manager"],"region":"US-EAS
 
 Standard user context fields: `user_id`, `name`, `email`, `manager_id`, `region`, `department`, `team_id`, `level`, `job_role`, `org_id`. Custom attributes are also supported.
 
+## MCP Server (AI Agent Integration)
+
+NexaQL ships with a built-in [Model Context Protocol](https://modelcontextprotocol.io/) server, so any MCP-compatible AI agent (Claude Desktop, Cursor, custom agents) can query your data with full access control enforcement.
+
+### Start the MCP Server
+
+```bash
+# stdio transport (for Claude Desktop / Cursor)
+nexaql mcp
+
+# HTTP transport (for remote agents)
+nexaql mcp --transport streamable-http --port 8080
+```
+
+### Claude Desktop Configuration
+
+Add to your `claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "nexaql": {
+      "command": "nexaql",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+### Tools
+
+| Tool | Description |
+|------|-------------|
+| `ask` | Natural language question → NexaQL → SQL → results with summary |
+| `query` | Execute a NexaQL query directly |
+| `validate_query` | Parse and validate a query without executing it |
+| `sql_preview` | Translate NexaQL to native SQL without executing |
+| `list_domains` | List all available domains and the active domain |
+| `switch_domain` | Switch the active domain |
+| `describe_node` | Describe a node's fields, edges, types, and PII flags |
+| `describe_ontology` | Full ontology overview — all nodes, fields, edges |
+| `list_connectors` | List configured database connectors |
+| `user_context_schema` | Discover supported user context fields, roles, and RLS attributes |
+| `configure_auth` | Switch between `dev` and `jwt` auth modes |
+
+### Resources
+
+| URI | Description |
+|-----|-------------|
+| `nexaql://ontology` | Full ontology as JSON |
+| `nexaql://grammar` | NexaQL query syntax reference |
+| `nexaql://roles` | Defined roles with permissions and field restrictions |
+
+### Authentication
+
+In **dev mode** (default), agents pass user identity as a raw dict:
+
+```python
+result = await ask(
+    question="top customers by revenue",
+    user_context={"user_id": "alice", "roles": ["analyst"], "region": "US-EAST"}
+)
+```
+
+In **jwt mode** (production), agents pass a signed JWT token. This prevents impersonation — the server verifies the signature before extracting user claims:
+
+```python
+# Configure JWT mode (one-time setup)
+await configure_auth(auth_mode="jwt", auth_secret="your-secret-key")
+
+# Agents pass signed tokens
+token = jwt.encode({"sub": "alice", "roles": ["analyst"]}, "your-secret-key", algorithm="HS256")
+result = await ask(question="top customers", auth_token=token)
+```
+
+Access control (RBAC, field stripping, RLS, PII masking) is enforced on every query — including agent chat responses. An analyst asking "show me customer emails" gets results with the email column stripped automatically.
+
 ## Configuration
 
 All configuration lives in the bootstrap database (`~/.nexaql/nexaql.db`) and is managed through the Admin UI or API. No config files required.
@@ -403,8 +483,10 @@ nexaql/
 │   ├── adapters/         # PostgreSQL, DuckDB (+ pluggable base)
 │   ├── api/              # FastAPI server + admin panel routes
 │   ├── chat/             # NL → NexaQL agent pipeline
+│   ├── mcp_server.py     # MCP server (11 tools, 3 resources)
+│   ├── auth.py           # JWT authentication & user context resolution
 │   ├── bootstrap.py      # DuckDB-backed state (domains, schemas, connectors, keys)
-│   └── cli.py            # CLI: install, serve, query
+│   └── cli.py            # CLI: install, serve, query, mcp
 ├── frontend/             # React + Tailwind admin panel & playground
 └── ontologies/           # Sample schema + seed data
 ```

@@ -120,12 +120,14 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE TABLE IF NOT EXISTS server_config (
-    id            INTEGER PRIMARY KEY DEFAULT 1 CHECK(id = 1),
-    host          TEXT DEFAULT '0.0.0.0',
-    port          INTEGER DEFAULT 3717,
-    cors_origins  TEXT DEFAULT '["*"]',
-    auth_mode     TEXT DEFAULT 'dev',
-    active_domain TEXT
+    id             INTEGER PRIMARY KEY DEFAULT 1 CHECK(id = 1),
+    host           TEXT DEFAULT '0.0.0.0',
+    port           INTEGER DEFAULT 3717,
+    cors_origins   TEXT DEFAULT '["*"]',
+    auth_mode      TEXT DEFAULT 'dev',
+    active_domain  TEXT,
+    auth_secret    TEXT,
+    auth_algorithm TEXT DEFAULT 'HS256'
 );
 """
 
@@ -152,6 +154,13 @@ def _ensure_tables(conn: duckdb.DuckDBPyConnection) -> None:
     row = conn.execute("SELECT COUNT(*) FROM server_config").fetchone()
     if row and row[0] == 0:
         conn.execute("INSERT INTO server_config (id) VALUES (1)")
+
+    # Migrate: add auth columns if missing (existing DBs from pre-0.7.10)
+    for col, default in [("auth_secret", "NULL"), ("auth_algorithm", "'HS256'")]:
+        try:
+            conn.execute(f"SELECT {col} FROM server_config LIMIT 1")
+        except Exception:
+            conn.execute(f"ALTER TABLE server_config ADD COLUMN {col} TEXT DEFAULT {default}")
 
     # Attempt legacy migration on first init
     _migrate_from_legacy(conn)
@@ -603,10 +612,15 @@ def get_server_config() -> dict:
     """Get the server configuration (singleton row)."""
     conn = _get_conn()
     row = conn.execute(
-        "SELECT host, port, cors_origins, auth_mode, active_domain FROM server_config WHERE id = 1"
+        "SELECT host, port, cors_origins, auth_mode, active_domain, auth_secret, auth_algorithm"
+        " FROM server_config WHERE id = 1"
     ).fetchone()
     if row is None:
-        return {"host": "0.0.0.0", "port": 3717, "cors_origins": ["*"], "auth_mode": "dev", "active_domain": None}
+        return {
+            "host": "0.0.0.0", "port": 3717, "cors_origins": ["*"],
+            "auth_mode": "dev", "active_domain": None,
+            "auth_secret": None, "auth_algorithm": "HS256",
+        }
     try:
         cors = json.loads(row[2]) if row[2] else ["*"]
     except (json.JSONDecodeError, TypeError):
@@ -617,13 +631,15 @@ def get_server_config() -> dict:
         "cors_origins": cors,
         "auth_mode": row[3] or "dev",
         "active_domain": row[4],
+        "auth_secret": row[5],
+        "auth_algorithm": row[6] or "HS256",
     }
 
 
 def update_server_config(**kwargs: Any) -> None:
     """Update server config fields."""
     conn = _get_conn()
-    allowed = {"host", "port", "cors_origins", "auth_mode", "active_domain"}
+    allowed = {"host", "port", "cors_origins", "auth_mode", "active_domain", "auth_secret", "auth_algorithm"}
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return

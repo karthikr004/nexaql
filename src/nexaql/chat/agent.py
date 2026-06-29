@@ -36,6 +36,9 @@ from nexaql.engine.parser import ParseError, parse
 from nexaql.engine.types import ColumnMeta, NodeShape
 from nexaql.engine.validator import validate
 from nexaql.ontology import Ontology
+from nexaql.policy.context import UserContext
+from nexaql.policy.enforcer import enforce_access
+from nexaql.policy.masking import mask_results
 
 logger = logging.getLogger(__name__)
 
@@ -148,12 +151,24 @@ async def _try_execute(
     query_text: str,
     ontology: Ontology,
     adapter: QueryAdapter,
+    user: UserContext | None = None,
 ) -> tuple[AdapterResult | None, str | None]:
-    """Parse, validate, and execute a query. Returns ``(result, error)``."""
+    """Parse, enforce access control, validate, and execute a query.
+
+    Returns ``(result, error)``.
+    """
     try:
         ast = parse(query_text)
     except ParseError as e:
         return None, f"Parse error: {e}"
+
+    if user is not None:
+        enforcement = enforce_access(ast, ontology, user)
+        if enforcement.denied:
+            return None, f"Access denied: {enforcement.denied_reason}"
+        ast = enforcement.ast
+    else:
+        enforcement = None
 
     validation = validate(ast, ontology)
     if not validation.valid:
@@ -162,6 +177,8 @@ async def _try_execute(
 
     try:
         result = await adapter.execute(ast, ontology)
+        if enforcement and enforcement.masked_fields:
+            result.rows = mask_results(result.rows, enforcement.masked_fields)
         return result, None
     except Exception as e:
         return None, str(e)
@@ -176,12 +193,13 @@ async def execute_with_retry_intent(
     question: str,
     original_response: str,
     intent_data: dict[str, Any] | None,
+    user: UserContext | None = None,
 ) -> tuple[AdapterResult | None, str | None, str, dict[str, Any] | None]:
     """Execute a query built from intent, retrying with corrected intent on failure.
 
     Returns ``(result, error, final_query_text, final_intent)``.
     """
-    result, error = await _try_execute(query_text, ontology, adapter)
+    result, error = await _try_execute(query_text, ontology, adapter, user)
     if result is not None:
         return result, None, query_text, intent_data
 
@@ -226,7 +244,7 @@ async def execute_with_retry_intent(
             retry_intent = parse_intent(retry_intent_data)
             retry_query = build_nexaql(retry_intent)
 
-            result2, error2 = await _try_execute(retry_query, ontology, adapter)
+            result2, error2 = await _try_execute(retry_query, ontology, adapter, user)
             if result2 is not None:
                 return result2, None, retry_query, retry_intent_data
             return None, error2, retry_query, retry_intent_data
@@ -244,12 +262,13 @@ async def execute_with_retry_raw(
     history: list[dict[str, str]],
     question: str,
     explanation: str,
+    user: UserContext | None = None,
 ) -> tuple[AdapterResult | None, str | None, str]:
     """Execute a query, retrying once with the LLM if it fails (legacy mode).
 
     Returns ``(result, error, final_query_text)``.
     """
-    result, error = await _try_execute(query_text, ontology, adapter)
+    result, error = await _try_execute(query_text, ontology, adapter, user)
     if result is not None:
         return result, None, query_text
 
@@ -285,7 +304,7 @@ async def execute_with_retry_raw(
         retry_query = extract_nexaql_query(retry_text)
 
         if retry_query:
-            result2, error2 = await _try_execute(retry_query, ontology, adapter)
+            result2, error2 = await _try_execute(retry_query, ontology, adapter, user)
             if result2 is not None:
                 return result2, None, retry_query
             return None, error2, retry_query
@@ -336,6 +355,7 @@ async def ask(
     ontology: Ontology,
     adapter: QueryAdapter | None,
     llm_config: LLMConfig,
+    user: UserContext | None = None,
 ) -> ChatResponse:
     """Run the full chat pipeline: generate -> execute -> summarize.
 
@@ -351,6 +371,8 @@ async def ask(
         The query adapter for execution (may be ``None`` if no datasource).
     llm_config:
         LLM configuration (model, API key, token limits).
+    user:
+        Resolved user context for access control enforcement.
 
     Returns
     -------
@@ -360,9 +382,9 @@ async def ask(
     mode = _get_generation_mode(llm_config)
 
     if mode == "intent":
-        return await _ask_intent(question, history, ontology, adapter, llm_config)
+        return await _ask_intent(question, history, ontology, adapter, llm_config, user)
     else:
-        return await _ask_raw(question, history, ontology, adapter, llm_config)
+        return await _ask_raw(question, history, ontology, adapter, llm_config, user)
 
 
 async def _ask_intent(
@@ -371,6 +393,7 @@ async def _ask_intent(
     ontology: Ontology,
     adapter: QueryAdapter | None,
     llm_config: LLMConfig,
+    user: UserContext | None = None,
 ) -> ChatResponse:
     """Intent-based pipeline (Option B): extract → build → execute → summarize."""
 
@@ -382,7 +405,7 @@ async def _ask_intent(
     if query_text is None:
         # Fallback to raw mode if intent extraction fails
         logger.warning("Intent extraction failed, falling back to raw mode")
-        response = await _ask_raw(question, history, ontology, adapter, llm_config)
+        response = await _ask_raw(question, history, ontology, adapter, llm_config, user)
         response.generation_mode = "raw_fallback"
         return response
 
@@ -406,6 +429,7 @@ async def _ask_intent(
         question=question,
         original_response=llm_response,
         intent_data=intent_data,
+        user=user,
     )
 
     # Step 3: Summarize
@@ -445,6 +469,7 @@ async def _ask_raw(
     ontology: Ontology,
     adapter: QueryAdapter | None,
     llm_config: LLMConfig,
+    user: UserContext | None = None,
 ) -> ChatResponse:
     """Raw NexaQL pipeline (Option A, legacy): generate → execute → summarize."""
 
@@ -479,6 +504,7 @@ async def _ask_raw(
         history=history,
         question=question,
         explanation=explanation,
+        user=user,
     )
 
     # Step 3: Summarize
