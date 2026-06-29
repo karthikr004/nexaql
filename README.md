@@ -30,11 +30,11 @@ NexaQL is not a GraphQL wrapper. It's a standalone query engine that translates 
 
 ```bash
 pip install nexaql
-nexaql init
+nexaql install
 nexaql serve
 ```
 
-Open http://localhost:3717 - a playground with sample e-commerce data loads instantly. No external database needed.
+Open http://localhost:3717 — a playground with sample e-commerce data loads instantly. No external database needed.
 
 ### Connect Your Own Database
 
@@ -162,8 +162,8 @@ The analyst's query returns `name` but not `email` or `lifetime_value`. The mana
 ### Developer Experience
 - **Playground UI** - Monaco editor with syntax highlighting, schema explorer, SQL preview
 - **Role switcher** - test access control live in the playground
-- **CLI** - `nexaql query`, `nexaql serve`, `nexaql init`
-- **Zero config** - ships with sample data, works after `pip install`
+- **CLI** - `nexaql install`, `nexaql serve`, `nexaql query`
+- **Zero config** - ships with sample data, works after `nexaql install`
 
 ## Query Syntax Reference
 
@@ -404,7 +404,7 @@ nexaql/
 │   ├── api/              # FastAPI server + admin panel routes
 │   ├── chat/             # NL → NexaQL agent pipeline
 │   ├── bootstrap.py      # DuckDB-backed state (domains, schemas, connectors, keys)
-│   └── cli.py            # CLI: serve, init, query
+│   └── cli.py            # CLI: install, serve, query
 ├── frontend/             # React + Tailwind admin panel & playground
 └── ontologies/           # Sample schema + seed data
 ```
