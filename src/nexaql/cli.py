@@ -275,6 +275,16 @@ def install(skip_sample: bool, config_path: str, force: bool) -> None:
     )
     click.echo(f"         Saved connector 'sample-duckdb' (id={connector_id})")
 
+    # Save ontology to bootstrap DB schema (admin panel reads from here)
+    if not skip_sample:
+        bs.save_schema(
+            domain_name="ecommerce",
+            schema_name="sample",
+            connector_id=connector_id,
+            ontology_json=ont_data,
+        )
+        click.echo(f"         Saved schema 'sample' with ontology ({len(ont_data.get('nodes', {}))} nodes)")
+
     # Set active domain
     bs.set_active_domain("ecommerce")
     click.echo(f"         Active domain: ecommerce")
