@@ -277,6 +277,9 @@ def install(skip_sample: bool, config_path: str, force: bool) -> None:
 
     # Save ontology to bootstrap DB schema (admin panel reads from here)
     if not skip_sample:
+        # Remove any stale schemas for this domain first
+        for old_schema in bs.list_schemas("ecommerce"):
+            bs.delete_schema("ecommerce", old_schema["name"])
         bs.save_schema(
             domain_name="ecommerce",
             schema_name="sample",
