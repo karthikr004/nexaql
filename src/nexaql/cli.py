@@ -182,8 +182,10 @@ def install(skip_sample: bool, config_path: str, force: bool) -> None:
     if not skip_sample:
         import duckdb
 
-        if force and os.path.exists(DUCKDB_FILE):
-            os.remove(DUCKDB_FILE)
+        if force:
+            for f in [DUCKDB_FILE, DUCKDB_FILE + ".wal"]:
+                if os.path.exists(f):
+                    os.remove(f)
 
         db_exists = os.path.exists(DUCKDB_FILE)
         conn = duckdb.connect(DUCKDB_FILE)
