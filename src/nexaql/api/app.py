@@ -28,6 +28,7 @@ def _load_api_keys_into_env() -> None:
         "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
+        "meta": "META_API_KEY",
     }
     for provider, env_var in env_map.items():
         if not os.environ.get(env_var):

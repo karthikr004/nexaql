@@ -22,6 +22,7 @@ const MODEL_SUGGESTIONS: Record<string, string[]> = {
   openai: ['gpt-4o', 'gpt-4o-mini', 'gpt-4.1'],
   openrouter: ['anthropic/claude-sonnet-4-6', 'openai/gpt-4o', 'google/gemini-2.0-flash'],
   google: ['gemini-2.0-flash', 'gemini-2.5-pro'],
+  meta: ['muse-spark-1.1'],
 };
 
 interface Props {
@@ -39,6 +40,7 @@ export default function ApiKeysPanel({ onToast }: Props) {
 
   // LLM model config
   const [llmConfig, setLlmConfig] = useState<LLMConfig>({ provider: '', model: '' });
+  const [activeProvider, setActiveProvider] = useState('');
   const [modelInput, setModelInput] = useState('');
   const [savingModel, setSavingModel] = useState(false);
 
@@ -56,6 +58,7 @@ export default function ApiKeysPanel({ onToast }: Props) {
       if (res.ok) {
         const cfg = await res.json();
         setLlmConfig(cfg);
+        setActiveProvider(cfg.provider || '');
         setModelInput(cfg.model || '');
       }
     } catch { /* ignore */ }
@@ -93,7 +96,7 @@ export default function ApiKeysPanel({ onToast }: Props) {
       const res = await fetch('/api/llm-config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: modelInput.trim() }),
+        body: JSON.stringify({ provider: activeProvider, model: modelInput.trim() }),
       });
       const body = await res.json();
       if (res.ok) {
@@ -115,8 +118,9 @@ export default function ApiKeysPanel({ onToast }: Props) {
     } catch (err) { onToast({ message: `Error: ${err}`, type: 'error' }); }
   }, [fetchKeys, fetchLLMConfig, onToast]);
 
-  const suggestions = MODEL_SUGGESTIONS[llmConfig.provider] || [];
-  const modelChanged = modelInput.trim() !== (llmConfig.model || '');
+  const suggestions = MODEL_SUGGESTIONS[activeProvider] || [];
+  const configChanged = modelInput.trim() !== (llmConfig.model || '') || activeProvider !== (llmConfig.provider || '');
+  const configuredProviders = keys.map((k) => k.provider);
 
   return (
     <>
@@ -136,6 +140,7 @@ export default function ApiKeysPanel({ onToast }: Props) {
                 <option value="openai">OpenAI</option>
                 <option value="openrouter">OpenRouter</option>
                 <option value="google">Google</option>
+                <option value="meta">Meta (Muse Spark)</option>
               </select>
             </div>
             <div>
@@ -174,13 +179,37 @@ export default function ApiKeysPanel({ onToast }: Props) {
           </div>
         )}
 
-        {/* Model selector */}
-        {llmConfig.provider && (
+        {/* Active Model selector */}
+        {configuredProviders.length > 0 && (
           <div className="rounded border p-4 space-y-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
             <span className="font-semibold text-xs" style={{ color: 'var(--text-primary)' }}>Active Model</span>
             <div>
               <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>
-                Model ({llmConfig.provider})
+                Provider
+              </label>
+              <select
+                value={activeProvider}
+                onChange={(e) => {
+                  const newProv = e.target.value;
+                  setActiveProvider(newProv);
+                  const defaults = MODEL_SUGGESTIONS[newProv];
+                  if (defaults && defaults.length > 0) {
+                    setModelInput(defaults[0] ?? '');
+                  } else {
+                    setModelInput('');
+                  }
+                }}
+                className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none"
+                style={inputStyle}
+              >
+                {configuredProviders.map((p) => (
+                  <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>
+                Model
               </label>
               <div className="flex gap-2">
                 <input
@@ -197,7 +226,7 @@ export default function ApiKeysPanel({ onToast }: Props) {
                 <button
                   type="button"
                   onClick={handleSaveModel}
-                  disabled={savingModel || !modelInput.trim() || !modelChanged}
+                  disabled={savingModel || !modelInput.trim() || !configChanged}
                   className="rounded px-4 py-1.5 text-xs font-semibold bg-[#3dd68c] text-[#0f1117] hover:bg-[#32b577] disabled:opacity-50"
                 >
                   {savingModel ? 'Saving...' : 'Update'}

@@ -94,6 +94,7 @@ export interface ChatTurn {
   // Pipeline trace
   intent: Record<string, unknown> | null;
   generationMode: string | null;
+  durationMs?: number;
 }
 
 export interface HistoryEntry {

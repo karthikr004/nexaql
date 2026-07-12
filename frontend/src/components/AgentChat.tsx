@@ -234,6 +234,18 @@ function ChatBubble({ turn }: { turn: ChatTurn }) {
         {/* Summary */}
         <FormattedSummary text={turn.summary} />
 
+        {/* Latency */}
+        {turn.durationMs != null && (
+          <div className="flex items-center gap-1.5 text-[10px]" style={{ color: 'var(--text-muted)' }}>
+            <span>⏱</span>
+            <span>
+              {turn.durationMs >= 1000
+                ? `${(turn.durationMs / 1000).toFixed(1)}s`
+                : `${turn.durationMs}ms`}
+            </span>
+          </div>
+        )}
+
         {/* Error */}
         {turn.error && (
           <p
@@ -354,6 +366,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
       ]);
 
       try {
+        const startTime = performance.now();
         const controller = new AbortController();
         const timeout = setTimeout(() => controller.abort(), 60000);
         const res = await fetch('/api/chat', {
@@ -364,6 +377,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
         });
         clearTimeout(timeout);
         const data = await res.json();
+        const durationMs = Math.round(performance.now() - startTime);
 
         const completedTurn: ChatTurn = {
           id: turnId,
@@ -380,6 +394,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
           error: data.error ?? null,
           intent: data.intent ?? null,
           generationMode: data.generationMode ?? null,
+          durationMs,
         };
 
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : completedTurn)));

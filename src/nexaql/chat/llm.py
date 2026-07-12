@@ -35,6 +35,7 @@ PROVIDER_BASE_URLS: dict[str, str] = {
     "ollama": "http://localhost:11434/v1",
     "openrouter": "https://openrouter.ai/api/v1",
     "openai": "https://api.openai.com/v1",
+    "meta": "https://api.meta.ai/v1",
 }
 
 # Default models per provider (used only as fallback hints in status display)
@@ -43,6 +44,7 @@ DEFAULT_MODELS: dict[str, str] = {
     "openrouter": "",
     "openai": "",
     "anthropic": "claude-sonnet-4-6",
+    "meta": "muse-spark-1.1",
 }
 
 # ── Client cache ──────────────────────────────────────────────────────────────
@@ -103,7 +105,7 @@ def chat_completion(
         raise RuntimeError(
             "LLM not configured. Set 'provider' and 'model' in nexaql.yaml "
             "or configure via the Admin panel. "
-            "Supported providers: ollama, openrouter, openai, anthropic."
+            "Supported providers: ollama, openrouter, openai, anthropic, meta."
         )
 
     provider = llm_config.provider.lower()

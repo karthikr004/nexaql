@@ -122,6 +122,7 @@ def load_config_from_bootstrap() -> NexaQLConfig:
             "openai": "gpt-4o",
             "openrouter": "anthropic/claude-sonnet-4-6",
             "google": "gemini-2.0-flash",
+            "meta": "muse-spark-1.1",
         }
         for candidate in _provider_models:
             key = bs.get_api_key(candidate)
@@ -138,6 +139,7 @@ def load_config_from_bootstrap() -> NexaQLConfig:
                 "openai": "gpt-4o",
                 "openrouter": "anthropic/claude-sonnet-4-6",
                 "google": "gemini-2.0-flash",
+                "meta": "muse-spark-1.1",
             }
             model = _fallback_models.get(provider, model)
         llm = LLMConfig(

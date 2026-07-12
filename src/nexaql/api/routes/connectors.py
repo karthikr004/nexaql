@@ -533,6 +533,7 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
         "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
+        "meta": "META_API_KEY",
     }
     env_var = env_map.get(provider_key)
     if env_var:
@@ -561,6 +562,10 @@ async def save_api_key(req: SaveApiKeyRequest) -> JSONResponse:
             new_provider = "openai"
             if not current_model or not current_model.startswith("gpt"):
                 new_model = "gpt-4o"
+        elif provider_key == "meta":
+            new_provider = "meta"
+            if not current_model or not current_model.startswith("muse"):
+                new_model = "muse-spark-1.1"
 
         if new_provider != current_provider or new_model != current_model:
             bs.save_llm_config(
@@ -601,6 +606,7 @@ async def delete_api_key(provider: str) -> JSONResponse:
         "openrouter": "OPENROUTER_API_KEY",
         "google": "GOOGLE_API_KEY",
         "cohere": "COHERE_API_KEY",
+        "meta": "META_API_KEY",
     }
     env_var = env_map.get(provider.lower())
     if env_var and env_var in os.environ:
@@ -630,16 +636,17 @@ async def get_llm_config() -> JSONResponse:
 
 class UpdateLLMConfigRequest(BaseModel):
     model: str
+    provider: Optional[str] = None
 
 
 @router.put("/llm-config")
 async def update_llm_config(req: UpdateLLMConfigRequest) -> JSONResponse:
-    """Update the active LLM model."""
+    """Update the active LLM provider and model."""
     if not req.model.strip():
         return JSONResponse({"error": "Model is required"}, status_code=400)
 
     cfg = bs.get_active_llm_config()
-    provider = cfg["provider"] if cfg else "anthropic"
+    provider = req.provider.strip() if req.provider and req.provider.strip() else (cfg["provider"] if cfg else "anthropic")
 
     bs.save_llm_config(
         provider=provider,
