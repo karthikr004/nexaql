@@ -689,7 +689,7 @@ export default function Playground() {
                 />
               </Suspense>
             ) : (
-              <AgentChat onTurnComplete={setLastChatTurn} suggestions={ontology?.nlQuestions} />
+              <AgentChat onTurnComplete={setLastChatTurn} suggestions={ontology?.nlQuestions} extraHeaders={userContextHeaders()} />
             )}
           </div>
         </div>

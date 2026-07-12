@@ -203,6 +203,9 @@ async def execute_with_retry_intent(
     if result is not None:
         return result, None, query_text, intent_data
 
+    if error and not error.startswith(("Parse error:", "Validation failed:")):
+        return None, error, query_text, intent_data
+
     # Retry: ask LLM to fix the intent JSON
     try:
         system_prompt = build_intent_system_prompt(ontology)
@@ -271,6 +274,9 @@ async def execute_with_retry_raw(
     result, error = await _try_execute(query_text, ontology, adapter, user)
     if result is not None:
         return result, None, query_text
+
+    if error and not error.startswith(("Parse error:", "Validation failed:")):
+        return None, error, query_text
 
     # Retry: ask LLM to fix the query
     try:
@@ -432,6 +438,29 @@ async def _ask_intent(
         user=user,
     )
 
+    # Access denied — return a clear, non-technical message
+    if exec_error and exec_error.startswith("Access denied:"):
+        reason = exec_error.replace("Access denied: ", "", 1)
+        return ChatResponse(
+            explanation=llm_response,
+            nexaql_query=final_query,
+            summary=f"Your current role does not have permission to access this data. {reason}",
+            error=None,
+            intent=final_intent,
+            generation_mode="intent",
+        )
+
+    # System/runtime errors — don't expose raw stack traces
+    if exec_error and not exec_error.startswith(("Parse error:", "Validation failed:")):
+        return ChatResponse(
+            explanation=llm_response,
+            nexaql_query=final_query,
+            summary="Something went wrong while executing the query. This is a system error, not a problem with your question.",
+            error=exec_error,
+            intent=final_intent,
+            generation_mode="intent",
+        )
+
     # Step 3: Summarize
     summary = llm_response
     if exec_result is not None and exec_error is None:
@@ -506,6 +535,27 @@ async def _ask_raw(
         explanation=explanation,
         user=user,
     )
+
+    # Access denied — return a clear, non-technical message
+    if exec_error and exec_error.startswith("Access denied:"):
+        reason = exec_error.replace("Access denied: ", "", 1)
+        return ChatResponse(
+            explanation=explanation,
+            nexaql_query=final_query,
+            summary=f"Your current role does not have permission to access this data. {reason}",
+            error=None,
+            generation_mode="raw",
+        )
+
+    # System/runtime errors — don't expose raw stack traces
+    if exec_error and not exec_error.startswith(("Parse error:", "Validation failed:")):
+        return ChatResponse(
+            explanation=explanation,
+            nexaql_query=final_query,
+            summary="Something went wrong while executing the query. This is a system error, not a problem with your question.",
+            error=exec_error,
+            generation_mode="raw",
+        )
 
     # Step 3: Summarize
     summary = explanation

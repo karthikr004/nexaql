@@ -279,9 +279,10 @@ const FALLBACK_SUGGESTIONS = [
 interface Props {
   onTurnComplete?: (turn: ChatTurn) => void;
   suggestions?: string[];
+  extraHeaders?: Record<string, string>;
 }
 
-export default function AgentChat({ onTurnComplete, suggestions }: Props) {
+export default function AgentChat({ onTurnComplete, suggestions, extraHeaders }: Props) {
   const SUGGESTIONS = suggestions?.length ? suggestions : FALLBACK_SUGGESTIONS;
   const [turns, setTurns] = useState<ChatTurn[]>([]);
   const [input, setInput] = useState('');
@@ -371,7 +372,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
         const timeout = setTimeout(() => controller.abort(), 60000);
         const res = await fetch('/api/chat', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...extraHeaders },
           body: JSON.stringify({ question, history }),
           signal: controller.signal,
         });
@@ -425,7 +426,7 @@ export default function AgentChat({ onTurnComplete, suggestions }: Props) {
         setLoading(false);
       }
     },
-    [turns, loading, apiKeyMissing, onTurnComplete],
+    [turns, loading, apiKeyMissing, onTurnComplete, extraHeaders],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {

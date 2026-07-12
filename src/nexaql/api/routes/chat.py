@@ -5,11 +5,12 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from nexaql.adapters import get_adapter
 from nexaql.api.deps import get_config, get_ontology
+from nexaql.api.middleware import get_user_context
 from nexaql.chat.agent import ChatResponse, ask
 
 router = APIRouter()
@@ -42,7 +43,7 @@ class ChatResponseBody(BaseModel):
 
 
 @router.post("/chat")
-async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
+async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody:
     if not body.question.strip():
         raise HTTPException(status_code=400, detail="Question is required")
 
@@ -73,6 +74,7 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
             )
 
     ontology = get_ontology()
+    user = await get_user_context(request)
 
     # Resolve the default adapter
     try:
@@ -92,6 +94,7 @@ async def chat_endpoint(body: ChatRequest) -> ChatResponseBody:
             ontology=ontology,
             adapter=adapter,
             llm_config=cfg.llm,
+            user=user,
         )
     except Exception as e:
         return ChatResponseBody(error=str(e))
