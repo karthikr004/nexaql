@@ -10,10 +10,11 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
-from nexaql.api.deps import get_adapter_for_datasource, get_config, get_ontology
+from nexaql.api.deps import get_adapter_for_connector, get_adapter_for_datasource, get_config, get_ontology
 from nexaql.api.middleware import get_user_context
 from nexaql.engine.parser import ParseError, parse
 from nexaql.engine.validator import validate
+from nexaql.federation import detect_cross_datasource, execute_federated
 from nexaql.policy import enforce_access, mask_results
 
 router = APIRouter()
@@ -75,12 +76,26 @@ async def execute_query(body: ExecuteRequest, request: Request) -> ExecuteRespon
 
     # Execute
     try:
-        root_node_name = enforced_ast.body.name
-        node_def = ontology.nodes.get(root_node_name)
-        ds_name = getattr(node_def, "datasource", None) if node_def else None
-        adapter = get_adapter_for_datasource(ds_name)
+        is_cross, connector_to_nodes = detect_cross_datasource(enforced_ast, ontology)
 
-        result = await adapter.execute(enforced_ast, ontology)
+        if is_cross:
+            adapter_map = {}
+            for connector_id in connector_to_nodes:
+                adapter_map[connector_id] = get_adapter_for_connector(connector_id)
+            session_id = request.headers.get("X-Session-Id")
+            result = await execute_federated(enforced_ast, ontology, adapter_map, session_id)
+        else:
+            root_node_name = enforced_ast.body.name
+            node_to_connector = getattr(ontology, "node_to_connector", None) or {}
+            connector_id = node_to_connector.get(root_node_name)
+            if connector_id is not None:
+                adapter = get_adapter_for_connector(connector_id)
+            else:
+                node_def = ontology.nodes.get(root_node_name)
+                ds_name = getattr(node_def, "datasource", None) if node_def else None
+                adapter = get_adapter_for_datasource(ds_name)
+            result = await adapter.execute(enforced_ast, ontology)
+
         query_preview = result.query_preview
     except Exception as e:
         return ExecuteResponse(

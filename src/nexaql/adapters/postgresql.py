@@ -104,3 +104,17 @@ class PostgreSQLAdapter(QueryAdapter):
             return True
         except Exception:
             return False
+
+    async def fetch_table(self, table_name: str, row_limit: int = 5_000_000) -> tuple[List[Dict[str, Any]], List[ColumnMeta]]:
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            stmt = await conn.prepare(f"SELECT * FROM {table_name} LIMIT {row_limit}")
+            records = await stmt.fetch()
+
+            columns: List[ColumnMeta] = []
+            for attr in stmt.get_attributes():
+                columns.append(ColumnMeta(name=attr.name, type=_pg_oid_to_type(attr.type.oid)))
+
+            rows: List[Dict[str, Any]] = [dict(r) for r in records]
+
+        return rows, columns

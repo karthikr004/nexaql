@@ -789,6 +789,9 @@ def _seed_ontology_files(conn: duckdb.DuckDBPyConnection) -> None:
     Creates a placeholder "sample" connector so the FK constraint on
     schemas.connector_id is satisfied.  Sets the first seeded domain
     as the active domain.
+
+    If a support.yaml is found, also creates a PostgreSQL connector and
+    seeds the support_tickets table for cross-datasource federation demo.
     """
     row = conn.execute("SELECT COUNT(*) FROM domains").fetchone()
     if row and row[0] > 0:
@@ -823,7 +826,6 @@ def _seed_ontology_files(conn: duckdb.DuckDBPyConnection) -> None:
         ).fetchone()
         domain_id = domain_row[0]
 
-        # Create schema (one schema per YAML file, named after the domain)
         schema_name = domain_name
         conn.execute(
             "INSERT OR IGNORE INTO schemas "
@@ -849,6 +851,9 @@ def _seed_ontology_files(conn: duckdb.DuckDBPyConnection) -> None:
             )
             log.info("Set active domain to '%s'", first_domain)
 
+    # After domains are seeded, try to set up the PostgreSQL support connector
+    _ensure_support_connector(conn)
+
 
 def _discover_ontology_yamls() -> list[str]:
     """Find bundled and local ontology YAML files to seed."""
@@ -866,7 +871,6 @@ def _discover_ontology_yamls() -> list[str]:
     #    Only add files whose domain isn't already covered by pkg data.
     ont_dir = os.path.join(os.getcwd(), "ontologies")
     if os.path.isdir(ont_dir):
-        # Collect domains already found in pkg data to avoid duplicates
         seen_domains: set[str] = set()
         for f in yamls:
             try:
@@ -938,6 +942,264 @@ def _ensure_sample_connector(conn: duckdb.DuckDBPyConnection) -> int:
     )
     row = conn.execute("SELECT id FROM connectors WHERE name = 'sample'").fetchone()
     return row[0]
+
+
+def _ensure_support_connector(conn: duckdb.DuckDBPyConnection) -> int | None:
+    """Create or return the 'support_postgres' connector for the support tickets DB.
+
+    Seeds the PostgreSQL database with support_tickets data if available.
+    Also creates the support ontology schema and patches ecommerce nodes
+    with reverse edges to support_ticket.
+    Returns None if PostgreSQL is not available.
+    """
+    row = conn.execute(
+        "SELECT id FROM connectors WHERE name = 'support_postgres'"
+    ).fetchone()
+    if row:
+        return row[0]
+
+    pg_url = _get_support_pg_url()
+    if pg_url is None:
+        log.info("PostgreSQL not available — skipping support connector")
+        return None
+
+    _seed_support_data(pg_url)
+
+    conn.execute(
+        "INSERT INTO connectors (name, type, url, created_at) VALUES (?, ?, ?, ?)",
+        ["support_postgres", "postgresql", pg_url, _now()],
+    )
+    row = conn.execute("SELECT id FROM connectors WHERE name = 'support_postgres'").fetchone()
+    connector_id = row[0]
+    log.info("Created 'support_postgres' connector (id=%d)", connector_id)
+
+    _seed_support_ontology(conn, connector_id)
+
+    return connector_id
+
+
+def _seed_support_ontology(conn: duckdb.DuckDBPyConnection, connector_id: int) -> None:
+    """Create the support ontology schema and patch ecommerce nodes with reverse edges."""
+    support_ontology = {
+        "version": "1",
+        "domain": "ecommerce",
+        "description": "Customer support tickets in PostgreSQL, linked to ecommerce data.",
+        "nodes": {
+            "support_ticket": {
+                "table": "support_tickets",
+                "description": "Customer support tickets linked to orders and customers.",
+                "primary_key": "id",
+                "fields": {
+                    "id": {"type": "integer", "description": "Unique ticket identifier.", "filterable": True},
+                    "ticket_number": {"type": "string", "description": "Human-readable ticket number.", "filterable": True},
+                    "customer_id": {"type": "integer", "description": "FK to customers.", "filterable": True},
+                    "order_id": {"type": "integer", "description": "FK to orders.", "filterable": True},
+                    "order_item_id": {"type": "integer", "description": "FK to order_items.", "filterable": True},
+                    "subject": {"type": "string", "description": "Ticket subject line.", "filterable": True},
+                    "description": {"type": "string", "description": "Detailed description of the issue."},
+                    "status": {
+                        "type": "enum", "description": "Current ticket status.", "filterable": True,
+                        "values": ["OPEN", "IN_PROGRESS", "RESOLVED", "CLOSED"],
+                    },
+                    "priority": {
+                        "type": "enum", "description": "Ticket priority level.", "filterable": True,
+                        "values": ["LOW", "MEDIUM", "HIGH", "CRITICAL"],
+                    },
+                    "category": {
+                        "type": "enum", "description": "Issue category.", "filterable": True,
+                        "values": ["PRODUCT_DEFECT", "SHIPPING", "BILLING", "REFUND", "WRONG_ITEM", "MISSING_PARTS", "EXCHANGE"],
+                    },
+                    "channel": {
+                        "type": "enum", "description": "Channel through which the ticket was created.", "filterable": True,
+                        "values": ["EMAIL", "PHONE", "CHAT"],
+                    },
+                    "assigned_to": {"type": "string", "description": "Support agent handling the ticket.", "filterable": True},
+                    "satisfaction": {"type": "integer", "description": "Customer satisfaction score (1-5).", "filterable": True},
+                    "created_at": {"type": "date", "description": "When the ticket was created.", "filterable": True},
+                    "updated_at": {"type": "date", "description": "When the ticket was last updated.", "filterable": True},
+                    "resolved_at": {"type": "date", "description": "When the ticket was resolved.", "filterable": True},
+                },
+                "edges": {
+                    "customer": {
+                        "node": "customer",
+                        "description": "The customer who filed this ticket.",
+                        "join_steps": [{"table": "customers", "alias_key": "customer", "condition": "{customer}.id = {support_ticket}.customer_id"}],
+                    },
+                    "order": {
+                        "node": "order",
+                        "description": "The order related to this ticket.",
+                        "join_type": "LEFT",
+                        "join_steps": [{"table": "orders", "alias_key": "order", "condition": "{order}.id = {support_ticket}.order_id"}],
+                    },
+                    "order_item": {
+                        "node": "order_item",
+                        "description": "The specific order item related to this ticket.",
+                        "join_type": "LEFT",
+                        "join_steps": [{"table": "order_items", "alias_key": "order_item", "condition": "{order_item}.id = {support_ticket}.order_item_id"}],
+                    },
+                },
+                "special_filters": {
+                    "unresolved": {
+                        "description": "Only open or in-progress tickets.",
+                        "sql": "{support_ticket}.status IN ('OPEN', 'IN_PROGRESS')",
+                    },
+                    "high_priority": {
+                        "description": "Only HIGH or CRITICAL priority tickets.",
+                        "sql": "{support_ticket}.priority IN ('HIGH', 'CRITICAL')",
+                    },
+                },
+                "visible_to": ["analyst", "manager", "admin"],
+            },
+        },
+    }
+
+    domain = get_domain("ecommerce")
+    if domain is None:
+        log.warning("ecommerce domain not found — cannot seed support ontology")
+        return
+
+    now = _now()
+    ontology_json = json.dumps(support_ontology, default=str)
+    conn.execute(
+        "INSERT OR IGNORE INTO schemas "
+        "(domain_id, connector_id, name, ontology_json, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?)",
+        [domain["id"], connector_id, "support", ontology_json, now, now],
+    )
+    log.info("Seeded 'support' schema in ecommerce domain")
+
+    _patch_ecommerce_edges(conn, domain["id"])
+
+
+def _patch_ecommerce_edges(conn: duckdb.DuckDBPyConnection, domain_id: int) -> None:
+    """Add support_tickets edges to customer and order nodes in ecommerce schema."""
+    row = conn.execute(
+        "SELECT id, ontology_json FROM schemas WHERE domain_id = ? AND name = 'ecommerce'",
+        [domain_id],
+    ).fetchone()
+    if row is None:
+        return
+
+    schema_id = row[0]
+    try:
+        ont = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+    except (json.JSONDecodeError, TypeError):
+        return
+
+    nodes = ont.get("nodes", {})
+    changed = False
+
+    # Add support_tickets edge to customer node
+    customer = nodes.get("customer")
+    if customer is not None:
+        edges = customer.get("edges", {})
+        if "support_tickets" not in edges:
+            edges["support_tickets"] = {
+                "node": "support_ticket",
+                "description": "Support tickets filed by this customer.",
+                "join_type": "LEFT",
+                "join_steps": [{"table": "support_tickets", "alias_key": "support_ticket", "condition": "{support_ticket}.customer_id = {customer}.id"}],
+            }
+            customer["edges"] = edges
+            changed = True
+
+    # Add support_tickets edge to order node
+    order = nodes.get("order")
+    if order is not None:
+        edges = order.get("edges", {})
+        if "support_tickets" not in edges:
+            edges["support_tickets"] = {
+                "node": "support_ticket",
+                "description": "Support tickets related to this order.",
+                "join_type": "LEFT",
+                "join_steps": [{"table": "support_tickets", "alias_key": "support_ticket", "condition": "{support_ticket}.order_id = {order}.id"}],
+            }
+            order["edges"] = edges
+            changed = True
+
+    if changed:
+        conn.execute(
+            "UPDATE schemas SET ontology_json = ?, updated_at = ? WHERE id = ?",
+            [json.dumps(ont, default=str), _now(), schema_id],
+        )
+        log.info("Patched ecommerce schema with support_tickets edges on customer and order")
+
+
+def _get_support_pg_url() -> str | None:
+    """Check if PostgreSQL is available and return a connection URL.
+
+    Tries to connect to local PostgreSQL with the nexaql_support database.
+    Returns None if PostgreSQL is not reachable.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["pg_isready", "-h", "localhost", "-p", "5432"],
+            capture_output=True, timeout=5,
+        )
+        if result.returncode != 0:
+            return None
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return None
+
+    # Ensure the nexaql_support database exists
+    try:
+        result = subprocess.run(
+            ["createdb", "nexaql_support"],
+            capture_output=True, timeout=10,
+        )
+    except Exception:
+        pass  # database may already exist
+
+    return "postgresql://localhost:5432/nexaql_support"
+
+
+def _seed_support_data(pg_url: str) -> None:
+    """Seed the support_tickets table into PostgreSQL."""
+    seed_sql_path = os.path.join(os.path.dirname(__file__), "data", "sample_support_seed.sql")
+    if not os.path.exists(seed_sql_path):
+        log.warning("Support seed SQL not found at %s", seed_sql_path)
+        return
+
+    try:
+        import asyncio
+        import asyncpg
+
+        async def _run_seed():
+            conn = await asyncpg.connect(pg_url)
+            try:
+                # Check if table already has data
+                try:
+                    count = await conn.fetchval("SELECT COUNT(*) FROM support_tickets")
+                    if count and count > 0:
+                        log.info("support_tickets already seeded (%d rows)", count)
+                        return
+                except asyncpg.exceptions.UndefinedTableError:
+                    pass  # table doesn't exist yet
+
+                with open(seed_sql_path) as f:
+                    sql = f.read()
+                await conn.execute(sql)
+                count = await conn.fetchval("SELECT COUNT(*) FROM support_tickets")
+                log.info("Seeded support_tickets with %d rows", count or 0)
+            finally:
+                await conn.close()
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+
+        if loop and loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                executor.submit(lambda: asyncio.run(_run_seed())).result()
+        else:
+            asyncio.run(_run_seed())
+
+    except Exception as e:
+        log.warning("Failed to seed support data: %s", e)
 
 
 def _seed_sample_data() -> str:
