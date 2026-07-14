@@ -193,3 +193,4 @@ class Ontology(BaseModel):
     roles: Optional[dict[str, RoleDef]] = None
     access_functions: Optional[dict[str, AccessFunction]] = None
     nodes: dict[str, OntologyNode]
+    node_to_connector: Optional[dict[str, int]] = None

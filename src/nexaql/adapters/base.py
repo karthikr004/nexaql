@@ -45,3 +45,10 @@ class QueryAdapter(ABC):
     async def healthcheck(self) -> bool:
         """Return ``True`` if the underlying datasource is reachable."""
         ...
+
+    async def fetch_table(self, table_name: str, row_limit: int = 5_000_000) -> tuple[List[Dict[str, Any]], List[ColumnMeta]]:
+        """Fetch all rows from a table for cross-datasource federation.
+
+        Subclasses should override this for efficient bulk loading.
+        """
+        raise NotImplementedError(f"{self.adapter_type} does not support fetch_table")

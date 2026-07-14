@@ -169,11 +169,12 @@ def load_ontology_from_dict(data: dict) -> Ontology:
         "version": data.get("version", "1.0"),
         "nodes": data.get("nodes", {}),
     }
-    # Pass through optional top-level keys if present
     if data.get("roles"):
         ont_dict["roles"] = data["roles"]
     if data.get("access_functions"):
         ont_dict["access_functions"] = data["access_functions"]
+    if data.get("node_to_connector"):
+        ont_dict["node_to_connector"] = data["node_to_connector"]
     return Ontology(**ont_dict)
 
 
@@ -289,6 +290,30 @@ def invalidate_ontology_cache(domain: str | None = None) -> None:
 
 
 _adapter_cache: dict[str, QueryAdapter] = {}
+
+
+def get_adapter_for_connector(connector_id: int) -> QueryAdapter:
+    """Get or create a QueryAdapter for a bootstrap DB connector by ID."""
+    cache_key = f"__connector_{connector_id}"
+    if cache_key in _adapter_cache:
+        return _adapter_cache[cache_key]
+
+    from nexaql import bootstrap as bs
+    from nexaql.config import DatasourceEntry
+
+    connector = bs.get_connector_by_id(connector_id)
+    if connector is None:
+        raise ValueError(f"Connector with id={connector_id} not found")
+
+    ds_entry = DatasourceEntry(
+        type=connector["type"],
+        url=connector.get("url"),
+        path=connector.get("url"),
+    )
+
+    adapter = _get_adapter(ds_entry)
+    _adapter_cache[cache_key] = adapter
+    return adapter
 
 
 def get_adapter_for_datasource(datasource_name: str | None = None) -> QueryAdapter:

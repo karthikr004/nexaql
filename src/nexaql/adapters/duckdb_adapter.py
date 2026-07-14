@@ -136,3 +136,22 @@ class DuckDBAdapter(QueryAdapter):
     def _ping(self) -> None:
         conn = self._get_conn()
         conn.execute("SELECT 1").fetchone()
+
+    async def fetch_table(self, table_name: str, row_limit: int = 5_000_000) -> tuple[List[Dict[str, Any]], List[ColumnMeta]]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(None, self._fetch_table_sync, table_name, row_limit)
+
+    def _fetch_table_sync(self, table_name: str, row_limit: int) -> tuple[List[Dict[str, Any]], List[ColumnMeta]]:
+        conn = self._get_conn()
+        rel = conn.execute(f"SELECT * FROM {table_name} LIMIT {row_limit}")
+        description = rel.description
+        raw_rows = rel.fetchall()
+
+        columns: List[ColumnMeta] = []
+        col_names: List[str] = []
+        for col_name, col_type, *_ in description:
+            columns.append(ColumnMeta(name=col_name, type=_duckdb_type_to_str(col_type)))
+            col_names.append(col_name)
+
+        rows: List[Dict[str, Any]] = [dict(zip(col_names, row)) for row in raw_rows]
+        return rows, columns
