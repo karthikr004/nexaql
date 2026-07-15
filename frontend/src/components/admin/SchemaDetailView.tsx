@@ -79,7 +79,6 @@ export default function SchemaDetailView({
   const [saving, setSaving] = useState(false);
   const [regenerating, setRegenerating] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
-  const [regeneratingNode, setRegeneratingNode] = useState<string | null>(null);
   const [viewTab, setViewTab] = useState<'nodes' | 'roles' | 'access'>('nodes');
 
   const fetchOntology = useCallback(async () => {
@@ -158,31 +157,6 @@ export default function SchemaDetailView({
     }
   }, [ontology, onToast, onOntologyChanged]);
 
-  // ── Node-level regeneration ──────────────────────────────────────────────
-
-  const handleRegenerateNode = useCallback(async (nodeName: string) => {
-    setRegeneratingNode(nodeName);
-    try {
-      const res = await fetch(`/api/admin/ontology/node/${encodeURIComponent(nodeName)}/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ domain: domainName }),
-      });
-      const body = await res.json();
-      if (res.ok) {
-        onToast({ message: `Synced "${nodeName}" — ${body.field_count} fields, ${body.edge_count} edges`, type: 'success' });
-        fetchOntology();
-        onOntologyChanged?.();
-      } else {
-        onToast({ message: body.error || `Failed to sync ${nodeName}`, type: 'error' });
-      }
-    } catch (err) {
-      onToast({ message: `Error: ${err}`, type: 'error' });
-    } finally {
-      setRegeneratingNode(null);
-    }
-  }, [domainName, fetchOntology, onToast, onOntologyChanged]);
-
   const nodeEntries = Object.entries(ontology?.nodes ?? {});
   const nodeNames = nodeEntries.map(([n]) => n);
   const roleNames = Object.keys(ontology?.roles ?? {});
@@ -196,47 +170,48 @@ export default function SchemaDetailView({
     if (c.id != null) connectorIdToName[c.id] = c.name;
   }
 
-  const handleRegenerateAll = useCallback(async () => {
-    const connectorIds = new Set<number>();
-    for (const cid of Object.values(nodeToConnector)) {
-      if (cid != null) connectorIds.add(cid);
-    }
-    if (connectorIds.size === 0) {
-      onToast({ message: 'No connectors found for this domain', type: 'error' });
+  // ── Regenerate selected schema (single node) from its connector ─────────
+
+  const handleRegenerateSchema = useCallback(async () => {
+    if (!selectedNode) return;
+    const connectorId = nodeToConnector[selectedNode];
+    if (connectorId == null) {
+      onToast({ message: `No connector mapped for "${selectedNode}"`, type: 'error' });
       return;
     }
+    const connectorName = connectorIdToName[connectorId];
+    if (!connectorName) {
+      onToast({ message: `Connector not found for "${selectedNode}"`, type: 'error' });
+      return;
+    }
+    const tableName = selectedNodeData?.table || selectedNode;
     setRegenerating(true);
-    let totalNodes = 0;
     try {
-      for (const cid of connectorIds) {
-        const cname = connectorIdToName[cid];
-        if (!cname) continue;
-        const res = await fetch('/api/generate-ontology', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            connector_name: cname,
-            domain: domainName,
-            description: '',
-            replace: true,
-          }),
-        });
-        const body = await res.json();
-        if (res.ok) {
-          totalNodes += body.node_count ?? 0;
-        } else {
-          onToast({ message: `Failed to regenerate from ${cname}: ${body.error}`, type: 'error' });
-        }
+      const res = await fetch('/api/generate-ontology', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          connector_name: connectorName,
+          domain: domainName,
+          description: '',
+          include_tables: [tableName],
+          replace: true,
+        }),
+      });
+      const body = await res.json();
+      if (res.ok) {
+        onToast({ message: `Regenerated "${selectedNode}" from ${connectorName}`, type: 'success' });
+        fetchOntology();
+        onOntologyChanged?.();
+      } else {
+        onToast({ message: body.error || `Failed to regenerate ${selectedNode}`, type: 'error' });
       }
-      onToast({ message: `Regenerated ${totalNodes} nodes from ${connectorIds.size} connector(s)`, type: 'success' });
-      fetchOntology();
-      onOntologyChanged?.();
     } catch (err) {
       onToast({ message: `Error: ${err}`, type: 'error' });
     } finally {
       setRegenerating(false);
     }
-  }, [nodeToConnector, connectorIdToName, domainName, fetchOntology, onOntologyChanged, onToast]);
+  }, [selectedNode, selectedNodeData, nodeToConnector, connectorIdToName, domainName, fetchOntology, onOntologyChanged, onToast]);
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <SectionHeader
@@ -269,8 +244,8 @@ export default function SchemaDetailView({
                 </button>
                 <button
                   type="button"
-                  onClick={handleRegenerateAll}
-                  disabled={regenerating}
+                  onClick={handleRegenerateSchema}
+                  disabled={regenerating || !selectedNode}
                   className="rounded border px-2 py-1 text-[10px] font-semibold disabled:opacity-50"
                   style={{ borderColor: 'var(--border)', color: 'var(--badge-green-text)' }}
                 >
@@ -331,14 +306,12 @@ export default function SchemaDetailView({
               </span>
             </div>
             <div className="flex-1 overflow-y-auto">
-              {nodeEntries.map(([name, node]) => {
-                const isRegenNode = regeneratingNode === name;
-                return (
+              {nodeEntries.map(([name, node]) => (
                   <button
                     type="button"
                     key={name}
                     onClick={() => setSelectedNode(name)}
-                    className={`flex w-full items-center justify-between border-b px-3 py-2.5 text-left transition-colors ${
+                    className={`flex w-full items-center border-b px-3 py-2.5 text-left transition-colors ${
                       selectedNode === name ? 'border-l-2' : ''
                     }`}
                     style={{
@@ -360,19 +333,8 @@ export default function SchemaDetailView({
                           : ''}
                       </span>
                     </div>
-                    <button
-                      type="button"
-                      title={`Sync ${name} from source`}
-                      onClick={(e) => { e.stopPropagation(); handleRegenerateNode(name); }}
-                      disabled={isRegenNode}
-                      className="shrink-0 rounded border px-1 py-0.5 text-[8px] disabled:opacity-50 hover:bg-[var(--bg-elevated)]"
-                      style={{ borderColor: 'var(--border)', color: 'var(--text-muted)' }}
-                    >
-                      {isRegenNode ? '↻...' : '↻'}
-                    </button>
                   </button>
-                );
-              })}
+              ))}
               {nodeEntries.length === 0 && (
                 <div className="py-6 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>
                   No nodes. Regenerate or add a schema.
