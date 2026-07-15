@@ -769,17 +769,14 @@ class OntologyGenerator:
                 fk_col = next((c for c in table.columns if c.name == fk.from_column), None)
                 join_type = "LEFT JOIN" if (fk_col and fk_col.is_nullable) else "JOIN"
 
-                # Build alias for join
-                alias = f"{target_node[0]}1"
-
                 edges[edge_name] = OntologyEdge(
                     node=target_node,
                     description=f"Related {target_node}",
                     join_type=join_type,
                     join_steps=[JoinStep(
                         table=fk.to_table,
-                        alias_key=alias,
-                        condition=f"{alias}.{fk.to_column} = {node_name[0]}0.{fk.from_column}",
+                        alias_key=target_node,
+                        condition=f"{{{node_name}}}.{fk.from_column} = {{{target_node}}}.{fk.to_column}",
                     )],
                 )
 
@@ -794,16 +791,14 @@ class OntologyGenerator:
                 if rev_name in fields or rev_name in edges:
                     rev_name = f"{rev_name}_list"
 
-                alias = f"{source_node[0]}1"
-
                 edges[rev_name] = OntologyEdge(
                     node=source_node,
                     description=f"{source_node.replace('_', ' ').title()} referencing this {node_name}",
                     join_type="LEFT JOIN",
                     join_steps=[JoinStep(
                         table=fk.from_table,
-                        alias_key=alias,
-                        condition=f"{alias}.{fk.from_column} = {node_name[0]}0.{fk.to_column}",
+                        alias_key=source_node,
+                        condition=f"{{{node_name}}}.{fk.to_column} = {{{source_node}}}.{fk.from_column}",
                     )],
                 )
 
@@ -812,7 +807,7 @@ class OntologyGenerator:
             node_desc = table.comment or f"{table.name.replace('_', ' ').title()} records"
 
             node = OntologyNode(
-                table=table.name if table.name != node_name else None,
+                table=table.name,
                 description=node_desc,
                 primary_key=pk,
                 fields=fields,

@@ -67,15 +67,17 @@ function stripRowPolicyUIFields(ontology: OntologyData): OntologyData {
 // ── Main component ──────────────────────────────────────────────────────────
 
 export default function SchemaDetailView({
-  domainName, schema, connectors, onBack,
-  onRegenerate, regenerating, onToast, onOntologyChanged,
+  domainName, schema: _schema, connectors, onBack,
+  onRegenerate: _onRegenerate, regenerating: _regeneratingProp, onToast, onOntologyChanged,
 }: Props) {
+  void _onRegenerate; void _regeneratingProp;
   const [ontology, setOntology] = useState<OntologyData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [regenerating, setRegenerating] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [regeneratingNode, setRegeneratingNode] = useState<string | null>(null);
   const [viewTab, setViewTab] = useState<'nodes' | 'roles' | 'access'>('nodes');
@@ -186,13 +188,60 @@ export default function SchemaDetailView({
   const roleNames = Object.keys(ontology?.roles ?? {});
   const accessFunctions: Record<string, AccessFunctionData> = ontology?.access_functions ?? {};
   const selectedNodeData = selectedNode ? ontology?.nodes[selectedNode] : null;
-  const connectorName = schema.connector_name ?? 'unknown';
+  const nodeToConnector: Record<string, number> = (ontology as any)?.node_to_connector ?? {};
 
+  // Build connector ID → name lookup
+  const connectorIdToName: Record<number, string> = {};
+  for (const c of connectors) {
+    if (c.id != null) connectorIdToName[c.id] = c.name;
+  }
+
+  const handleRegenerateAll = useCallback(async () => {
+    const connectorIds = new Set<number>();
+    for (const cid of Object.values(nodeToConnector)) {
+      if (cid != null) connectorIds.add(cid);
+    }
+    if (connectorIds.size === 0) {
+      onToast({ message: 'No connectors found for this domain', type: 'error' });
+      return;
+    }
+    setRegenerating(true);
+    let totalNodes = 0;
+    try {
+      for (const cid of connectorIds) {
+        const cname = connectorIdToName[cid];
+        if (!cname) continue;
+        const res = await fetch('/api/generate-ontology', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            connector_name: cname,
+            domain: domainName,
+            description: '',
+            replace: true,
+          }),
+        });
+        const body = await res.json();
+        if (res.ok) {
+          totalNodes += body.node_count ?? 0;
+        } else {
+          onToast({ message: `Failed to regenerate from ${cname}: ${body.error}`, type: 'error' });
+        }
+      }
+      onToast({ message: `Regenerated ${totalNodes} nodes from ${connectorIds.size} connector(s)`, type: 'success' });
+      fetchOntology();
+      onOntologyChanged?.();
+    } catch (err) {
+      onToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setRegenerating(false);
+    }
+  }, [nodeToConnector, connectorIdToName, domainName, fetchOntology, onOntologyChanged, onToast]);
   return (
     <div className="flex flex-1 flex-col overflow-hidden">
       <SectionHeader
         title={domainName}
-        subtitle={`${nodeEntries.length} node(s) via ${connectorName}`}
+        subtitle={`${nodeEntries.length} node(s)`}
       />
 
       {/* Top bar: back + actions */}
@@ -202,9 +251,9 @@ export default function SchemaDetailView({
             &larr; Back
           </button>
           <div className="flex items-center gap-3 text-[11px]">
-            <span className="font-mono font-semibold" style={{ color: 'var(--text-primary)' }}>{schema.name}</span>
+            <span className="font-mono font-semibold" style={{ color: 'var(--text-primary)' }}>{domainName}</span>
             <span style={{ color: 'var(--text-muted)' }}>
-              {schema.node_count} nodes &middot; {connectorName}
+              {nodeEntries.length} nodes
             </span>
           </div>
           <div className="flex items-center gap-2">
@@ -220,7 +269,7 @@ export default function SchemaDetailView({
                 </button>
                 <button
                   type="button"
-                  onClick={onRegenerate}
+                  onClick={handleRegenerateAll}
                   disabled={regenerating}
                   className="rounded border px-2 py-1 text-[10px] font-semibold disabled:opacity-50"
                   style={{ borderColor: 'var(--border)', color: 'var(--badge-green-text)' }}
@@ -306,6 +355,9 @@ export default function SchemaDetailView({
                         {Object.keys(node.fields).length}f
                         {node.edges ? ` · ${Object.keys(node.edges).length}e` : ''}
                         {node.visible_to?.length ? ` · ${node.visible_to.join(',')}` : ''}
+                        {nodeToConnector[name] != null && connectorIdToName[nodeToConnector[name]!]
+                          ? ` · ${connectorIdToName[nodeToConnector[name]!]}`
+                          : ''}
                       </span>
                     </div>
                     <button
@@ -336,6 +388,8 @@ export default function SchemaDetailView({
                 nodeName={selectedNode}
                 node={selectedNodeData}
                 nodeNames={nodeNames}
+                allNodes={ontology?.nodes ?? {}}
+                connectorNames={connectors.map((c) => c.name)}
                 roleNames={roleNames}
                 accessFunctions={accessFunctions}
                 onUpdateNode={(updater) => updateNode(selectedNode, updater)}

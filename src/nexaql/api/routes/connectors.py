@@ -376,28 +376,24 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
             ds.path = connection_url
 
     # Save to bootstrap DB
-    save_name = req.output_schema_name or req.connector_name
     try:
-        # Check for duplicate when replace=False (i.e. "Add Schema")
-        if not req.replace:
-            existing = bs.get_schema(req.domain, save_name)
-            if existing:
-                return JSONResponse(
-                    {"error": f"Schema '{save_name}' already exists in domain '{req.domain}'. Use a different name or regenerate the existing schema."},
-                    status_code=409,
-                )
-
         ontology_dict = ontology.model_dump(exclude_none=True)
+        all_nodes = ontology_dict.get("nodes", {})
+        top_level = {k: v for k, v in ontology_dict.items() if k != "nodes"}
 
-        # Bootstrap default roles and access functions if not already present
-        if "roles" not in ontology_dict or not ontology_dict["roles"]:
-            ontology_dict["roles"] = {
+        # Extract roles and access_functions to domain level
+        roles = ontology_dict.get("roles")
+        access_functions = ontology_dict.get("access_functions")
+
+        # Bootstrap default roles/access if not present
+        if not roles:
+            roles = {
                 "admin": {"description": "Full access to all data"},
                 "analyst": {"description": "Read-only access for reporting and analytics"},
                 "manager": {"description": "Access scoped to their department or region"},
             }
-        if "access_functions" not in ontology_dict or not ontology_dict["access_functions"]:
-            ontology_dict["access_functions"] = {
+        if not access_functions:
+            access_functions = {
                 "owns_record": {
                     "description": "User owns the record (created_by or user_id matches)",
                     "sql": "{field} = {user.id}",
@@ -415,11 +411,32 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
                 },
             }
 
-        bs.save_schema(
+        # Save per-table schemas (one schema per node)
+        for node_name, node_def in all_nodes.items():
+            schema_name = node_name
+            if not req.replace:
+                existing = bs.get_schema(req.domain, schema_name)
+                if existing:
+                    continue
+
+            node_def["datasource"] = req.connector_name
+
+            per_table_ont = {**top_level, "nodes": {node_name: node_def}}
+            per_table_ont.pop("roles", None)
+            per_table_ont.pop("access_functions", None)
+
+            bs.save_schema(
+                domain_name=req.domain,
+                schema_name=schema_name,
+                connector_id=connector_id,
+                ontology_json=per_table_ont,
+            )
+
+        # Save roles and access_functions at domain level
+        bs.save_domain_policies(
             domain_name=req.domain,
-            schema_name=save_name,
-            connector_id=connector_id,
-            ontology_json=ontology_dict,
+            roles=roles,
+            access_functions=access_functions,
         )
 
         # Update domain description

@@ -19,7 +19,11 @@ router = APIRouter(tags=["admin"])
 
 
 async def _save_ontology_to_db(ontology: Ontology) -> None:
-    """Save ontology to both the bootstrap DB and the active store."""
+    """Save ontology to both the bootstrap DB and the active store.
+
+    Per-table schema model: each node is stored in its own schema.
+    Roles and access_functions are saved at the domain level.
+    """
     import json as _json
     from nexaql import bootstrap as bs
     from nexaql.api.deps import _get_store_for_datasource
@@ -28,45 +32,46 @@ async def _save_ontology_to_db(ontology: Ontology) -> None:
 
     # ── Update bootstrap DB (primary read path) ──────────────────────
     schemas = bs.list_schemas(domain)
-    if schemas:
-        # Build node→schema mapping from existing data
-        node_schema_map: dict[str, dict] = {}
-        for schema in schemas:
-            try:
-                ont_data = _json.loads(schema["ontology_json"]) if isinstance(schema["ontology_json"], str) else schema["ontology_json"]
-            except (ValueError, TypeError):
-                ont_data = {}
-            for node_name in ont_data.get("nodes", {}):
-                node_schema_map[node_name] = schema
 
-        ont_dict = ontology.model_dump(exclude_none=True)
-        all_nodes = ont_dict.get("nodes", {})
-        top_level = {k: v for k, v in ont_dict.items() if k != "nodes"}
+    # Build node→schema mapping from existing per-table schemas
+    node_schema_map: dict[str, dict] = {}
+    for schema in schemas:
+        try:
+            ont_data = _json.loads(schema["ontology_json"]) if isinstance(schema["ontology_json"], str) else schema["ontology_json"]
+        except (ValueError, TypeError):
+            ont_data = {}
+        for node_name in ont_data.get("nodes", {}):
+            node_schema_map[node_name] = schema
 
-        # Group updated nodes back into their schemas
-        schema_nodes: dict[int, dict[str, Any]] = {}
-        for node_name, node_def in all_nodes.items():
-            src_schema = node_schema_map.get(node_name, schemas[0])
-            sid = src_schema["id"]
-            if sid not in schema_nodes:
-                schema_nodes[sid] = {}
-            schema_nodes[sid][node_name] = node_def
+    ont_dict = ontology.model_dump(exclude_none=True)
+    all_nodes = ont_dict.get("nodes", {})
+    top_level = {k: v for k, v in ont_dict.items() if k not in ("nodes", "roles", "access_functions")}
 
-        # Also include schemas that had no matching nodes (keep their data)
-        for schema in schemas:
-            sid = schema["id"]
-            if sid not in schema_nodes:
-                schema_nodes[sid] = {}
+    # Save each node as its own per-table schema
+    for node_name, node_def in all_nodes.items():
+        src_schema = node_schema_map.get(node_name)
+        connector_id = src_schema["connector_id"] if src_schema else None
 
-        for schema in schemas:
-            sid = schema["id"]
-            updated_ont = {**top_level, "nodes": schema_nodes.get(sid, {})}
-            bs.save_schema(
-                domain_name=domain,
-                schema_name=schema["name"],
-                connector_id=schema["connector_id"],
-                ontology_json=updated_ont,
-            )
+        if connector_id is None and schemas:
+            connector_id = schemas[0]["connector_id"]
+
+        per_table_ont = {**top_level, "nodes": {node_name: node_def}}
+        bs.save_schema(
+            domain_name=domain,
+            schema_name=node_name,
+            connector_id=connector_id,
+            ontology_json=per_table_ont,
+        )
+
+    # Save roles and access_functions at domain level
+    roles = ont_dict.get("roles")
+    access_functions = ont_dict.get("access_functions")
+    if roles or access_functions:
+        bs.save_domain_policies(
+            domain_name=domain,
+            roles=roles,
+            access_functions=access_functions,
+        )
 
     # ── Also save to the store (secondary path) ─────────────────────
     store = _get_store_for_datasource()

@@ -9,7 +9,6 @@ import type {
   NodeData,
   FieldData,
   EdgeData,
-  JoinStepData,
   SpecialFilterData,
   RowPolicyData,
   AccessFunctionData,
@@ -20,7 +19,7 @@ import type {
 type EditorTab = 'general' | 'fields' | 'edges' | 'filters' | 'access';
 
 const FIELD_TYPES = ['string', 'integer', 'numeric', 'boolean', 'date', 'enum'];
-const JOIN_TYPES = ['JOIN', 'LEFT', 'LEFT JOIN'];
+const JOIN_TYPES = ['JOIN', 'LEFT JOIN'];
 
 const TABS: { key: EditorTab; label: string }[] = [
   { key: 'general', label: 'General' },
@@ -40,7 +39,6 @@ function get<V>(rec: Record<string, V>, key: string): V {
 
 function makeEmptyField(): FieldData { return { type: 'string', description: '', filterable: false }; }
 function makeEmptyEdge(): EdgeData { return { node: '', description: '', join_steps: [] }; }
-function makeEmptyJoinStep(): JoinStepData { return { table: '', alias_key: '', condition: '' }; }
 function makeEmptyFilter(): SpecialFilterData { return { description: '', sql: '' }; }
 function makeEmptyRowPolicy(): RowPolicyData { return { condition: '', roles: [], mode: 'function' }; }
 
@@ -50,6 +48,8 @@ interface Props {
   nodeName: string;
   node: NodeData;
   nodeNames: string[];
+  allNodes: Record<string, NodeData>;
+  connectorNames: string[];
   roleNames: string[];
   accessFunctions: Record<string, AccessFunctionData>;
   onUpdateNode: (updater: (draft: NodeData) => void) => void;
@@ -58,7 +58,7 @@ interface Props {
 
 // ── Tab renderers ────────────────────────────────────────────────────────────
 
-function GeneralTab({ node, onUpdate }: { node: NodeData; onUpdate: (u: (n: NodeData) => void) => void }) {
+function GeneralTab({ node, connectorNames, onUpdate }: { node: NodeData; connectorNames: string[]; onUpdate: (u: (n: NodeData) => void) => void }) {
   return (
     <div className="space-y-4 p-4">
       <div>
@@ -74,8 +74,11 @@ function GeneralTab({ node, onUpdate }: { node: NodeData; onUpdate: (u: (n: Node
         <textarea rows={3} value={node.description} onChange={(e) => onUpdate((n) => { n.description = e.target.value; })} className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none resize-none" style={inputStyle} />
       </div>
       <div>
-        <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Datasource (optional)</label>
-        <input value={node.datasource ?? ''} onChange={(e) => onUpdate((n) => { n.datasource = e.target.value || undefined; })} className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none" style={inputStyle} />
+        <label className="mb-1 block text-[10px] uppercase tracking-widest" style={labelStyle}>Datasource</label>
+        <select value={node.datasource ?? ''} onChange={(e) => onUpdate((n) => { n.datasource = e.target.value || undefined; })} className="w-full rounded border px-2 py-1.5 text-sm focus:outline-none" style={inputStyle}>
+          <option value="">-- select --</option>
+          {connectorNames.map((cn) => <option key={cn} value={cn}>{cn}</option>)}
+        </select>
       </div>
     </div>
   );
@@ -145,59 +148,132 @@ function FieldsTab({ node, onUpdate }: { node: NodeData; onUpdate: (u: (n: NodeD
   );
 }
 
-function EdgesTab({ node, nodeNames, onUpdate }: { node: NodeData; nodeNames: string[]; onUpdate: (u: (n: NodeData) => void) => void }) {
+function EdgesTab({ nodeName, node, nodeNames, allNodes, onUpdate }: { nodeName: string; node: NodeData; nodeNames: string[]; allNodes: Record<string, NodeData>; onUpdate: (u: (n: NodeData) => void) => void }) {
   const edges = node.edges ?? {};
   const edgeEntries = Object.entries(edges);
+
+  const getFieldNames = (nname: string): string[] => {
+    const nd = allNodes[nname];
+    if (!nd) return [];
+    return Object.keys(nd.fields);
+  };
+
+  const parseJoinFields = (edata: EdgeData): { sourceField: string; targetField: string } => {
+    if (edata.join_steps.length === 0 || !edata.join_steps[0]) return { sourceField: '', targetField: '' };
+    const cond = edata.join_steps[0].condition;
+    const match = cond.match(/\{(\w+)\}\.(\w+)\s*=\s*\{(\w+)\}\.(\w+)/);
+    if (!match) return { sourceField: '', targetField: '' };
+    const leftAlias = match[1] ?? '';
+    const leftField = match[2] ?? '';
+    const rightField = match[4] ?? '';
+    if (leftAlias === nodeName) {
+      return { sourceField: leftField, targetField: rightField };
+    }
+    return { sourceField: rightField, targetField: leftField };
+  };
+
+  const updateJoinFromFields = (ename: string, targetNodeName: string, sourceField: string, targetField: string) => {
+    onUpdate((n) => {
+      const ed = n.edges?.[ename];
+      if (!ed) return;
+      const targetNd = allNodes[targetNodeName];
+      const tableName = targetNd?.table ?? targetNodeName;
+      const condition = sourceField && targetField
+        ? `{${nodeName}}.${sourceField} = {${targetNodeName}}.${targetField}`
+        : '';
+      if (ed.join_steps.length === 0) {
+        ed.join_steps.push({ table: tableName, alias_key: targetNodeName, condition });
+      } else {
+        const step = ed.join_steps[0];
+        if (step) {
+          step.table = tableName;
+          step.alias_key = targetNodeName;
+          step.condition = condition;
+        }
+      }
+    });
+  };
+
+  const setTargetNode = (ename: string, targetNodeName: string) => {
+    onUpdate((n) => {
+      const ed = n.edges?.[ename];
+      if (!ed) return;
+      ed.node = targetNodeName;
+      const targetNd = allNodes[targetNodeName];
+      const tableName = targetNd?.table ?? targetNodeName;
+      if (ed.join_steps.length > 0 && ed.join_steps[0]) {
+        ed.join_steps[0].table = tableName;
+        ed.join_steps[0].alias_key = targetNodeName;
+        ed.join_steps[0].condition = '';
+      } else {
+        ed.join_steps = [{ table: tableName, alias_key: targetNodeName, condition: '' }];
+      }
+    });
+  };
+
   return (
     <div className="space-y-3 p-4">
-      {edgeEntries.map(([ename, edata]) => (
-        <div key={ename} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
-          <div className="mb-2 flex items-center justify-between">
-            <input value={ename} onChange={(e) => { const nn = e.target.value; if (nn === ename) return; onUpdate((n) => { const ed = n.edges ?? {}; const v = get(ed, ename); delete ed[ename]; ed[nn] = v; n.edges = ed; }); }}
-              className="rounded border px-2 py-1 font-mono text-xs focus:outline-none" style={inputStyle} placeholder="Edge name" />
-            <button type="button" onClick={() => onUpdate((n) => { if (n.edges) delete n.edges[ename]; })} className="hover:text-red-400" style={{ color: 'var(--text-secondary)' }} title="Delete edge">x</button>
-          </div>
-          <div className="grid grid-cols-3 gap-2">
-            <div>
-              <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Target Node</label>
-              <select value={edata.node} onChange={(e) => onUpdate((n) => { const ed = n.edges?.[ename]; if (ed) ed.node = e.target.value; })}
-                className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle}>
-                <option value="">-- select --</option>
-                {nodeNames.map((nn) => <option key={nn} value={nn}>{nn}</option>)}
-              </select>
+      {edgeEntries.map(([ename, edata]) => {
+        const parsed = parseJoinFields(edata);
+        const sourceFields = getFieldNames(nodeName);
+        const targetFields = edata.node ? getFieldNames(edata.node) : [];
+        if (parsed.sourceField && sourceFields.indexOf(parsed.sourceField) === -1) {
+          sourceFields.push(parsed.sourceField);
+        }
+        if (parsed.targetField && targetFields.indexOf(parsed.targetField) === -1) {
+          targetFields.push(parsed.targetField);
+        }
+        return (
+          <div key={ename} className="rounded-lg border p-3" style={{ borderColor: 'var(--border)', backgroundColor: 'var(--bg-secondary)' }}>
+            <div className="mb-2 flex items-center justify-between">
+              <input value={ename} onChange={(e) => { const nn = e.target.value; if (nn === ename) return; onUpdate((n) => { const ed = n.edges ?? {}; const v = get(ed, ename); delete ed[ename]; ed[nn] = v; n.edges = ed; }); }}
+                className="rounded border px-2 py-1 font-mono text-xs focus:outline-none" style={inputStyle} placeholder="Edge name" />
+              <button type="button" onClick={() => onUpdate((n) => { if (n.edges) delete n.edges[ename]; })} className="hover:text-red-400" style={{ color: 'var(--text-secondary)' }} title="Delete edge">x</button>
             </div>
-            <div>
-              <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Description</label>
-              <input value={edata.description} onChange={(e) => onUpdate((n) => { const ed = n.edges?.[ename]; if (ed) ed.description = e.target.value; })}
-                className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle} />
-            </div>
-            <div>
-              <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Join Type</label>
-              <select value={edata.join_type ?? 'JOIN'} onChange={(e) => onUpdate((n) => { const ed = n.edges?.[ename]; if (ed) ed.join_type = e.target.value; })}
-                className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle}>
-                {JOIN_TYPES.map((jt) => <option key={jt} value={jt}>{jt}</option>)}
-              </select>
-            </div>
-          </div>
-          {/* Join Steps */}
-          <div className="mt-2">
-            <label className="mb-1 block text-[9px] uppercase tracking-widest" style={labelStyle}>Join Steps</label>
-            {edata.join_steps.map((step, si) => (
-              <div key={si} className="mb-1 grid grid-cols-[1fr_1fr_2fr_auto] gap-1.5">
-                <input value={step.table} onChange={(e) => onUpdate((n) => { const s = n.edges?.[ename]?.join_steps[si]; if (s) s.table = e.target.value; })}
-                  placeholder="table" className="rounded border px-1.5 py-1 font-mono text-[10px] focus:outline-none" style={inputStyle} />
-                <input value={step.alias_key} onChange={(e) => onUpdate((n) => { const s = n.edges?.[ename]?.join_steps[si]; if (s) s.alias_key = e.target.value; })}
-                  placeholder="alias_key" className="rounded border px-1.5 py-1 font-mono text-[10px] focus:outline-none" style={inputStyle} />
-                <input value={step.condition} onChange={(e) => onUpdate((n) => { const s = n.edges?.[ename]?.join_steps[si]; if (s) s.condition = e.target.value; })}
-                  placeholder="condition" className="rounded border px-1.5 py-1 font-mono text-[10px] focus:outline-none" style={inputStyle} />
-                <button type="button" onClick={() => onUpdate((n) => { n.edges?.[ename]?.join_steps.splice(si, 1); })} className="hover:text-red-400" style={{ color: 'var(--text-secondary)' }}>x</button>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Target Node</label>
+                <select value={edata.node} onChange={(e) => setTargetNode(ename, e.target.value)}
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle}>
+                  <option value="">-- select --</option>
+                  {nodeNames.map((nn) => <option key={nn} value={nn}>{nn}</option>)}
+                </select>
               </div>
-            ))}
-            <button type="button" onClick={() => onUpdate((n) => { const ed = n.edges?.[ename]; if (ed) ed.join_steps.push(makeEmptyJoinStep()); })}
-              className="mt-1 text-[10px]" style={{ color: 'var(--text-muted)' }}>+ Add Join Step</button>
+              <div>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Description</label>
+                <input value={edata.description} onChange={(e) => onUpdate((n) => { const ed = n.edges?.[ename]; if (ed) ed.description = e.target.value; })}
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle} />
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Join Type</label>
+                <select value={edata.join_type ?? 'JOIN'} onChange={(e) => onUpdate((n) => { const ed = n.edges?.[ename]; if (ed) ed.join_type = e.target.value; })}
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle}>
+                  {JOIN_TYPES.map((jt) => <option key={jt} value={jt}>{jt}</option>)}
+                </select>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-2">
+              <div>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Source Field ({nodeName})</label>
+                <select value={parsed.sourceField} onChange={(e) => updateJoinFromFields(ename, edata.node, e.target.value, parsed.targetField)}
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle}>
+                  <option value="">-- select --</option>
+                  {sourceFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="mb-0.5 block text-[9px] uppercase tracking-widest" style={labelStyle}>Target Field ({edata.node || '...'})</label>
+                <select value={parsed.targetField} onChange={(e) => updateJoinFromFields(ename, edata.node, parsed.sourceField, e.target.value)}
+                  className="w-full rounded border px-1.5 py-1 text-xs focus:outline-none" style={inputStyle}
+                  disabled={!edata.node}>
+                  <option value="">-- select --</option>
+                  {targetFields.map((f) => <option key={f} value={f}>{f}</option>)}
+                </select>
+              </div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
       {edgeEntries.length === 0 && <div className="py-6 text-center text-xs" style={{ color: 'var(--text-secondary)' }}>No edges defined</div>}
       <button type="button" onClick={() => { const name = `edge_${Object.keys(edges).length + 1}`; onUpdate((n) => { if (!n.edges) n.edges = {}; n.edges[name] = makeEmptyEdge(); }); }}
         className="rounded border px-3 py-1.5 text-[11px] transition-colors" style={{ borderColor: 'var(--border)', color: 'var(--text-secondary)' }}>+ Add Edge</button>
@@ -507,7 +583,7 @@ function RolePicker({ label, selected, roleNames, onChange, color }: { label: st
 
 // ── Main NodeEditor ──────────────────────────────────────────────────────────
 
-export default function NodeEditor({ nodeName, node, nodeNames, roleNames, accessFunctions, onUpdateNode, onUpdateOntology: _onUpdateOntology }: Props) {
+export default function NodeEditor({ nodeName, node, nodeNames, allNodes, connectorNames, roleNames, accessFunctions, onUpdateNode, onUpdateOntology: _onUpdateOntology }: Props) {
   void _onUpdateOntology; // reserved for future use (e.g. renaming nodes)
   const [activeTab, setActiveTab] = useState<EditorTab>('general');
 
@@ -539,9 +615,9 @@ export default function NodeEditor({ nodeName, node, nodeNames, roleNames, acces
 
       {/* Tab content */}
       <div className="flex-1 overflow-y-auto">
-        {activeTab === 'general' && <GeneralTab node={node} onUpdate={onUpdateNode} />}
+        {activeTab === 'general' && <GeneralTab node={node} connectorNames={connectorNames} onUpdate={onUpdateNode} />}
         {activeTab === 'fields' && <FieldsTab node={node} onUpdate={onUpdateNode} />}
-        {activeTab === 'edges' && <EdgesTab node={node} nodeNames={nodeNames} onUpdate={onUpdateNode} />}
+        {activeTab === 'edges' && <EdgesTab nodeName={nodeName} node={node} nodeNames={nodeNames} allNodes={allNodes} onUpdate={onUpdateNode} />}
         {activeTab === 'filters' && <FiltersTab node={node} onUpdate={onUpdateNode} />}
         {activeTab === 'access' && <AccessTab nodeName={nodeName} node={node} roleNames={roleNames} accessFunctions={accessFunctions} onUpdate={onUpdateNode} />}
       </div>
