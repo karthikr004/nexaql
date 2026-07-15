@@ -703,10 +703,16 @@ class OntologyGenerator:
         for fk in foreign_keys:
             reverse_fk.setdefault(fk.to_table, []).append(fk)
 
-        # Track table → node name mapping
+        # Track table → node name mapping (include FK-referenced tables
+        # so edges resolve even when regenerating a single table)
         table_to_node: dict[str, str] = {}
         for t in tables:
             table_to_node[t.name] = _table_to_node_name(t.name)
+        for fk in foreign_keys:
+            if fk.to_table not in table_to_node:
+                table_to_node[fk.to_table] = _table_to_node_name(fk.to_table)
+            if fk.from_table not in table_to_node:
+                table_to_node[fk.from_table] = _table_to_node_name(fk.from_table)
 
         # Build nodes
         nodes: dict[str, OntologyNode] = {}
