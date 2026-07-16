@@ -1,11 +1,14 @@
 # Copyright (c) 2026-present NexaQL Contributors
 """NexaQL command-line interface.
 
-Provides three commands:
+Core commands:
 
-- ``nexaql serve`` -- start the FastAPI server
-- ``nexaql init``  -- create an ``nexaql.yaml`` template
-- ``nexaql query`` -- run a query from the command line
+- ``nexaql serve``      -- start the FastAPI server
+- ``nexaql init``       -- create an ``nexaql.yaml`` template
+- ``nexaql query``      -- run a query from the command line
+- ``nexaql generate``   -- generate per-table schemas from a saved connector
+- ``nexaql regenerate`` -- regenerate a single schema/node
+- ``nexaql mcp``        -- start the MCP server for AI agents
 """
 
 from __future__ import annotations
@@ -493,92 +496,110 @@ def mcp(transport: str, port: int) -> None:
 
 
 @main.command()
-@click.argument("connection_url")
-@click.option("--schema", default="public", help="Database schema to introspect")
-@click.option("--output", "-o", default=None, help="Output YAML file path")
-@click.option("--domain", default="auto_generated", help="Domain name for the ontology")
-@click.option("--description", default=None, help="Description for the ontology")
+@click.argument("connector_name")
+@click.option("--domain", required=True, help="Domain name (e.g. 'ecommerce', 'hr')")
+@click.option("--tables", "-t", multiple=True, help="Tables to include (repeatable). If omitted, all tables.")
 @click.option("--exclude", multiple=True, help="Tables to exclude (repeatable)")
-@click.option("--include", multiple=True, help="Only include these tables (repeatable)")
+@click.option("--schema", default="public", help="Database schema to introspect (default: public)")
+@click.option("--description", default=None, help="Description for the domain")
 @click.option("--no-enums", is_flag=True, help="Skip enum detection (faster)")
 @click.option("--no-pii", is_flag=True, help="Skip PII detection")
-@click.option("--system-columns", is_flag=True, help="Include system columns (created_at, etc.)")
+@click.option("--no-replace", is_flag=True, help="Skip existing schemas instead of replacing")
 def generate(
-    connection_url: str,
-    schema: str,
-    output: Optional[str],
+    connector_name: str,
     domain: str,
-    description: Optional[str],
+    tables: tuple[str, ...],
     exclude: tuple[str, ...],
-    include: tuple[str, ...],
+    schema: str,
+    description: Optional[str],
     no_enums: bool,
     no_pii: bool,
-    system_columns: bool,
+    no_replace: bool,
 ) -> None:
-    """Generate a NexaQL ontology from a database schema.
+    """Generate per-table schemas from a saved connector.
 
-    Connects to the database, introspects tables/columns/foreign keys,
-    and generates an ontology YAML file.
+    Saves schemas to the bootstrap DB with automatic edge discovery.
 
     Examples:
 
-        nexaql generate postgresql://user:pass@localhost/mydb
+        nexaql generate my_postgres --domain ecommerce
 
-        nexaql generate postgresql://user:pass@localhost/mydb -o ontologies/myapp.yaml
+        nexaql generate my_duckdb --domain sales -t orders -t customers
 
-        nexaql generate mydata.duckdb --schema main --domain inventory
+        nexaql generate my_postgres --domain hr --exclude audit_log --exclude migrations
     """
-    from nexaql.ontology.generator import OntologyGenerator
+    from nexaql.ontology.service import generate_schemas
 
-    desc = description or f"Auto-generated ontology from {domain} database"
+    click.echo(f"Generating schemas from connector '{connector_name}' into domain '{domain}'...")
 
-    click.echo(f"Connecting to {connection_url}...")
+    include_tables = list(tables) if tables else None
+    exclude_tables = list(exclude) if exclude else None
 
-    gen = OntologyGenerator(connection_url)
+    result = asyncio.run(generate_schemas(
+        connector_name=connector_name,
+        domain=domain,
+        include_tables=include_tables,
+        exclude_tables=exclude_tables,
+        schema_name=schema,
+        description=description or "",
+        detect_enums=not no_enums,
+        detect_pii=not no_pii,
+        replace=not no_replace,
+    ))
 
-    try:
-        ontology = asyncio.run(gen.generate(
-            schema=schema,
-            domain=domain,
-            description=desc,
-            exclude_tables=list(exclude) if exclude else None,
-            include_tables=list(include) if include else None,
-            detect_enums=not no_enums,
-            detect_pii=not no_pii,
-            include_system_columns=system_columns,
-        ))
-    except Exception as e:
-        click.echo(f"Error: {e}", err=True)
+    if "error" in result:
+        click.echo(f"Error: {result['error']}", err=True)
         sys.exit(1)
 
-    node_count = len(ontology.nodes)
-    field_count = sum(len(n.fields) for n in ontology.nodes.values())
-    edge_count = sum(len(n.edges or {}) for n in ontology.nodes.values())
+    click.echo(f"Generated {result['node_count']} schemas, "
+               f"{result['total_fields']} fields, {result['total_edges']} edges")
+    click.echo()
 
-    click.echo(f"Discovered {node_count} tables, {field_count} fields, {edge_count} edges")
+    for name, info in result["nodes"].items():
+        edge_names = ", ".join(info["edges"]) or "—"
+        click.echo(f"  {name} ({info['table']}): "
+                   f"{info['field_count']} fields | edges: {edge_names}")
 
-    # Summary table
-    for name, node in ontology.nodes.items():
-        pii_count = sum(1 for f in node.fields.values() if f.pii)
-        enum_count = sum(1 for f in node.fields.values() if f.values)
-        edge_names = ", ".join((node.edges or {}).keys()) or "—"
-        pii_str = f" ({pii_count} PII)" if pii_count else ""
-        enum_str = f" ({enum_count} enums)" if enum_count else ""
-        click.echo(f"  {name}: {len(node.fields)} fields{pii_str}{enum_str} | edges: {edge_names}")
+    click.echo(f"\nDomain '{domain}' is now active.")
 
-    if output:
-        os.makedirs(os.path.dirname(os.path.abspath(output)), exist_ok=True)
-        gen.save(ontology, output)
-        click.echo(f"\nSaved to {output}")
-    else:
-        # Print YAML to stdout
-        import yaml
-        data = ontology.model_dump(exclude_none=True)
-        click.echo("\n---")
-        click.echo(yaml.dump(data, default_flow_style=False, sort_keys=False))
 
-    click.echo(f"\nTo enrich with LLM descriptions, run:")
-    click.echo(f"  nexaql enrich {output or '<path>'}")
+# ── nexaql regenerate ──────────────────────────────────────────────────────
+
+
+@main.command()
+@click.argument("node_name")
+@click.option("--domain", default=None, help="Domain name (uses active domain if not specified)")
+def regenerate(node_name: str, domain: Optional[str]) -> None:
+    """Regenerate a single schema/node from its original connector.
+
+    Re-introspects the table, regenerates the schema, and re-runs edge
+    discovery across the domain.
+
+    Examples:
+
+        nexaql regenerate orders
+
+        nexaql regenerate customers --domain ecommerce
+    """
+    from nexaql import bootstrap as _bs
+    from nexaql.ontology.service import regenerate_schema
+
+    target_domain = domain or _bs.get_active_domain()
+    if not target_domain:
+        click.echo("Error: No active domain. Specify --domain.", err=True)
+        sys.exit(1)
+
+    click.echo(f"Regenerating schema '{node_name}' in domain '{target_domain}'...")
+
+    result = asyncio.run(regenerate_schema(node_name=node_name, domain=target_domain))
+
+    if "error" in result:
+        click.echo(f"Error: {result['error']}", err=True)
+        sys.exit(1)
+
+    edge_names = ", ".join(result.get("edges", [])) or "—"
+    click.echo(f"Regenerated: {result['node']} ({result['table']})")
+    click.echo(f"  {result['field_count']} fields | edges: {edge_names}")
 
 
 # ── nexaql taxonomy ───────────────────────────────────────────────────────
