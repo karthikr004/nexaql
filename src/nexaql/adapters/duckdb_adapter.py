@@ -33,7 +33,12 @@ _DUCKDB_TYPE_MAP: Dict[str, str] = {
 def _duckdb_type_to_str(type_name: Any) -> str:
     # DuckDB returns DuckDBPyType objects, not plain strings — convert first
     name = str(type_name).upper()
-    return _DUCKDB_TYPE_MAP.get(name, "string")
+    matched = _DUCKDB_TYPE_MAP.get(name)
+    if matched:
+        return matched
+    # Handle parameterised types like DECIMAL(10,2) → DECIMAL
+    base = name.split("(")[0]
+    return _DUCKDB_TYPE_MAP.get(base, "string")
 
 
 class DuckDBAdapter(QueryAdapter):

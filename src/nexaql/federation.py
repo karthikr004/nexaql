@@ -371,4 +371,8 @@ def _duckdb_type_to_nexaql(duckdb_type: str) -> str:
         "DATE": "date",
         "TIMESTAMP": "date",
     }
-    return mapping.get(name, "string")
+    matched = mapping.get(name)
+    if matched:
+        return matched
+    base = name.split("(")[0]
+    return mapping.get(base, "string")
