@@ -407,6 +407,73 @@ async def list_connectors() -> dict[str, Any]:
 
 
 @mcp.tool()
+async def generate_schema(
+    connector_name: str,
+    domain: str,
+    tables: list[str] | None = None,
+    exclude_tables: list[str] | None = None,
+    schema_name: str = "public",
+    description: str = "",
+) -> dict[str, Any]:
+    """Generate per-table schemas from a saved database connector.
+
+    Introspects the database, generates one schema per table, saves to
+    the bootstrap DB, and runs automatic edge discovery across the domain.
+
+    Args:
+        connector_name: Name of a saved connector (see list_connectors)
+        domain: Domain name to group schemas under (e.g. "ecommerce", "hr")
+        tables: Optional list of table names to include. If omitted, all tables are included.
+        exclude_tables: Optional list of table names to exclude.
+        schema_name: Database schema to introspect (default: "public", auto-switches to "main" for DuckDB)
+        description: Human-readable description for the domain
+    """
+    from nexaql.ontology.service import generate_schemas
+
+    result = await generate_schemas(
+        connector_name=connector_name,
+        domain=domain,
+        include_tables=tables,
+        exclude_tables=exclude_tables,
+        schema_name=schema_name,
+        description=description,
+    )
+
+    if "error" not in result:
+        _invalidate_cache()
+
+    return result
+
+
+@mcp.tool()
+async def regenerate_schema(
+    node_name: str,
+    domain: str | None = None,
+) -> dict[str, Any]:
+    """Regenerate a single schema/node from its original connector.
+
+    Re-introspects the table, regenerates the schema, and re-runs
+    edge discovery across the domain.
+
+    Args:
+        node_name: Name of the node/schema to regenerate (e.g. "orders", "customers")
+        domain: Domain name. Uses active domain if not specified.
+    """
+    from nexaql.ontology.service import regenerate_schema as _regenerate
+
+    target_domain = domain or bs.get_active_domain()
+    if not target_domain:
+        return {"error": "No active domain. Specify a domain."}
+
+    result = await _regenerate(node_name=node_name, domain=target_domain)
+
+    if "error" not in result:
+        _invalidate_cache()
+
+    return result
+
+
+@mcp.tool()
 async def user_context_schema() -> dict[str, Any]:
     """Describe the user context fields supported by this NexaQL instance.
 

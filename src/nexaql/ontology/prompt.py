@@ -425,10 +425,13 @@ def ontology_to_prompt_text(ontology: Ontology) -> str:
         lines.append(f"Node: {name} [{ds_type}]")
         lines.append(f"  Description: {defn.description}")
 
-        field_list = ", ".join(
-            f"{fn}:{fd.type}{'⚡' if fd.filterable else ''}"
-            for fn, fd in defn.fields.items()
-        )
+        field_parts = []
+        for fn, fd in defn.fields.items():
+            part = f"{fn}:{fd.type}{'⚡' if fd.filterable else ''}"
+            if fd.values:
+                part += f"[{','.join(fd.values)}]"
+            field_parts.append(part)
+        field_list = ", ".join(field_parts)
         lines.append(f"  Fields: {field_list}")
 
         edge_list = ", ".join(

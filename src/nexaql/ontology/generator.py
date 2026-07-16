@@ -152,12 +152,13 @@ _PII_PATTERNS = [
     r"password", r"secret", r"token",
 ]
 
-# Patterns for common enum columns (low cardinality)
+# Patterns for common enum columns (low cardinality) — used as a boost
+# signal: these get a relaxed ratio threshold during enum detection.
 _ENUM_PATTERNS = [
     r"status", r"state", r"type", r"category", r"priority",
     r"severity", r"level", r"tier", r"grade", r"rating",
     r"country_code", r"currency_code", r"language",
-    r"gender", r"role", r"department",
+    r"gender", r"role", r"department", r"region",
 ]
 
 # Columns to exclude from the ontology (system columns)
@@ -182,7 +183,7 @@ def _is_pii(column_name: str) -> bool:
 
 
 def _is_likely_enum(column_name: str) -> bool:
-    """Heuristic check if a column is likely an enum."""
+    """Heuristic check if a column name matches a known enum pattern."""
     name = column_name.lower()
     return any(re.search(pattern, name) for pattern in _ENUM_PATTERNS)
 
@@ -593,8 +594,15 @@ class OntologyGenerator:
 
     async def _detect_enums(self, tables: list[TableInfo],
                             max_cardinality: int = 25,
-                            sample_limit: int = 1000) -> dict[str, dict[str, list[str]]]:
-        """Detect enum-like columns by sampling distinct values.
+                            min_rows: int = 10) -> dict[str, dict[str, list[str]]]:
+        """Detect enum-like columns by comparing distinct values to total rows.
+
+        A column qualifies as enum when its values repeat significantly:
+        - distinct_count / total_rows < ratio_threshold
+        - Known enum patterns (status, region, etc.) get a relaxed threshold (0.5)
+        - Other VARCHAR columns use a strict threshold (0.1)
+        - Tables with fewer than min_rows are skipped (too little data to judge)
+        - Columns must have 2..max_cardinality distinct values
 
         Returns {table_name: {column_name: [values]}}.
         """
@@ -609,6 +617,21 @@ class OntologyGenerator:
                         c for c in table.columns
                         if _is_likely_enum(c.name) or c.data_type in ("character varying", "varchar", "text")
                     ]
+                    if not candidates:
+                        continue
+
+                    total_rows = 0
+                    try:
+                        count_row = await conn.fetchrow(
+                            f"SELECT COUNT(*) AS cnt FROM {table.schema_name}.{table.name}"
+                        )
+                        total_rows = count_row["cnt"] if count_row else 0
+                    except Exception:
+                        pass
+
+                    if total_rows < min_rows:
+                        continue
+
                     for col in candidates:
                         try:
                             rows = await conn.fetch(
@@ -617,7 +640,11 @@ class OntologyGenerator:
                                 f"ORDER BY {col.name} LIMIT {max_cardinality + 1}"
                             )
                             values = [str(r[col.name]) for r in rows]
-                            if 2 <= len(values) <= max_cardinality:
+                            if len(values) < 2 or len(values) > max_cardinality:
+                                continue
+                            ratio = len(values) / total_rows
+                            threshold = 0.5 if _is_likely_enum(col.name) else 0.1
+                            if ratio < threshold:
                                 result.setdefault(table.name, {})[col.name] = values
                         except Exception:
                             continue
@@ -633,6 +660,21 @@ class OntologyGenerator:
                         c for c in table.columns
                         if _is_likely_enum(c.name) or "varchar" in c.data_type.lower()
                     ]
+                    if not candidates:
+                        continue
+
+                    total_rows = 0
+                    try:
+                        count_result = conn.execute(
+                            f"SELECT COUNT(*) FROM {table.name}"
+                        ).fetchone()
+                        total_rows = count_result[0] if count_result else 0
+                    except Exception:
+                        pass
+
+                    if total_rows < min_rows:
+                        continue
+
                     for col in candidates:
                         try:
                             rows = conn.execute(
@@ -641,7 +683,11 @@ class OntologyGenerator:
                                 f"ORDER BY {col.name} LIMIT {max_cardinality + 1}"
                             ).fetchall()
                             values = [str(r[0]) for r in rows]
-                            if 2 <= len(values) <= max_cardinality:
+                            if len(values) < 2 or len(values) > max_cardinality:
+                                continue
+                            ratio = len(values) / total_rows
+                            threshold = 0.5 if _is_likely_enum(col.name) else 0.1
+                            if ratio < threshold:
                                 result.setdefault(table.name, {})[col.name] = values
                         except Exception:
                             continue
