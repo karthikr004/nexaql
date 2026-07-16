@@ -107,6 +107,7 @@ class TranslatorContext:
     has_agg: bool = False
     counter: int = 0
     dialect: str = "postgresql"
+    scalar_exprs: List[str] = field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -490,11 +491,8 @@ def _process_node(
             child_shape = _process_node(resolved_child, ctx, False, ef.node.name)
             children.append(child_shape)
 
-    # GROUP BY: when this node has aggregations, its scalar columns go into GROUP BY
-    if my_agg_aliases:
-        for expr in scalar_raw_exprs:
-            if expr not in ctx.group_bys:
-                ctx.group_bys.append(expr)
+    # Collect scalar expressions so the top-level GROUP BY pass can use them
+    ctx.scalar_exprs.extend(scalar_raw_exprs)
 
     return NodeShape(
         edge_name=edge_name,
@@ -582,12 +580,10 @@ def translate(ast: QueryAST, ontology: Any) -> TranslateResult:
 
     shape = _process_node(root_node, ctx, True, None)
 
-    # Fallback GROUP BY: if aggregations exist but no group-by yet,
-    # collect all non-aggregate SELECT expressions
-    if ctx.has_agg and not ctx.group_bys:
-        for s in ctx.selects:
-            if "(" not in s:
-                expr = s.split(" AS ")[0].strip() if " AS " in s else s
+    # GROUP BY: when aggregations exist, all scalar fields must be grouped
+    if ctx.has_agg:
+        for expr in ctx.scalar_exprs:
+            if expr not in ctx.group_bys:
                 ctx.group_bys.append(expr)
 
     is_distinct = any(getattr(d, "type", None) == "distinct" for d in root_node.directives)
