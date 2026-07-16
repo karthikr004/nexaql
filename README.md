@@ -38,18 +38,35 @@ Open http://localhost:3717 — a playground with sample e-commerce data loads in
 
 ### Connect Your Own Database
 
+**Via CLI:**
+
 ```bash
-# Add a PostgreSQL connector via the Admin panel or API
+# Add a connector via the Admin panel or API
 curl -X POST localhost:3717/api/connectors \
   -H 'Content-Type: application/json' \
   -d '{"name":"mydb","type":"postgresql","config":{"url":"postgresql://user:pass@localhost:5432/mydb"}}'
 
-# Generate an ontology from it
-curl -X POST localhost:3717/api/connectors/generate-ontology \
-  -d '{"connector_name":"mydb","domain":"my_domain","output_schema_name":"main"}'
+# Generate schemas (all tables)
+nexaql generate mydb --domain my_domain
+
+# Generate schemas (specific tables only)
+nexaql generate mydb --domain my_domain -t orders -t customers -t products
+
+# Regenerate a single schema after DB changes
+nexaql regenerate orders --domain my_domain
 ```
 
-NexaQL introspects your database schema, detects relationships, enums, and PII fields, then generates a full ontology with default roles and access policies - ready to query.
+**Via MCP (AI agents):**
+
+```python
+# Generate schemas from a connector
+await generate_schema(connector_name="mydb", domain="my_domain", tables=["orders", "customers"])
+
+# Regenerate a single schema
+await regenerate_schema(node_name="orders", domain="my_domain")
+```
+
+NexaQL introspects your database schema, detects relationships, enums, and PII fields, then generates per-table schemas with automatic edge discovery across all nodes in the domain - including cross-datasource relationships.
 
 ## How It Works
 
@@ -165,7 +182,7 @@ The analyst's query returns `name` but not `email` or `lifetime_value`. The mana
 ### Developer Experience
 - **Playground UI** - Monaco editor with syntax highlighting, schema explorer, SQL preview
 - **Role switcher** - test access control live in the playground
-- **CLI** - `nexaql install`, `nexaql serve`, `nexaql query`
+- **CLI** - `nexaql install`, `nexaql serve`, `nexaql query`, `nexaql generate`, `nexaql regenerate`, `nexaql mcp`
 - **Zero config** - ships with sample data, works after `nexaql install`
 
 ## Query Syntax Reference
@@ -340,6 +357,8 @@ Add to your `claude_desktop_config.json`:
 | `describe_node` | Describe a node's fields, edges, types, and PII flags |
 | `describe_ontology` | Full ontology overview — all nodes, fields, edges |
 | `list_connectors` | List configured database connectors |
+| `generate_schema` | Generate per-table schemas from a saved connector with edge discovery |
+| `regenerate_schema` | Regenerate a single schema/node from its original connector |
 | `user_context_schema` | Discover supported user context fields, roles, and RLS attributes |
 | `configure_auth` | Switch between `dev` and `jwt` auth modes |
 
@@ -483,10 +502,10 @@ nexaql/
 │   ├── adapters/         # PostgreSQL, DuckDB (+ pluggable base)
 │   ├── api/              # FastAPI server + admin panel routes
 │   ├── chat/             # NL → NexaQL agent pipeline
-│   ├── mcp_server.py     # MCP server (11 tools, 3 resources)
+│   ├── mcp_server.py     # MCP server (13 tools, 3 resources)
 │   ├── auth.py           # JWT authentication & user context resolution
 │   ├── bootstrap.py      # DuckDB-backed state (domains, schemas, connectors, keys)
-│   └── cli.py            # CLI: install, serve, query, mcp
+│   └── cli.py            # CLI: install, serve, query, generate, regenerate, mcp
 ├── frontend/             # React + Tailwind admin panel & playground
 └── ontologies/           # Sample schema + seed data
 ```
