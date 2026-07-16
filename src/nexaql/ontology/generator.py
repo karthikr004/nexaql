@@ -152,24 +152,13 @@ _PII_PATTERNS = [
     r"password", r"secret", r"token",
 ]
 
-# Patterns for common enum columns (low cardinality)
+# Patterns for common enum columns (low cardinality) — used as a boost
+# signal: these get a relaxed ratio threshold during enum detection.
 _ENUM_PATTERNS = [
     r"status", r"state", r"type", r"category", r"priority",
     r"severity", r"level", r"tier", r"grade", r"rating",
     r"country_code", r"currency_code", r"language",
     r"gender", r"role", r"department", r"region",
-]
-
-# Columns that are never enums (high cardinality by nature)
-_NEVER_ENUM_PATTERNS = [
-    r"name", r"first_name", r"last_name", r"full_name",
-    r"email", r"e_mail", r"phone", r"mobile", r"cell",
-    r"address", r"street", r"city", r"zip", r"postal",
-    r"url", r"website", r"description", r"comment", r"note",
-    r"title", r"subject", r"body", r"message", r"content",
-    r"password", r"token", r"secret", r"hash",
-    r"ssn", r"tax_id", r"passport", r"license",
-    r"ip_address", r"user_agent", r"uuid", r"guid",
 ]
 
 # Columns to exclude from the ontology (system columns)
@@ -194,17 +183,9 @@ def _is_pii(column_name: str) -> bool:
 
 
 def _is_likely_enum(column_name: str) -> bool:
-    """Heuristic check if a column is likely an enum."""
+    """Heuristic check if a column name matches a known enum pattern."""
     name = column_name.lower()
-    if _is_never_enum(name):
-        return False
     return any(re.search(pattern, name) for pattern in _ENUM_PATTERNS)
-
-
-def _is_never_enum(column_name: str) -> bool:
-    """Columns that should never be classified as enums."""
-    name = column_name.lower() if not column_name.islower() else column_name
-    return any(re.search(pattern, name) for pattern in _NEVER_ENUM_PATTERNS)
 
 
 def _table_to_node_name(table_name: str) -> str:
@@ -613,14 +594,15 @@ class OntologyGenerator:
 
     async def _detect_enums(self, tables: list[TableInfo],
                             max_cardinality: int = 25,
-                            sample_limit: int = 1000) -> dict[str, dict[str, list[str]]]:
-        """Detect enum-like columns by sampling distinct values.
+                            min_rows: int = 10) -> dict[str, dict[str, list[str]]]:
+        """Detect enum-like columns by comparing distinct values to total rows.
 
-        A column qualifies as enum only if:
-        - It is not in the never-enum exclusion list (name, email, phone, etc.)
-        - It has 2..max_cardinality distinct values
-        - The distinct/total ratio is low (< 0.3), indicating repeated values
-        - OR the column name matches a known enum pattern (status, region, etc.)
+        A column qualifies as enum when its values repeat significantly:
+        - distinct_count / total_rows < ratio_threshold
+        - Known enum patterns (status, region, etc.) get a relaxed threshold (0.5)
+        - Other VARCHAR columns use a strict threshold (0.1)
+        - Tables with fewer than min_rows are skipped (too little data to judge)
+        - Columns must have 2..max_cardinality distinct values
 
         Returns {table_name: {column_name: [values]}}.
         """
@@ -631,14 +613,13 @@ class OntologyGenerator:
             conn = await asyncpg.connect(self._url)
             try:
                 for table in tables:
-                    candidates = []
-                    for c in table.columns:
-                        if _is_never_enum(c.name):
-                            continue
-                        if _is_likely_enum(c.name) or c.data_type in ("character varying", "varchar", "text"):
-                            candidates.append(c)
+                    candidates = [
+                        c for c in table.columns
+                        if _is_likely_enum(c.name) or c.data_type in ("character varying", "varchar", "text")
+                    ]
+                    if not candidates:
+                        continue
 
-                    # Get total row count for ratio check
                     total_rows = 0
                     try:
                         count_row = await conn.fetchrow(
@@ -647,6 +628,9 @@ class OntologyGenerator:
                         total_rows = count_row["cnt"] if count_row else 0
                     except Exception:
                         pass
+
+                    if total_rows < min_rows:
+                        continue
 
                     for col in candidates:
                         try:
@@ -658,8 +642,9 @@ class OntologyGenerator:
                             values = [str(r[col.name]) for r in rows]
                             if len(values) < 2 or len(values) > max_cardinality:
                                 continue
-                            is_known_enum = _is_likely_enum(col.name)
-                            if is_known_enum or (total_rows > 0 and len(values) / total_rows < 0.3):
+                            ratio = len(values) / total_rows
+                            threshold = 0.5 if _is_likely_enum(col.name) else 0.1
+                            if ratio < threshold:
                                 result.setdefault(table.name, {})[col.name] = values
                         except Exception:
                             continue
@@ -671,14 +656,13 @@ class OntologyGenerator:
             conn = duckdb.connect(self._url)
             try:
                 for table in tables:
-                    candidates = []
-                    for c in table.columns:
-                        if _is_never_enum(c.name):
-                            continue
-                        if _is_likely_enum(c.name) or "varchar" in c.data_type.lower():
-                            candidates.append(c)
+                    candidates = [
+                        c for c in table.columns
+                        if _is_likely_enum(c.name) or "varchar" in c.data_type.lower()
+                    ]
+                    if not candidates:
+                        continue
 
-                    # Get total row count for ratio check
                     total_rows = 0
                     try:
                         count_result = conn.execute(
@@ -687,6 +671,9 @@ class OntologyGenerator:
                         total_rows = count_result[0] if count_result else 0
                     except Exception:
                         pass
+
+                    if total_rows < min_rows:
+                        continue
 
                     for col in candidates:
                         try:
@@ -698,8 +685,9 @@ class OntologyGenerator:
                             values = [str(r[0]) for r in rows]
                             if len(values) < 2 or len(values) > max_cardinality:
                                 continue
-                            is_known_enum = _is_likely_enum(col.name)
-                            if is_known_enum or (total_rows > 0 and len(values) / total_rows < 0.3):
+                            ratio = len(values) / total_rows
+                            threshold = 0.5 if _is_likely_enum(col.name) else 0.1
+                            if ratio < threshold:
                                 result.setdefault(table.name, {})[col.name] = values
                         except Exception:
                             continue
