@@ -84,10 +84,12 @@ CREATE TABLE IF NOT EXISTS connectors (
 );
 
 CREATE TABLE IF NOT EXISTS domains (
-    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_domains'),
-    name        TEXT UNIQUE NOT NULL,
-    description TEXT,
-    created_at  TEXT
+    id                   INTEGER PRIMARY KEY DEFAULT nextval('seq_domains'),
+    name                 TEXT UNIQUE NOT NULL,
+    description          TEXT,
+    roles_json           TEXT,
+    access_functions_json TEXT,
+    created_at           TEXT
 );
 
 CREATE TABLE IF NOT EXISTS schemas (
@@ -281,11 +283,16 @@ def get_domain(name: str) -> dict | None:
     """Get a domain by name."""
     conn = _get_conn()
     row = conn.execute(
-        "SELECT id, name, description, created_at FROM domains WHERE name = ?", [name]
+        "SELECT id, name, description, roles_json, access_functions_json, created_at "
+        "FROM domains WHERE name = ?", [name]
     ).fetchone()
     if row is None:
         return None
-    return {"id": row[0], "name": row[1], "description": row[2], "created_at": row[3]}
+    return {
+        "id": row[0], "name": row[1], "description": row[2],
+        "roles_json": row[3], "access_functions_json": row[4],
+        "created_at": row[5],
+    }
 
 
 def create_domain(name: str, description: str = "") -> int:
@@ -297,6 +304,32 @@ def create_domain(name: str, description: str = "") -> int:
     )
     row = conn.execute("SELECT id FROM domains WHERE name = ?", [name]).fetchone()
     return row[0]
+
+
+def save_domain_policies(
+    domain_name: str,
+    roles: dict | None = None,
+    access_functions: dict | None = None,
+) -> None:
+    """Save roles and access_functions at the domain level."""
+    conn = _get_conn()
+    domain = get_domain(domain_name)
+    if domain is None:
+        raise ValueError(f"Domain '{domain_name}' not found")
+    updates = []
+    params = []
+    if roles is not None:
+        updates.append("roles_json = ?")
+        params.append(json.dumps(roles))
+    if access_functions is not None:
+        updates.append("access_functions_json = ?")
+        params.append(json.dumps(access_functions))
+    if updates:
+        params.append(domain_name)
+        conn.execute(
+            f"UPDATE domains SET {', '.join(updates)} WHERE name = ?",
+            params,
+        )
 
 
 def delete_domain(name: str) -> bool:
@@ -439,29 +472,28 @@ def get_domain_ontology(domain_name: str) -> dict | None:
             merged_nodes[node_name] = node_def
             node_to_connector[node_name] = schema["connector_id"]
 
-    # Collect top-level ontology metadata from the first schema that has it
-    version = "1.0"
+    # Load roles and access_functions from domain level
+    domain = get_domain(domain_name)
     roles: dict[str, Any] = {}
     access_functions: dict[str, Any] = {}
-    for schema in schemas:
-        try:
-            ont_data = json.loads(schema["ontology_json"]) if isinstance(schema["ontology_json"], str) else schema["ontology_json"]
-        except (json.JSONDecodeError, TypeError):
-            continue
-        if ont_data.get("version") and version == "1.0":
-            version = str(ont_data["version"])
-        if ont_data.get("roles") and not roles:
-            roles = ont_data["roles"]
-        if ont_data.get("access_functions") and not access_functions:
-            access_functions = ont_data["access_functions"]
+    if domain:
+        if domain.get("roles_json"):
+            try:
+                roles = json.loads(domain["roles_json"]) if isinstance(domain["roles_json"], str) else domain["roles_json"]
+            except (json.JSONDecodeError, TypeError):
+                pass
+        if domain.get("access_functions_json"):
+            try:
+                access_functions = json.loads(domain["access_functions_json"]) if isinstance(domain["access_functions_json"], str) else domain["access_functions_json"]
+            except (json.JSONDecodeError, TypeError):
+                pass
 
-    domain = get_domain(domain_name)
     result: dict[str, Any] = {
         "domain": domain_name,
         "description": domain["description"] if domain else "",
         "nodes": merged_nodes,
         "node_to_connector": node_to_connector,
-        "version": version,
+        "version": "1.0",
     }
     if roles:
         result["roles"] = roles
@@ -815,29 +847,46 @@ def _seed_ontology_files(conn: duckdb.DuckDBPyConnection) -> None:
             log.warning("Skipping %s: %s", path, e)
             continue
 
-        # Create domain
+        ont_data = json.loads(ontology_json) if isinstance(ontology_json, str) else ontology_json
+
+        # Extract roles and access_functions for domain level
+        roles_json = None
+        access_functions_json = None
+        if ont_data.get("roles"):
+            roles_json = json.dumps(ont_data["roles"])
+        if ont_data.get("access_functions"):
+            access_functions_json = json.dumps(ont_data["access_functions"])
+
+        # Create domain with roles/access at domain level
         now = _now()
         conn.execute(
-            "INSERT OR IGNORE INTO domains (name, description, created_at) VALUES (?, ?, ?)",
-            [domain_name, description, now],
+            "INSERT OR IGNORE INTO domains (name, description, roles_json, access_functions_json, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [domain_name, description, roles_json, access_functions_json, now],
         )
         domain_row = conn.execute(
             "SELECT id FROM domains WHERE name = ?", [domain_name]
         ).fetchone()
         domain_id = domain_row[0]
 
-        schema_name = domain_name
-        conn.execute(
-            "INSERT OR IGNORE INTO schemas "
-            "(domain_id, connector_id, name, ontology_json, created_at, updated_at) "
-            "VALUES (?, ?, ?, ?, ?, ?)",
-            [domain_id, sample_connector_id, schema_name, ontology_json, now, now],
-        )
+        # Create one schema per node/table
+        nodes = ont_data.get("nodes", {})
+        for node_name, node_def in nodes.items():
+            single_node_ont = {
+                "domain": domain_name,
+                "nodes": {node_name: node_def},
+            }
+            conn.execute(
+                "INSERT OR IGNORE INTO schemas "
+                "(domain_id, connector_id, name, ontology_json, created_at, updated_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [domain_id, sample_connector_id, node_name, json.dumps(single_node_ont), now, now],
+            )
 
         if first_domain is None:
             first_domain = domain_name
 
-        log.info("Seeded domain '%s' from %s", domain_name, path)
+        log.info("Seeded domain '%s' with %d per-table schemas from %s", domain_name, len(nodes), path)
 
     # Set the first seeded domain as active (if none is set)
     if first_domain:
@@ -1059,70 +1108,68 @@ def _seed_support_ontology(conn: duckdb.DuckDBPyConnection, connector_id: int) -
         return
 
     now = _now()
-    ontology_json = json.dumps(support_ontology, default=str)
+    # Per-table schema: one schema named "support_ticket" with one node
+    single_node_ont = {
+        "domain": "ecommerce",
+        "nodes": {"support_ticket": support_ontology["nodes"]["support_ticket"]},
+    }
     conn.execute(
         "INSERT OR IGNORE INTO schemas "
         "(domain_id, connector_id, name, ontology_json, created_at, updated_at) "
         "VALUES (?, ?, ?, ?, ?, ?)",
-        [domain["id"], connector_id, "support", ontology_json, now, now],
+        [domain["id"], connector_id, "support_ticket", json.dumps(single_node_ont, default=str), now, now],
     )
-    log.info("Seeded 'support' schema in ecommerce domain")
+    log.info("Seeded 'support_ticket' per-table schema in ecommerce domain")
 
     _patch_ecommerce_edges(conn, domain["id"])
 
 
 def _patch_ecommerce_edges(conn: duckdb.DuckDBPyConnection, domain_id: int) -> None:
-    """Add support_tickets edges to customer and order nodes in ecommerce schema."""
-    row = conn.execute(
-        "SELECT id, ontology_json FROM schemas WHERE domain_id = ? AND name = 'ecommerce'",
-        [domain_id],
-    ).fetchone()
-    if row is None:
-        return
+    """Add support_tickets edges to customer and order per-table schemas."""
+    now = _now()
 
-    schema_id = row[0]
-    try:
-        ont = json.loads(row[1]) if isinstance(row[1], str) else row[1]
-    except (json.JSONDecodeError, TypeError):
-        return
+    edge_patches = [
+        ("customer", {
+            "node": "support_ticket",
+            "description": "Support tickets filed by this customer.",
+            "join_type": "LEFT",
+            "join_steps": [{"table": "support_tickets", "alias_key": "support_ticket", "condition": "{support_ticket}.customer_id = {customer}.id"}],
+        }),
+        ("order", {
+            "node": "support_ticket",
+            "description": "Support tickets related to this order.",
+            "join_type": "LEFT",
+            "join_steps": [{"table": "support_tickets", "alias_key": "support_ticket", "condition": "{support_ticket}.order_id = {order}.id"}],
+        }),
+    ]
 
-    nodes = ont.get("nodes", {})
-    changed = False
+    for node_name, edge_def in edge_patches:
+        row = conn.execute(
+            "SELECT id, ontology_json FROM schemas WHERE domain_id = ? AND name = ?",
+            [domain_id, node_name],
+        ).fetchone()
+        if row is None:
+            continue
 
-    # Add support_tickets edge to customer node
-    customer = nodes.get("customer")
-    if customer is not None:
-        edges = customer.get("edges", {})
+        schema_id = row[0]
+        try:
+            ont = json.loads(row[1]) if isinstance(row[1], str) else row[1]
+        except (json.JSONDecodeError, TypeError):
+            continue
+
+        node_def = ont.get("nodes", {}).get(node_name)
+        if node_def is None:
+            continue
+
+        edges = node_def.get("edges", {})
         if "support_tickets" not in edges:
-            edges["support_tickets"] = {
-                "node": "support_ticket",
-                "description": "Support tickets filed by this customer.",
-                "join_type": "LEFT",
-                "join_steps": [{"table": "support_tickets", "alias_key": "support_ticket", "condition": "{support_ticket}.customer_id = {customer}.id"}],
-            }
-            customer["edges"] = edges
-            changed = True
-
-    # Add support_tickets edge to order node
-    order = nodes.get("order")
-    if order is not None:
-        edges = order.get("edges", {})
-        if "support_tickets" not in edges:
-            edges["support_tickets"] = {
-                "node": "support_ticket",
-                "description": "Support tickets related to this order.",
-                "join_type": "LEFT",
-                "join_steps": [{"table": "support_tickets", "alias_key": "support_ticket", "condition": "{support_ticket}.order_id = {order}.id"}],
-            }
-            order["edges"] = edges
-            changed = True
-
-    if changed:
-        conn.execute(
-            "UPDATE schemas SET ontology_json = ?, updated_at = ? WHERE id = ?",
-            [json.dumps(ont, default=str), _now(), schema_id],
-        )
-        log.info("Patched ecommerce schema with support_tickets edges on customer and order")
+            edges["support_tickets"] = edge_def
+            node_def["edges"] = edges
+            conn.execute(
+                "UPDATE schemas SET ontology_json = ?, updated_at = ? WHERE id = ?",
+                [json.dumps(ont, default=str), now, schema_id],
+            )
+            log.info("Patched '%s' schema with support_tickets edge", node_name)
 
 
 def _get_support_pg_url() -> str | None:

@@ -458,8 +458,9 @@ export default function DomainsPanel({ onToast, onOntologyChanged, onNavigate, i
           pendingSchemaName.current = undefined;
         }
 
-        // Skip the intermediate schema-list page when there's exactly one schema
-        if (autoDrill && list.length === 1 && list[0]) {
+        // Always skip the intermediate schema-list page — per-table schemas
+        // mean every domain has N schemas; go straight to the node editor
+        if (autoDrill && list.length >= 1 && list[0]) {
           setSelectedSchema(list[0]);
           onNavigate?.(domain, list[0].name);
         }
@@ -601,12 +602,8 @@ export default function DomainsPanel({ onToast, onOntologyChanged, onNavigate, i
         schema={selectedSchema}
         connectors={connectors}
         onBack={() => {
-          if (schemas.length <= 1) {
-            navigateDomains(null, null);
-            setSchemas([]);
-          } else {
-            navigateDomains(selectedDomain, null);
-          }
+          navigateDomains(null, null);
+          setSchemas([]);
         }}
         onRegenerate={() => handleRegenerate(selectedSchema)}
         regenerating={regeneratingSchema === selectedSchema.name}

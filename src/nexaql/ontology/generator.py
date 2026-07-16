@@ -693,42 +693,22 @@ class OntologyGenerator:
         if detect_enums:
             enum_values = await self._detect_enums(tables)
 
-        # Build FK lookup: from_table → list[ForeignKey]
-        fk_by_table: dict[str, list[ForeignKey]] = {}
-        for fk in foreign_keys:
-            fk_by_table.setdefault(fk.from_table, []).append(fk)
-
-        # Build reverse FK lookup: to_table → list[ForeignKey] (for reverse edges)
-        reverse_fk: dict[str, list[ForeignKey]] = {}
-        for fk in foreign_keys:
-            reverse_fk.setdefault(fk.to_table, []).append(fk)
-
-        # Track table → node name mapping
-        table_to_node: dict[str, str] = {}
-        for t in tables:
-            table_to_node[t.name] = _table_to_node_name(t.name)
-
-        # Build nodes
+        # Build nodes (fields only — edges are discovered as a post-processing
+        # step after the node is saved, so they can span across datasources)
         nodes: dict[str, OntologyNode] = {}
 
         for table in tables:
-            node_name = table_to_node[table.name]
+            node_name = _table_to_node_name(table.name)
 
-            # Build fields
+            # Build fields (include all columns except PK and system columns)
             fields: dict[str, FieldDef] = {}
             for col in table.columns:
                 if col.is_primary_key:
-                    continue  # PK is separate in the ontology
+                    continue
 
                 if not include_system_columns and col.name in _SYSTEM_COLUMNS:
                     continue
 
-                # Skip FK columns (they become edges instead)
-                table_fks = fk_by_table.get(table.name, [])
-                if any(fk.from_column == col.name for fk in table_fks):
-                    continue
-
-                # Determine type
                 field_type = _map_type(col.data_type)
 
                 # Check for enum
@@ -738,7 +718,6 @@ class OntologyGenerator:
                     field_type = "enum"
                     values = table_enums[col.name]
 
-                # Build field def
                 field_def = FieldDef(
                     type=field_type,
                     description=_column_to_description(col.name, table.name),
@@ -746,77 +725,20 @@ class OntologyGenerator:
                     values=values,
                 )
 
-                # PII detection
                 if detect_pii and _is_pii(col.name):
                     field_def.pii = True
                     field_def.mask_with = "redact"
 
                 fields[col.name] = field_def
 
-            # Build edges from FKs
-            edges: dict[str, OntologyEdge] = {}
-            for fk in fk_by_table.get(table.name, []):
-                target_node = table_to_node.get(fk.to_table)
-                if not target_node:
-                    continue
-
-                edge_name = _infer_edge_name(fk)
-                # Avoid name collision with fields
-                if edge_name in fields:
-                    edge_name = f"{edge_name}_ref"
-
-                # Determine join type based on nullability
-                fk_col = next((c for c in table.columns if c.name == fk.from_column), None)
-                join_type = "LEFT JOIN" if (fk_col and fk_col.is_nullable) else "JOIN"
-
-                # Build alias for join
-                alias = f"{target_node[0]}1"
-
-                edges[edge_name] = OntologyEdge(
-                    node=target_node,
-                    description=f"Related {target_node}",
-                    join_type=join_type,
-                    join_steps=[JoinStep(
-                        table=fk.to_table,
-                        alias_key=alias,
-                        condition=f"{alias}.{fk.to_column} = {node_name[0]}0.{fk.from_column}",
-                    )],
-                )
-
-            # Build reverse edges (referenced table → referencing table)
-            for fk in reverse_fk.get(table.name, []):
-                source_node = table_to_node.get(fk.from_table)
-                if not source_node:
-                    continue
-
-                # Pluralize: customers → orders (one-to-many)
-                rev_name = source_node
-                if rev_name in fields or rev_name in edges:
-                    rev_name = f"{rev_name}_list"
-
-                alias = f"{source_node[0]}1"
-
-                edges[rev_name] = OntologyEdge(
-                    node=source_node,
-                    description=f"{source_node.replace('_', ' ').title()} referencing this {node_name}",
-                    join_type="LEFT JOIN",
-                    join_steps=[JoinStep(
-                        table=fk.from_table,
-                        alias_key=alias,
-                        condition=f"{alias}.{fk.from_column} = {node_name[0]}0.{fk.to_column}",
-                    )],
-                )
-
-            # Build the node
             pk = table.primary_key or "id"
             node_desc = table.comment or f"{table.name.replace('_', ' ').title()} records"
 
             node = OntologyNode(
-                table=table.name if table.name != node_name else None,
+                table=table.name,
                 description=node_desc,
                 primary_key=pk,
                 fields=fields,
-                edges=edges if edges else None,
             )
 
             nodes[node_name] = node
@@ -888,3 +810,253 @@ class OntologyGenerator:
             lines.append("")
 
         return "\n".join(lines)
+
+
+# ── Edge discovery (post-processing after node creation) ────────────────────
+
+
+def _singularize(name: str) -> str:
+    """Naive singularize: orders→order, categories→category, employees→employee."""
+    if name.endswith("ies"):
+        return name[:-3] + "y"
+    if name.endswith("ses") or name.endswith("xes") or name.endswith("zes"):
+        return name[:-2]
+    if name.endswith("s") and not name.endswith("ss"):
+        return name[:-1]
+    return name
+
+
+def discover_edges(
+    source_node_name: str,
+    domain_nodes: dict[str, "OntologyNode"],
+    connector_fks: list[ForeignKey] | None = None,
+) -> list[str]:
+    """Discover edges between source_node and all other nodes in the domain.
+
+    Called after a node is created or regenerated. Finds relationships
+    involving source_node only — both directions:
+      - source_node has a field referencing another node (forward edge)
+      - another node has a field referencing source_node (inverse edge)
+
+    Two strategies:
+    1. DB-level FK constraints (from connector_fks) — exact matches
+    2. Field-name heuristics ({target_singular}_id → target.pk) — works
+       across datasources where no FK constraints exist
+
+    Updates edges in-place on source_node and on affected target nodes.
+    Returns a list of node names that were modified (for re-saving).
+    """
+    source_node = domain_nodes[source_node_name]
+    source_table = source_node.table or source_node_name
+
+    # Build table → node_name lookup
+    table_to_node: dict[str, str] = {}
+    for nname, node in domain_nodes.items():
+        table_to_node[node.table or nname] = nname
+
+    # Clear existing edges on source_node (they'll be rebuilt)
+    source_node.edges = {}
+
+    # Also remove any inverse edges on OTHER nodes that point to source_node
+    # (they'll be rebuilt too)
+    for other_name, other_node in domain_nodes.items():
+        if other_name == source_node_name or not other_node.edges:
+            continue
+        stale_keys = []
+        for ename, edata in other_node.edges.items():
+            if edata.node == source_node_name:
+                stale_keys.append(ename)
+        for key in stale_keys:
+            del other_node.edges[key]
+
+    modified_nodes: set[str] = {source_node_name}
+
+    # Track which relationships we've already created (to avoid duplicates
+    # between FK and heuristic strategies)
+    created_pairs: set[tuple[str, str, str]] = set()  # (from_node, to_node, from_field)
+
+    # Strategy 1: FK constraints from connectors
+    if connector_fks:
+        for fk in connector_fks:
+            from_node_name = table_to_node.get(fk.from_table)
+            to_node_name = table_to_node.get(fk.to_table)
+            if not from_node_name or not to_node_name:
+                continue
+            if from_node_name == to_node_name:
+                continue
+            # Only process FKs involving the source node
+            if from_node_name != source_node_name and to_node_name != source_node_name:
+                continue
+
+            from_node = domain_nodes[from_node_name]
+            to_node = domain_nodes[to_node_name]
+
+            # Forward edge on from_node
+            edge_name = _infer_edge_name(fk)
+            if edge_name in (from_node.fields or {}):
+                edge_name = f"{edge_name}_ref"
+
+            if from_node.edges is None:
+                from_node.edges = {}
+            from_node.edges[edge_name] = OntologyEdge(
+                node=to_node_name,
+                description=f"Related {to_node_name}",
+                join_type="JOIN",
+                join_steps=[JoinStep(
+                    table=fk.to_table,
+                    alias_key=to_node_name,
+                    condition=f"{{{from_node_name}}}.{fk.from_column} = {{{to_node_name}}}.{fk.to_column}",
+                )],
+            )
+            modified_nodes.add(from_node_name)
+
+            # Inverse edge on to_node
+            inv_name = from_node_name
+            if inv_name in (to_node.edges or {}):
+                inv_name = f"{inv_name}_list"
+            if inv_name in (to_node.fields or {}):
+                inv_name = f"{inv_name}_list"
+
+            if to_node.edges is None:
+                to_node.edges = {}
+            to_node.edges[inv_name] = OntologyEdge(
+                node=from_node_name,
+                description=f"{from_node_name.replace('_', ' ').title()} referencing this {to_node_name}",
+                join_type="LEFT JOIN",
+                join_steps=[JoinStep(
+                    table=fk.from_table,
+                    alias_key=from_node_name,
+                    condition=f"{{{to_node_name}}}.{fk.to_column} = {{{from_node_name}}}.{fk.from_column}",
+                )],
+            )
+            modified_nodes.add(to_node_name)
+            created_pairs.add((from_node_name, to_node_name, fk.from_column))
+
+    # Strategy 2: Field-name heuristics for cross-datasource edges
+    node_names = set(domain_nodes.keys())
+
+    # 2a: source_node fields that reference other nodes
+    for field_name in list(source_node.fields.keys()):
+        if not field_name.endswith("_id"):
+            continue
+
+        stem = field_name[:-3]
+        target_name = None
+        for candidate in node_names:
+            if candidate == source_node_name:
+                continue
+            if stem == candidate or stem == _singularize(candidate):
+                target_name = candidate
+                break
+
+        if not target_name:
+            continue
+        if (source_node_name, target_name, field_name) in created_pairs:
+            continue
+
+        target_node = domain_nodes[target_name]
+        target_pk = target_node.primary_key or "id"
+        target_table = target_node.table or target_name
+
+        # Forward edge on source
+        edge_name = stem
+        if edge_name in (source_node.fields or {}):
+            edge_name = f"{edge_name}_ref"
+        if source_node.edges is None:
+            source_node.edges = {}
+        source_node.edges[edge_name] = OntologyEdge(
+            node=target_name,
+            description=f"Related {target_name}",
+            join_type="JOIN",
+            join_steps=[JoinStep(
+                table=target_table,
+                alias_key=target_name,
+                condition=f"{{{source_node_name}}}.{field_name} = {{{target_name}}}.{target_pk}",
+            )],
+        )
+
+        # Inverse edge on target
+        inv_name = source_node_name
+        if target_node.edges and inv_name in target_node.edges:
+            inv_name = f"{inv_name}_list"
+        if inv_name in (target_node.fields or {}):
+            inv_name = f"{inv_name}_list"
+        if target_node.edges is None:
+            target_node.edges = {}
+        target_node.edges[inv_name] = OntologyEdge(
+            node=source_node_name,
+            description=f"{source_node_name.replace('_', ' ').title()} referencing this {target_name}",
+            join_type="LEFT JOIN",
+            join_steps=[JoinStep(
+                table=source_table,
+                alias_key=source_node_name,
+                condition=f"{{{target_name}}}.{target_pk} = {{{source_node_name}}}.{field_name}",
+            )],
+        )
+        modified_nodes.add(target_name)
+        created_pairs.add((source_node_name, target_name, field_name))
+
+    # 2b: other nodes' fields that reference source_node
+    source_pk = source_node.primary_key or "id"
+    source_singular = _singularize(source_node_name)
+    for other_name, other_node in domain_nodes.items():
+        if other_name == source_node_name:
+            continue
+        for field_name in list(other_node.fields.keys()):
+            if not field_name.endswith("_id"):
+                continue
+            stem = field_name[:-3]
+            if stem != source_node_name and stem != source_singular:
+                continue
+            if (other_name, source_node_name, field_name) in created_pairs:
+                continue
+
+            other_table = other_node.table or other_name
+
+            # Forward edge on other_node → source_node
+            edge_name = stem
+            if edge_name in (other_node.fields or {}):
+                edge_name = f"{edge_name}_ref"
+            if other_node.edges is None:
+                other_node.edges = {}
+            if not any(e.node == source_node_name for e in other_node.edges.values()):
+                other_node.edges[edge_name] = OntologyEdge(
+                    node=source_node_name,
+                    description=f"Related {source_node_name}",
+                    join_type="JOIN",
+                    join_steps=[JoinStep(
+                        table=source_table,
+                        alias_key=source_node_name,
+                        condition=f"{{{other_name}}}.{field_name} = {{{source_node_name}}}.{source_pk}",
+                    )],
+                )
+                modified_nodes.add(other_name)
+
+            # Inverse edge on source_node
+            inv_name = other_name
+            if source_node.edges and inv_name in source_node.edges:
+                inv_name = f"{inv_name}_list"
+            if inv_name in (source_node.fields or {}):
+                inv_name = f"{inv_name}_list"
+            if source_node.edges is None:
+                source_node.edges = {}
+            if not any(e.node == other_name for e in source_node.edges.values()):
+                source_node.edges[inv_name] = OntologyEdge(
+                    node=other_name,
+                    description=f"{other_name.replace('_', ' ').title()} referencing this {source_node_name}",
+                    join_type="LEFT JOIN",
+                    join_steps=[JoinStep(
+                        table=other_table,
+                        alias_key=other_name,
+                        condition=f"{{{source_node_name}}}.{source_pk} = {{{other_name}}}.{field_name}",
+                    )],
+                )
+            created_pairs.add((other_name, source_node_name, field_name))
+
+    # Clean up empty edge dicts
+    for nname in modified_nodes:
+        node = domain_nodes[nname]
+        if node.edges is not None and len(node.edges) == 0:
+            node.edges = None
+
+    return list(modified_nodes)

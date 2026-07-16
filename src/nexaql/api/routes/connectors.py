@@ -25,7 +25,7 @@ from pydantic import BaseModel
 
 from nexaql import bootstrap as bs
 from nexaql.api.deps import _adapter_cache, get_config, reload_config
-from nexaql.ontology.generator import OntologyGenerator
+from nexaql.ontology.generator import OntologyGenerator, discover_edges
 
 router = APIRouter(tags=["connectors"])
 
@@ -376,28 +376,24 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
             ds.path = connection_url
 
     # Save to bootstrap DB
-    save_name = req.output_schema_name or req.connector_name
     try:
-        # Check for duplicate when replace=False (i.e. "Add Schema")
-        if not req.replace:
-            existing = bs.get_schema(req.domain, save_name)
-            if existing:
-                return JSONResponse(
-                    {"error": f"Schema '{save_name}' already exists in domain '{req.domain}'. Use a different name or regenerate the existing schema."},
-                    status_code=409,
-                )
-
         ontology_dict = ontology.model_dump(exclude_none=True)
+        all_nodes = ontology_dict.get("nodes", {})
+        top_level = {k: v for k, v in ontology_dict.items() if k != "nodes"}
 
-        # Bootstrap default roles and access functions if not already present
-        if "roles" not in ontology_dict or not ontology_dict["roles"]:
-            ontology_dict["roles"] = {
+        # Extract roles and access_functions to domain level
+        roles = ontology_dict.get("roles")
+        access_functions = ontology_dict.get("access_functions")
+
+        # Bootstrap default roles/access if not present
+        if not roles:
+            roles = {
                 "admin": {"description": "Full access to all data"},
                 "analyst": {"description": "Read-only access for reporting and analytics"},
                 "manager": {"description": "Access scoped to their department or region"},
             }
-        if "access_functions" not in ontology_dict or not ontology_dict["access_functions"]:
-            ontology_dict["access_functions"] = {
+        if not access_functions:
+            access_functions = {
                 "owns_record": {
                     "description": "User owns the record (created_by or user_id matches)",
                     "sql": "{field} = {user.id}",
@@ -415,11 +411,32 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
                 },
             }
 
-        bs.save_schema(
+        # Save per-table schemas (one schema per node, no edges yet)
+        for node_name, node_def in all_nodes.items():
+            schema_name = node_name
+            if not req.replace:
+                existing = bs.get_schema(req.domain, schema_name)
+                if existing:
+                    continue
+
+            node_def["datasource"] = req.connector_name
+
+            per_table_ont = {**top_level, "nodes": {node_name: node_def}}
+            per_table_ont.pop("roles", None)
+            per_table_ont.pop("access_functions", None)
+
+            bs.save_schema(
+                domain_name=req.domain,
+                schema_name=schema_name,
+                connector_id=connector_id,
+                ontology_json=per_table_ont,
+            )
+
+        # Save roles and access_functions at domain level
+        bs.save_domain_policies(
             domain_name=req.domain,
-            schema_name=save_name,
-            connector_id=connector_id,
-            ontology_json=ontology_dict,
+            roles=roles,
+            access_functions=access_functions,
         )
 
         # Update domain description
@@ -432,6 +449,61 @@ async def generate_ontology(req: GenerateOntologyRequest) -> JSONResponse:
 
         # Set as active domain
         bs.set_active_domain(req.domain)
+
+        # ── Edge discovery: post-process each new node ──────────────────
+        # Load all domain nodes, collect FKs from all connectors, then
+        # run discover_edges for each newly created node.
+        from nexaql.api.deps import _try_bootstrap_ontology
+        from nexaql.ontology.generator import ForeignKey as FK
+
+        domain_ont = _try_bootstrap_ontology(req.domain)
+        if domain_ont and domain_ont.nodes:
+            # Collect FKs from all connectors in this domain
+            all_fks: list[FK] = []
+            seen_connector_ids: set[int] = set()
+            domain_schemas = bs.list_schemas(req.domain)
+            for s in domain_schemas:
+                cid = s["connector_id"]
+                if cid in seen_connector_ids:
+                    continue
+                seen_connector_ids.add(cid)
+                c = bs.get_connector_by_id(cid)
+                if not c or not c.get("url"):
+                    continue
+                try:
+                    fk_gen = OntologyGenerator(connection_url=c["url"])
+                    fk_schema = "main" if fk_gen._db_type == "duckdb" else "public"
+                    _, fks = await fk_gen.introspect(schema=fk_schema)
+                    all_fks.extend(fks)
+                except Exception:
+                    pass
+
+            # Run edge discovery for each newly generated node
+            modified_set: set[str] = set()
+            for node_name in all_nodes.keys():
+                if node_name in domain_ont.nodes:
+                    modified = discover_edges(node_name, domain_ont.nodes, all_fks)
+                    modified_set.update(modified)
+
+            # Re-save modified nodes with their new edges
+            for mod_name in modified_set:
+                if mod_name not in domain_ont.nodes:
+                    continue
+                mod_node = domain_ont.nodes[mod_name]
+                mod_dict = mod_node.model_dump(exclude_none=True)
+                # Find the schema's connector_id
+                mod_schema = bs.get_schema(req.domain, mod_name)
+                mod_connector_id = mod_schema["connector_id"] if mod_schema else connector_id
+                per_table_ont = {**top_level, "nodes": {mod_name: mod_dict}}
+                bs.save_schema(
+                    domain_name=req.domain,
+                    schema_name=mod_name,
+                    connector_id=mod_connector_id,
+                    ontology_json=per_table_ont,
+                )
+
+            # Update ontology reference for the summary
+            ontology = domain_ont
     except Exception as e:
         return JSONResponse({
             "error": f"Failed to save ontology to bootstrap DB: {e}",
