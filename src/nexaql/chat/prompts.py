@@ -353,7 +353,10 @@ RULES:
 4. "calcs" — For computed expressions like date math or arithmetic. "expr" uses bare field names.
 5. "filters" — Only use fields marked as filterable (marked with ⚡ in the ontology).
    - ops: "eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null"
-   - String values must match exact case from ontology (enums are UPPERCASE).
+   - For enum fields (shown as field:enum⚡[VAL1,VAL2,...]), you MUST use one of the listed values EXACTLY.
+     Do NOT guess or abbreviate — e.g. if values are [US-EAST,US-WEST], use "US-EAST" not "US".
+     If the user's input is ambiguous (e.g. "US" could match "US-EAST" and "US-WEST"), use "in" with all matching values.
+   - String values must match exact case from ontology.
 6. "calc_filters" — Filters on computed expressions, e.g. "days until expiry < 30".
 7. "special_filters" — Pre-defined filters from the ontology. Use exact names and appropriate values.
 8. "edges" — Nested related data. Each edge can have its own fields, filters, aggregations, limit, and sub-edges.

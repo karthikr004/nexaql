@@ -157,7 +157,19 @@ _ENUM_PATTERNS = [
     r"status", r"state", r"type", r"category", r"priority",
     r"severity", r"level", r"tier", r"grade", r"rating",
     r"country_code", r"currency_code", r"language",
-    r"gender", r"role", r"department",
+    r"gender", r"role", r"department", r"region",
+]
+
+# Columns that are never enums (high cardinality by nature)
+_NEVER_ENUM_PATTERNS = [
+    r"name", r"first_name", r"last_name", r"full_name",
+    r"email", r"e_mail", r"phone", r"mobile", r"cell",
+    r"address", r"street", r"city", r"zip", r"postal",
+    r"url", r"website", r"description", r"comment", r"note",
+    r"title", r"subject", r"body", r"message", r"content",
+    r"password", r"token", r"secret", r"hash",
+    r"ssn", r"tax_id", r"passport", r"license",
+    r"ip_address", r"user_agent", r"uuid", r"guid",
 ]
 
 # Columns to exclude from the ontology (system columns)
@@ -184,7 +196,15 @@ def _is_pii(column_name: str) -> bool:
 def _is_likely_enum(column_name: str) -> bool:
     """Heuristic check if a column is likely an enum."""
     name = column_name.lower()
+    if _is_never_enum(name):
+        return False
     return any(re.search(pattern, name) for pattern in _ENUM_PATTERNS)
+
+
+def _is_never_enum(column_name: str) -> bool:
+    """Columns that should never be classified as enums."""
+    name = column_name.lower() if not column_name.islower() else column_name
+    return any(re.search(pattern, name) for pattern in _NEVER_ENUM_PATTERNS)
 
 
 def _table_to_node_name(table_name: str) -> str:
@@ -596,6 +616,12 @@ class OntologyGenerator:
                             sample_limit: int = 1000) -> dict[str, dict[str, list[str]]]:
         """Detect enum-like columns by sampling distinct values.
 
+        A column qualifies as enum only if:
+        - It is not in the never-enum exclusion list (name, email, phone, etc.)
+        - It has 2..max_cardinality distinct values
+        - The distinct/total ratio is low (< 0.3), indicating repeated values
+        - OR the column name matches a known enum pattern (status, region, etc.)
+
         Returns {table_name: {column_name: [values]}}.
         """
         result: dict[str, dict[str, list[str]]] = {}
@@ -605,10 +631,23 @@ class OntologyGenerator:
             conn = await asyncpg.connect(self._url)
             try:
                 for table in tables:
-                    candidates = [
-                        c for c in table.columns
-                        if _is_likely_enum(c.name) or c.data_type in ("character varying", "varchar", "text")
-                    ]
+                    candidates = []
+                    for c in table.columns:
+                        if _is_never_enum(c.name):
+                            continue
+                        if _is_likely_enum(c.name) or c.data_type in ("character varying", "varchar", "text"):
+                            candidates.append(c)
+
+                    # Get total row count for ratio check
+                    total_rows = 0
+                    try:
+                        count_row = await conn.fetchrow(
+                            f"SELECT COUNT(*) AS cnt FROM {table.schema_name}.{table.name}"
+                        )
+                        total_rows = count_row["cnt"] if count_row else 0
+                    except Exception:
+                        pass
+
                     for col in candidates:
                         try:
                             rows = await conn.fetch(
@@ -617,7 +656,10 @@ class OntologyGenerator:
                                 f"ORDER BY {col.name} LIMIT {max_cardinality + 1}"
                             )
                             values = [str(r[col.name]) for r in rows]
-                            if 2 <= len(values) <= max_cardinality:
+                            if len(values) < 2 or len(values) > max_cardinality:
+                                continue
+                            is_known_enum = _is_likely_enum(col.name)
+                            if is_known_enum or (total_rows > 0 and len(values) / total_rows < 0.3):
                                 result.setdefault(table.name, {})[col.name] = values
                         except Exception:
                             continue
@@ -629,10 +671,23 @@ class OntologyGenerator:
             conn = duckdb.connect(self._url)
             try:
                 for table in tables:
-                    candidates = [
-                        c for c in table.columns
-                        if _is_likely_enum(c.name) or "varchar" in c.data_type.lower()
-                    ]
+                    candidates = []
+                    for c in table.columns:
+                        if _is_never_enum(c.name):
+                            continue
+                        if _is_likely_enum(c.name) or "varchar" in c.data_type.lower():
+                            candidates.append(c)
+
+                    # Get total row count for ratio check
+                    total_rows = 0
+                    try:
+                        count_result = conn.execute(
+                            f"SELECT COUNT(*) FROM {table.name}"
+                        ).fetchone()
+                        total_rows = count_result[0] if count_result else 0
+                    except Exception:
+                        pass
+
                     for col in candidates:
                         try:
                             rows = conn.execute(
@@ -641,7 +696,10 @@ class OntologyGenerator:
                                 f"ORDER BY {col.name} LIMIT {max_cardinality + 1}"
                             ).fetchall()
                             values = [str(r[0]) for r in rows]
-                            if 2 <= len(values) <= max_cardinality:
+                            if len(values) < 2 or len(values) > max_cardinality:
+                                continue
+                            is_known_enum = _is_likely_enum(col.name)
+                            if is_known_enum or (total_rows > 0 and len(values) / total_rows < 0.3):
                                 result.setdefault(table.name, {})[col.name] = values
                         except Exception:
                             continue
