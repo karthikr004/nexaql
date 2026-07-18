@@ -147,7 +147,7 @@ def init(path: str, force: bool) -> None:
 # ── nexaql install ─────────────────────────────────────────────────────────
 
 
-DUCKDB_FILE = "nexaql.duckdb"
+SAMPLE_CONNECTOR_NAME = "sample"
 
 
 @main.command()
@@ -155,150 +155,131 @@ DUCKDB_FILE = "nexaql.duckdb"
 @click.option("--config", "config_path", default="nexaql.yaml", help="Config file path")
 @click.option("--force", is_flag=True, help="Overwrite existing config and data")
 def install(skip_sample: bool, config_path: str, force: bool) -> None:
-    """Set up NexaQL: sample database + config.
+    """Set up NexaQL: bootstrap config + sample database.
 
     This is the zero-to-running command. After install, configure your LLM
     provider in nexaql.yaml, then run: nexaql serve
 
     \b
     What it does:
-      1. Creates nexaql.duckdb with sample e-commerce data
-      2. Seeds the sample ontology into the database
-      3. Generates nexaql.yaml config
+      1. Initializes the bootstrap config database (SQLite)
+      2. Creates a sample DuckDB with e-commerce data (unless --skip-sample)
+      3. Registers the sample connector and ontology
+      4. Generates nexaql.yaml config
 
     \b
     Examples:
       nexaql install               # full setup with sample data
       nexaql install --skip-sample # config only, bring your own database
+      nexaql install --force       # recreate everything from scratch
     """
+    import re
+
+    from nexaql import bootstrap as bs
 
     click.echo()
     click.echo("  NexaQL Installer")
     click.echo("  ================")
     click.echo()
 
-    # ── Step 1: Create DuckDB with sample data ────────────────────────────
+    # ── Step 1: Bootstrap config DB ──────────────────────────────────────
 
-    click.echo(f"  [1/2] Setting up database: {DUCKDB_FILE}")
+    click.echo(f"  [1/2] Bootstrap config database")
+    click.echo(f"         Path: {bs._get_db_path()}")
 
-    if not skip_sample:
+    if skip_sample:
+        click.echo("         Skipping sample data (--skip-sample)")
+        click.echo()
+        click.echo("  Setup complete! Next:")
+        click.echo("    1. Add a connector:   nexaql connector add mydb --type postgresql --url postgresql://...")
+        click.echo("    2. Generate schemas:  nexaql generate mydb --domain mydomain")
+        click.echo("    3. Start the server:  nexaql serve")
+        click.echo()
+        bs.close()
+        return
+
+    # ── Step 2: Sample data ─────────────────────────────────────────────
+
+    click.echo(f"  [2/2] Setting up sample data")
+
+    # Load the bundled ontology YAML
+    import yaml
+
+    data_pkg = resources.files("nexaql.data")
+    ontology_file = data_pkg.joinpath("sample_ecommerce.yaml")
+    with resources.as_file(ontology_file) as ont_path:
+        with open(ont_path) as f:
+            ont_data = yaml.safe_load(f)
+
+    domain_name = ont_data.get("domain", "sample")
+    nodes = ont_data.get("nodes", {})
+
+    # Create the DuckDB data file in ~/.nexaql/ (same dir as bootstrap DB)
+    db_dir = os.path.dirname(bs._get_db_path())
+    sample_db_path = os.path.join(db_dir, "sample_ecommerce.duckdb")
+
+    if force and os.path.exists(sample_db_path):
+        os.remove(sample_db_path)
+        wal_path = sample_db_path + ".wal"
+        if os.path.exists(wal_path):
+            os.remove(wal_path)
+
+    if os.path.exists(sample_db_path):
+        click.echo(f"         Database exists: {sample_db_path}")
+        click.echo(f"         Use --force to recreate.")
+    else:
         import duckdb
 
-        if force:
-            for f in [DUCKDB_FILE, DUCKDB_FILE + ".wal"]:
-                if os.path.exists(f):
-                    os.remove(f)
+        seed_file = data_pkg.joinpath("sample_ecommerce_seed.sql")
+        with resources.as_file(seed_file) as seed_path:
+            seed_sql = seed_path.read_text()
 
-        db_exists = os.path.exists(DUCKDB_FILE)
-        conn = duckdb.connect(DUCKDB_FILE)
+        data_conn = duckdb.connect(sample_db_path)
+        cleaned = re.sub(r"^\s*--.*$", "", seed_sql, flags=re.MULTILINE)
+        for stmt in cleaned.split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                data_conn.execute(stmt)
 
-        if db_exists:
-            tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
-            if tables:
-                click.echo(f"         Database exists with {len(tables)} tables. Use --force to recreate.")
-            else:
-                db_exists = False
+        tables = [r[0] for r in data_conn.execute("SHOW TABLES").fetchall()]
+        data_conn.close()
+        click.echo(f"         Created: {sample_db_path}")
+        click.echo(f"         Seeded {len(tables)} tables: {', '.join(tables)}")
 
-        if not db_exists:
-            # Load and execute seed SQL
-            data_pkg = resources.files("nexaql.data")
-            seed_file = data_pkg.joinpath("sample_ecommerce_seed.sql")
-            with resources.as_file(seed_file) as seed_path:
-                seed_sql = seed_path.read_text()
-
-            # DuckDB can execute multiple statements
-            conn.execute(seed_sql)
-            tables = [r[0] for r in conn.execute("SHOW TABLES").fetchall()]
-            click.echo(f"         Seeded {len(tables)} tables: {', '.join(tables)}")
-
-        # Seed ontology into nexaql_ontologies table
-        click.echo("         Loading ontology into database...")
-
-        # Ensure ontology table exists
-        try:
-            conn.execute("CREATE SEQUENCE IF NOT EXISTS nexaql_ontologies_id_seq START 1")
-        except Exception:
-            pass
-
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS nexaql_ontologies (
-                id              INTEGER PRIMARY KEY DEFAULT nextval('nexaql_ontologies_id_seq'),
-                domain          TEXT NOT NULL,
-                version_num     INTEGER NOT NULL DEFAULT 1,
-                data            TEXT NOT NULL,
-                author          TEXT NOT NULL DEFAULT 'system',
-                note            TEXT,
-                is_active       BOOLEAN NOT NULL DEFAULT TRUE,
-                created_at      TIMESTAMP NOT NULL DEFAULT current_timestamp,
-                UNIQUE(domain, version_num)
-            )
-        """)
-
-        # Load sample ontology YAML and insert into DB
-        data_pkg = resources.files("nexaql.data")
-        ontology_file = data_pkg.joinpath("sample_ecommerce.yaml")
-        with resources.as_file(ontology_file) as ont_path:
-            import yaml
-            with open(ont_path) as f:
-                ont_data = yaml.safe_load(f)
-
-        domain = ont_data.get("domain", "ecommerce")
-
-        # Check if ontology already exists
-        existing = conn.execute(
-            "SELECT COUNT(*) FROM nexaql_ontologies WHERE domain = ? AND is_active = TRUE",
-            [domain],
-        ).fetchone()[0]
-
-        if existing > 0 and not force:
-            click.echo(f"         Ontology '{domain}' already exists in database")
-        else:
-            if existing > 0:
-                conn.execute("DELETE FROM nexaql_ontologies WHERE domain = ?", [domain])
-
-            conn.execute(
-                "INSERT INTO nexaql_ontologies (domain, version_num, data, author, note, is_active) "
-                "VALUES (?, 1, ?, 'nexaql-install', 'Initial setup', TRUE)",
-                [domain, json.dumps(ont_data)],
-            )
-            click.echo(f"         Ontology '{domain}' loaded ({len(ont_data.get('nodes', {}))} nodes)")
-
-        conn.close()
+    # Register connector (upsert — reuse existing if present)
+    existing_connector = bs.get_connector(SAMPLE_CONNECTOR_NAME)
+    if existing_connector:
+        connector_id = existing_connector["id"]
+        click.echo(f"         Connector '{SAMPLE_CONNECTOR_NAME}' already exists (id={connector_id})")
     else:
-        click.echo("         Skipping sample data (--skip-sample)")
-
-    # ── Step 2: Bootstrap DB config ────────────────────────────────────
-
-    click.echo(f"  [2/2] Configuring bootstrap database")
-
-    from nexaql import bootstrap as bs
-
-    # Save DuckDB connector
-    connector_id = bs.save_connector(
-        name="sample-duckdb",
-        type="duckdb",
-        url=os.path.abspath(DUCKDB_FILE),
-    )
-    click.echo(f"         Saved connector 'sample-duckdb' (id={connector_id})")
-
-    # Save ontology to bootstrap DB schema (admin panel reads from here)
-    if not skip_sample:
-        # Remove any stale schemas for this domain first
-        for old_schema in bs.list_schemas("ecommerce"):
-            bs.delete_schema("ecommerce", old_schema["name"])
-        bs.save_schema(
-            domain_name="ecommerce",
-            schema_name="sample",
-            connector_id=connector_id,
-            ontology_json=ont_data,
+        connector_id = bs.save_connector(
+            name=SAMPLE_CONNECTOR_NAME,
+            type="duckdb",
+            url=sample_db_path,
         )
-        click.echo(f"         Saved schema 'sample' with ontology ({len(ont_data.get('nodes', {}))} nodes)")
+        click.echo(f"         Registered connector '{SAMPLE_CONNECTOR_NAME}' (id={connector_id})")
+
+    # Register per-node schemas (clear stale ones first)
+    for old_schema in bs.list_schemas(domain_name):
+        bs.delete_schema(domain_name, old_schema["name"])
+
+    for node_name, node_def in nodes.items():
+        single_node_ont = {
+            "domain": domain_name,
+            "nodes": {node_name: node_def},
+        }
+        bs.save_schema(
+            domain_name=domain_name,
+            schema_name=node_name,
+            connector_id=connector_id,
+            ontology_json=single_node_ont,
+        )
+
+    click.echo(f"         Saved {len(nodes)} schemas in domain '{domain_name}'")
 
     # Set active domain
-    bs.set_active_domain("ecommerce")
-    click.echo(f"         Active domain: ecommerce")
-
-    click.echo(f"         Bootstrap DB: {bs._get_db_path()}")
+    bs.set_active_domain(domain_name)
+    click.echo(f"         Active domain: {domain_name}")
 
     # ── Done ──────────────────────────────────────────────────────────────
 
@@ -310,6 +291,7 @@ def install(skip_sample: bool, config_path: str, force: bool) -> None:
     click.echo("    2. Open http://localhost:3717")
     click.echo("    3. Add your LLM API key in the Admin panel")
     click.echo()
+    bs.close()
 
 
 # ── nexaql query ───────────────────────────────────────────────────────────
