@@ -95,9 +95,8 @@ def serve(host: Optional[str], port: Optional[int], config_path: str, reload: bo
     bind_host = host or srv.get("host") or cfg.server.host
     bind_port = port or srv.get("port") or cfg.server.port
 
-    db_path = os.path.join(os.path.expanduser("~"), ".nexaql", "nexaql.db")
     click.echo(f"Starting NexaQL server on {bind_host}:{bind_port}")
-    click.echo(f"Bootstrap DB: {db_path}")
+    click.echo(f"Bootstrap DB: {bs._get_db_path()}")
 
     uvicorn.run(
         "nexaql.api.app:create_app",
@@ -299,8 +298,7 @@ def install(skip_sample: bool, config_path: str, force: bool) -> None:
     bs.set_active_domain("ecommerce")
     click.echo(f"         Active domain: ecommerce")
 
-    db_path = os.path.join(os.path.expanduser("~"), ".nexaql", "nexaql.db")
-    click.echo(f"         Bootstrap DB: {db_path}")
+    click.echo(f"         Bootstrap DB: {bs._get_db_path()}")
 
     # ── Done ──────────────────────────────────────────────────────────────
 
@@ -423,10 +421,9 @@ def status() -> None:
     """Show current NexaQL configuration from the bootstrap database."""
     from nexaql import bootstrap as bs
 
-    db_path = os.path.join(os.path.expanduser("~"), ".nexaql", "nexaql.db")
     click.echo(f"\n  NexaQL Status")
     click.echo(f"  =============")
-    click.echo(f"  Bootstrap DB: {db_path}")
+    click.echo(f"  Bootstrap DB: {bs._get_db_path()}")
 
     # Server
     srv = bs.get_server_config()
@@ -730,6 +727,321 @@ def _print_table(
                 val_str = val_str[: widths[i] - 1] + "~"
             cells.append(val_str.ljust(widths[i]))
         click.echo(" | ".join(cells))
+
+
+# ── nexaql domain ─────────────────────────────────────────────────────────
+
+
+@main.group()
+def domain() -> None:
+    """Manage domains."""
+    pass
+
+
+@domain.command("list")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def domain_list(output_format: str) -> None:
+    """List all available data domains."""
+    from nexaql import bootstrap as bs
+
+    active = bs.get_active_domain()
+    domains = bs.list_domains()
+
+    if output_format == "json":
+        result = []
+        for d in domains:
+            name = d["name"]
+            schemas = bs.list_schemas(name)
+            node_count = 0
+            for s in schemas:
+                try:
+                    ont_data = json.loads(s.get("ontology_json", "{}"))
+                    node_count += len(ont_data.get("nodes", {}))
+                except Exception:
+                    pass
+                result.append({
+                    "name": name,
+                    "description": d.get("description", ""),
+                    "node_count": node_count,
+                    "active": name == active,
+                })
+        click.echo(json.dumps({"domains": result, "active_domain": active}, indent=2))
+        return
+
+    if not domains:
+        click.echo("No domains configured.")
+        return
+
+    click.echo(f"\n  Domains ({len(domains)})")
+    click.echo(f"  {'─' * 40}")
+    for d in domains:
+        name = d["name"]
+        marker = " *" if name == active else ""
+        schemas = bs.list_schemas(name)
+        node_count = 0
+        for s in schemas:
+            try:
+                ont_data = json.loads(s.get("ontology_json", "{}"))
+                node_count += len(ont_data.get("nodes", {}))
+            except Exception:
+                pass
+        click.echo(f"  {name}{marker} — {node_count} nodes")
+    click.echo()
+    bs.close()
+
+
+@domain.command("switch")
+@click.argument("name")
+def domain_switch(name: str) -> None:
+    """Switch to a different data domain."""
+    from nexaql import bootstrap as bs
+
+    d = bs.get_domain(name)
+    if not d:
+        click.echo(f"Error: domain '{name}' not found.", err=True)
+        sys.exit(1)
+
+    schemas = bs.list_schemas(name)
+    if not schemas:
+        click.echo(f"Error: domain '{name}' has no schemas.", err=True)
+        sys.exit(1)
+
+    bs.set_active_domain(name)
+    click.echo(f"Switched to domain '{name}'.")
+    bs.close()
+
+
+@domain.command("describe")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def domain_describe(output_format: str) -> None:
+    """Describe the active domain's ontology."""
+    from nexaql import bootstrap as bs
+    from nexaql.api.deps import load_ontology_from_dict
+
+    active = bs.get_active_domain()
+    if not active:
+        click.echo("Error: no active domain. Use 'nexaql domain switch <name>'.", err=True)
+        sys.exit(1)
+
+    ont_data = bs.get_domain_ontology(active)
+    if not ont_data:
+        click.echo(f"Error: could not load ontology for domain '{active}'.", err=True)
+        sys.exit(1)
+
+    ontology = load_ontology_from_dict(ont_data)
+
+    if output_format == "json":
+        nodes_out = {}
+        for nname, ndef in ontology.nodes.items():
+            fields = []
+            for fname, fdef in ndef.fields.items():
+                fields.append({"name": fname, "type": fdef.type, "filterable": fdef.filterable or False})
+            edges = []
+            for ename, edef in (ndef.edges or {}).items():
+                edges.append({"name": ename, "target_node": edef.node})
+            nodes_out[nname] = {"table": ndef.table, "fields": fields, "edges": edges}
+        click.echo(json.dumps({"domain": active, "nodes": nodes_out}, indent=2))
+        return
+
+    click.echo(f"\n  Domain: {active}")
+    click.echo(f"  Nodes: {len(ontology.nodes)}")
+    click.echo(f"  {'─' * 40}")
+    for nname, ndef in ontology.nodes.items():
+        field_count = len(ndef.fields)
+        edge_count = len(ndef.edges) if ndef.edges else 0
+        click.echo(f"  {nname} ({ndef.table}) — {field_count} fields, {edge_count} edges")
+    click.echo()
+    bs.close()
+
+
+# ── nexaql connector ──────────────────────────────────────────────────────
+
+
+@main.group()
+def connector() -> None:
+    """Manage data connectors."""
+    pass
+
+
+@connector.command("list")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def connector_list(output_format: str) -> None:
+    """List configured database connectors."""
+    from nexaql import bootstrap as bs
+
+    connectors = bs.list_connectors()
+
+    if output_format == "json":
+        click.echo(json.dumps({"connectors": connectors}, indent=2))
+        bs.close()
+        return
+
+    if not connectors:
+        click.echo("No connectors configured.")
+        bs.close()
+        return
+
+    click.echo(f"\n  Connectors ({len(connectors)})")
+    click.echo(f"  {'─' * 40}")
+    for c in connectors:
+        import re
+        masked = re.sub(r"://([^:]+):([^@]+)@", r"://\1:***@", c.get("url", "") or "")
+        click.echo(f"  [{c['id']}] {c['name']} ({c['type']}) — {masked}")
+    click.echo()
+    bs.close()
+
+
+@connector.command("add")
+@click.argument("name")
+@click.option("--type", "conn_type", required=True, type=click.Choice(["postgresql", "duckdb", "mysql"]),
+              help="Connector type")
+@click.option("--url", required=True, help="Connection URL or file path")
+def connector_add(name: str, conn_type: str, url: str) -> None:
+    """Add a new database connector."""
+    from nexaql import bootstrap as bs
+
+    existing = bs.get_connector(name)
+    if existing:
+        click.echo(f"Error: connector '{name}' already exists.", err=True)
+        sys.exit(1)
+
+    connector_id = bs.save_connector(name=name, type=conn_type, url=url)
+    click.echo(f"Saved connector '{name}' (id={connector_id}, type={conn_type}).")
+    bs.close()
+
+
+@connector.command("remove")
+@click.argument("name")
+@click.confirmation_option(prompt="Are you sure you want to remove this connector?")
+def connector_remove(name: str) -> None:
+    """Remove a database connector."""
+    from nexaql import bootstrap as bs
+
+    existing = bs.get_connector(name)
+    if not existing:
+        click.echo(f"Error: connector '{name}' not found.", err=True)
+        sys.exit(1)
+
+    bs.delete_connector(name)
+    click.echo(f"Removed connector '{name}'.")
+    bs.close()
+
+
+# ── nexaql schema ─────────────────────────────────────────────────────────
+
+
+@main.group()
+def schema() -> None:
+    """Manage schemas."""
+    pass
+
+
+@schema.command("list")
+@click.option("--domain", "domain_name", default=None, help="Domain name (uses active domain if not specified)")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def schema_list(domain_name: Optional[str], output_format: str) -> None:
+    """List schemas in a domain."""
+    from nexaql import bootstrap as bs
+
+    target = domain_name or bs.get_active_domain()
+    if not target:
+        click.echo("Error: no active domain. Specify --domain.", err=True)
+        sys.exit(1)
+
+    schemas = bs.list_schemas(target)
+
+    if output_format == "json":
+        click.echo(json.dumps({"domain": target, "schemas": schemas}, indent=2, default=str))
+        bs.close()
+        return
+
+    if not schemas:
+        click.echo(f"No schemas in domain '{target}'.")
+        bs.close()
+        return
+
+    click.echo(f"\n  Schemas in '{target}' ({len(schemas)})")
+    click.echo(f"  {'─' * 40}")
+    for s in schemas:
+        node_count = 0
+        try:
+            ont_data = json.loads(s.get("ontology_json", "{}"))
+            node_count = len(ont_data.get("nodes", {}))
+        except Exception:
+            pass
+        click.echo(f"  {s['name']} — connector: {s.get('connector_name', '?')}, {node_count} nodes")
+    click.echo()
+    bs.close()
+
+
+@schema.command("describe")
+@click.argument("node_name")
+@click.option("--domain", "domain_name", default=None, help="Domain name (uses active domain if not specified)")
+@click.option("--format", "output_format", type=click.Choice(["table", "json"]), default="table")
+def schema_describe(node_name: str, domain_name: Optional[str], output_format: str) -> None:
+    """Describe a specific node's fields, edges, and filters."""
+    from nexaql import bootstrap as bs
+    from nexaql.api.deps import load_ontology_from_dict
+
+    target = domain_name or bs.get_active_domain()
+    if not target:
+        click.echo("Error: no active domain. Specify --domain.", err=True)
+        sys.exit(1)
+
+    ont_data = bs.get_domain_ontology(target)
+    if not ont_data:
+        click.echo(f"Error: could not load ontology for domain '{target}'.", err=True)
+        sys.exit(1)
+
+    ontology = load_ontology_from_dict(ont_data)
+
+    defn = ontology.nodes.get(node_name)
+    if not defn:
+        available = list(ontology.nodes.keys())
+        click.echo(f"Error: node '{node_name}' not found. Available: {', '.join(available)}", err=True)
+        sys.exit(1)
+
+    if output_format == "json":
+        fields = []
+        for fname, fdef in defn.fields.items():
+            f = {"name": fname, "type": fdef.type, "filterable": fdef.filterable or False}
+            if fdef.description:
+                f["description"] = fdef.description
+            if fdef.values:
+                f["enum_values"] = fdef.values
+            if fdef.pii:
+                f["pii"] = True
+            fields.append(f)
+        edges = []
+        for ename, edef in (defn.edges or {}).items():
+            edges.append({"name": ename, "target_node": edef.node, "description": edef.description})
+        result = {"node": node_name, "table": defn.table, "fields": fields, "edges": edges}
+        click.echo(json.dumps(result, indent=2))
+        bs.close()
+        return
+
+    click.echo(f"\n  Node: {node_name}")
+    click.echo(f"  Table: {defn.table}")
+    click.echo(f"  {'─' * 40}")
+
+    click.echo(f"\n  Fields ({len(defn.fields)}):")
+    for fname, fdef in defn.fields.items():
+        filterable = " [filterable]" if fdef.filterable else ""
+        pii = " [PII]" if fdef.pii else ""
+        click.echo(f"    {fname} ({fdef.type}){filterable}{pii}")
+
+    if defn.edges:
+        click.echo(f"\n  Edges ({len(defn.edges)}):")
+        for ename, edef in defn.edges.items():
+            click.echo(f"    {ename} → {edef.node}")
+
+    if defn.special_filters:
+        click.echo(f"\n  Special Filters ({len(defn.special_filters)}):")
+        for sname, sdef in defn.special_filters.items():
+            click.echo(f"    @{sname}: {sdef.description}")
+
+    click.echo()
+    bs.close()
 
 
 # ── Entry point guard ───────────────────────────────────────────────────────
