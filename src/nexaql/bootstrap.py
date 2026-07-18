@@ -1,8 +1,11 @@
 # Copyright (c) 2026-present NexaQL Contributors
-"""Bootstrap database — single DuckDB file that stores all NexaQL configuration.
+"""Bootstrap database — SQLite file that stores all NexaQL configuration.
 
 Replaces nexaql.yaml, api_keys.json, and connectors.json with a proper
-database at ``~/.nexaql/nexaql.db``.
+database at ``~/.nexaql/nexaql.sqlite``.
+
+Uses SQLite with WAL mode for concurrent access (CLI + server can run
+simultaneously without locking errors).
 
 Tables:
   connectors   — database connections (Postgres, DuckDB, MySQL, etc.)
@@ -18,18 +21,17 @@ from __future__ import annotations
 import json
 import logging
 import os
+import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
-
-import duckdb
 
 log = logging.getLogger(__name__)
 
 # ── Bootstrap DB path ─────────────────────────────────────────────────────────
 
 _DEFAULT_DB_DIR = os.path.join(Path.home(), ".nexaql")
-_DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "nexaql.db")
+_DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "nexaql.sqlite")
 
 
 def _get_db_path() -> str:
@@ -39,17 +41,21 @@ def _get_db_path() -> str:
 
 # ── Connection management ─────────────────────────────────────────────────────
 
-_conn: duckdb.DuckDBPyConnection | None = None
+_conn: sqlite3.Connection | None = None
 _initialized: bool = False
 
 
-def _get_conn() -> duckdb.DuckDBPyConnection:
-    """Get or create the singleton DuckDB connection."""
+def _get_conn() -> sqlite3.Connection:
+    """Get or create the singleton SQLite connection with WAL mode."""
     global _conn, _initialized
     if _conn is None:
         db_path = _get_db_path()
         os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        _conn = duckdb.connect(db_path)
+        _migrate_from_duckdb(db_path)
+        _conn = sqlite3.connect(db_path, isolation_level=None)
+        _conn.execute("PRAGMA journal_mode=WAL")
+        _conn.execute("PRAGMA busy_timeout=5000")
+        _conn.execute("PRAGMA foreign_keys=ON")
         log.info(f"Bootstrap DB opened at {db_path}")
     if not _initialized:
         _ensure_tables(_conn)
@@ -66,6 +72,100 @@ def close() -> None:
         _initialized = False
 
 
+def _migrate_from_duckdb(sqlite_path: str) -> None:
+    """Auto-migrate data from old DuckDB nexaql.db to new SQLite file.
+
+    Only runs if the old DuckDB file exists and the SQLite file does not.
+    After successful migration, renames the old file to nexaql.db.bak.
+    """
+    if os.path.exists(sqlite_path):
+        return
+
+    old_db_path = os.path.join(os.path.dirname(sqlite_path), "nexaql.db")
+    if not os.path.exists(old_db_path):
+        return
+
+    log.info("Found legacy DuckDB config at %s — migrating to SQLite...", old_db_path)
+
+    try:
+        import duckdb
+    except ImportError:
+        log.warning("duckdb not installed — cannot migrate old config. Starting fresh.")
+        return
+
+    try:
+        old_conn = duckdb.connect(old_db_path, read_only=True)
+    except Exception as e:
+        log.warning("Cannot open old DuckDB config for migration: %s", e)
+        return
+
+    try:
+        new_conn = sqlite3.connect(sqlite_path, isolation_level=None)
+        new_conn.execute("PRAGMA journal_mode=WAL")
+        new_conn.execute("PRAGMA foreign_keys=OFF")
+
+        for stmt in _DDL.strip().split(";"):
+            stmt = stmt.strip()
+            if stmt:
+                new_conn.execute(stmt)
+
+        new_conn.execute("INSERT OR IGNORE INTO server_config (id) VALUES (1)")
+
+        tables_and_cols = [
+            ("connectors", ["id", "name", "type", "url", "credentials", "created_at"]),
+            ("domains", ["id", "name", "description", "roles_json", "access_functions_json", "created_at"]),
+            ("schemas", ["id", "domain_id", "connector_id", "name", "ontology_json", "created_at", "updated_at"]),
+            ("llm_config", ["id", "provider", "model", "max_tokens", "summary_max_tokens", "generation_mode", "is_active"]),
+            ("api_keys", ["id", "provider", "name", "key", "created_at"]),
+        ]
+
+        for table, cols in tables_and_cols:
+            try:
+                rows = old_conn.execute(f"SELECT {', '.join(cols)} FROM {table}").fetchall()
+            except Exception:
+                continue
+            if not rows:
+                continue
+            placeholders = ", ".join(["?"] * len(cols))
+            col_list = ", ".join(cols)
+            for row in rows:
+                try:
+                    new_conn.execute(
+                        f"INSERT OR IGNORE INTO {table} ({col_list}) VALUES ({placeholders})",
+                        list(row),
+                    )
+                except Exception as e:
+                    log.debug("Migration row skipped for %s: %s", table, e)
+
+        try:
+            row = old_conn.execute(
+                "SELECT host, port, cors_origins, auth_mode, active_domain, auth_secret, auth_algorithm "
+                "FROM server_config WHERE id = 1"
+            ).fetchone()
+            if row:
+                new_conn.execute(
+                    "UPDATE server_config SET host=?, port=?, cors_origins=?, auth_mode=?, "
+                    "active_domain=?, auth_secret=?, auth_algorithm=? WHERE id=1",
+                    list(row),
+                )
+        except Exception as e:
+            log.debug("server_config migration skipped: %s", e)
+
+        new_conn.execute("PRAGMA foreign_keys=ON")
+        new_conn.close()
+        old_conn.close()
+
+        backup_path = old_db_path + ".bak"
+        os.rename(old_db_path, backup_path)
+        log.info("Migration complete. Old DB backed up to %s", backup_path)
+
+    except Exception as e:
+        log.warning("DuckDB to SQLite migration failed: %s. Starting fresh.", e)
+        old_conn.close()
+        if os.path.exists(sqlite_path):
+            os.remove(sqlite_path)
+
+
 def _now() -> str:
     """UTC ISO timestamp."""
     return datetime.now(timezone.utc).isoformat()
@@ -75,7 +175,7 @@ def _now() -> str:
 
 _DDL = """
 CREATE TABLE IF NOT EXISTS connectors (
-    id          INTEGER PRIMARY KEY DEFAULT nextval('seq_connectors'),
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT UNIQUE NOT NULL,
     type        TEXT NOT NULL,
     url         TEXT,
@@ -84,7 +184,7 @@ CREATE TABLE IF NOT EXISTS connectors (
 );
 
 CREATE TABLE IF NOT EXISTS domains (
-    id                   INTEGER PRIMARY KEY DEFAULT nextval('seq_domains'),
+    id                   INTEGER PRIMARY KEY AUTOINCREMENT,
     name                 TEXT UNIQUE NOT NULL,
     description          TEXT,
     roles_json           TEXT,
@@ -93,7 +193,7 @@ CREATE TABLE IF NOT EXISTS domains (
 );
 
 CREATE TABLE IF NOT EXISTS schemas (
-    id             INTEGER PRIMARY KEY DEFAULT nextval('seq_schemas'),
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
     domain_id      INTEGER NOT NULL REFERENCES domains(id),
     connector_id   INTEGER NOT NULL REFERENCES connectors(id),
     name           TEXT NOT NULL,
@@ -104,17 +204,17 @@ CREATE TABLE IF NOT EXISTS schemas (
 );
 
 CREATE TABLE IF NOT EXISTS llm_config (
-    id              INTEGER PRIMARY KEY DEFAULT nextval('seq_llm_config'),
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
     provider        TEXT NOT NULL DEFAULT '',
     model           TEXT NOT NULL DEFAULT '',
     max_tokens      INTEGER DEFAULT 4096,
     summary_max_tokens INTEGER DEFAULT 2048,
     generation_mode TEXT DEFAULT 'intent',
-    is_active       BOOLEAN DEFAULT TRUE
+    is_active       BOOLEAN DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS api_keys (
-    id         INTEGER PRIMARY KEY DEFAULT nextval('seq_api_keys'),
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
     provider   TEXT UNIQUE NOT NULL,
     name       TEXT,
     key        TEXT NOT NULL,
@@ -134,16 +234,8 @@ CREATE TABLE IF NOT EXISTS server_config (
 """
 
 
-def _ensure_tables(conn: duckdb.DuckDBPyConnection) -> None:
+def _ensure_tables(conn: sqlite3.Connection) -> None:
     """Create tables if they don't exist."""
-    # Create sequences for auto-increment IDs
-    for seq in ["seq_connectors", "seq_domains", "seq_schemas", "seq_llm_config", "seq_api_keys"]:
-        try:
-            conn.execute(f"CREATE SEQUENCE IF NOT EXISTS {seq} START 1")
-        except Exception:
-            pass  # sequence already exists
-
-    # Create tables
     for stmt in _DDL.strip().split(";"):
         stmt = stmt.strip()
         if stmt:
@@ -696,7 +788,7 @@ def set_active_domain(domain_name: str) -> None:
 # ── Legacy migration ─────────────────────────────────────────────────────────
 
 
-def _migrate_from_legacy(conn: duckdb.DuckDBPyConnection) -> None:
+def _migrate_from_legacy(conn: sqlite3.Connection) -> None:
     """Migrate from nexaql.yaml + api_keys.json + connectors.json if they exist.
 
     Only runs if the bootstrap DB is empty (no connectors, no domains, no llm_config).
@@ -810,7 +902,7 @@ def _migrate_from_legacy(conn: duckdb.DuckDBPyConnection) -> None:
 # ── Seed bundled ontology files ──────────────────────────────────────────────
 
 
-def _seed_ontology_files(conn: duckdb.DuckDBPyConnection) -> None:
+def _seed_ontology_files(conn: sqlite3.Connection) -> None:
     """Seed bundled YAML ontology files into the bootstrap DB on first run.
 
     Only runs if the domains table is empty (no domains exist yet).
@@ -970,7 +1062,7 @@ def _parse_ontology_yaml(path: str) -> tuple[str, str, str]:
     return domain, description, ontology_json
 
 
-def _ensure_sample_connector(conn: duckdb.DuckDBPyConnection) -> int:
+def _ensure_sample_connector(conn: sqlite3.Connection) -> int:
     """Create or return the 'sample' connector backed by a real DuckDB data file.
 
     The data file lives at ``~/.nexaql/sample_ecommerce.duckdb`` and is
@@ -993,7 +1085,7 @@ def _ensure_sample_connector(conn: duckdb.DuckDBPyConnection) -> int:
     return row[0]
 
 
-def _ensure_support_connector(conn: duckdb.DuckDBPyConnection) -> int | None:
+def _ensure_support_connector(conn: sqlite3.Connection) -> int | None:
     """Create or return the 'support_postgres' connector for the support tickets DB.
 
     Seeds the PostgreSQL database with support_tickets data if available.
@@ -1027,7 +1119,7 @@ def _ensure_support_connector(conn: duckdb.DuckDBPyConnection) -> int | None:
     return connector_id
 
 
-def _seed_support_ontology(conn: duckdb.DuckDBPyConnection, connector_id: int) -> None:
+def _seed_support_ontology(conn: sqlite3.Connection, connector_id: int) -> None:
     """Create the support ontology schema and patch ecommerce nodes with reverse edges."""
     support_ontology = {
         "version": "1",
@@ -1124,7 +1216,7 @@ def _seed_support_ontology(conn: duckdb.DuckDBPyConnection, connector_id: int) -
     _patch_ecommerce_edges(conn, domain["id"])
 
 
-def _patch_ecommerce_edges(conn: duckdb.DuckDBPyConnection, domain_id: int) -> None:
+def _patch_ecommerce_edges(conn: sqlite3.Connection, domain_id: int) -> None:
     """Add support_tickets edges to customer and order per-table schemas."""
     now = _now()
 
@@ -1271,6 +1363,7 @@ def _seed_sample_data() -> str:
     try:
         import re
 
+        import duckdb
         data_conn = duckdb.connect(sample_db)
         with open(seed_sql_path) as f:
             sql = f.read()
