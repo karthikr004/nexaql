@@ -259,9 +259,6 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     # Attempt legacy migration on first init
     _migrate_from_legacy(conn)
 
-    # Seed bundled / local ontology YAML files if no domains exist yet
-    _seed_ontology_files(conn)
-
 
 # ── Connectors CRUD ──────────────────────────────────────────────────────────
 

@@ -288,6 +288,47 @@ def extract_nexaql_query(text: str) -> str | None:
 # ── Intent-based prompt (Option B) ──────────────────────────────────────────
 
 
+def _build_dynamic_examples(ontology: Ontology) -> str:
+    """Generate query examples from the active ontology's actual nodes/fields."""
+    nodes = list(ontology.nodes.items())
+    if not nodes:
+        return ""
+
+    examples = []
+
+    # Example 1: a node with an edge — "X with their Y count"
+    for node_name, node_def in nodes:
+        edges = node_def.edges or {}
+        if not edges:
+            continue
+        field_names = list(node_def.fields.keys())
+        display_fields = field_names[:2]
+        edge_name = next(iter(edges))
+        examples.append(
+            f'Q: "{node_name}s with their {edge_name} count"\n'
+            f'```json\n'
+            f'{{"node": "{node_name}", "fields": {display_fields}, '
+            f'"edges": [{{"name": "{edge_name}", "aggregations": '
+            f'[{{"alias": "{edge_name}_count", "func": "count"}}]}}], '
+            f'"order_by": [{{"field": "{edge_name}_count", "direction": "DESC"}}]}}\n'
+            f'```'
+        )
+        break
+
+    # Example 2: simple top-N query on the first node
+    node_name, node_def = nodes[0]
+    field_names = list(node_def.fields.keys())
+    display_fields = field_names[:3]
+    examples.append(
+        f'Q: "top 10 {node_name}s"\n'
+        f'```json\n'
+        f'{{"node": "{node_name}", "fields": {display_fields}, "limit": 10}}\n'
+        f'```'
+    )
+
+    return "\n\n".join(examples)
+
+
 def build_intent_system_prompt(ontology: Ontology) -> str:
     """Build a compact system prompt for structured intent extraction.
 
@@ -381,14 +422,6 @@ Q: "invoices expiring within 30 days with supplier name"
 {{"node": "invoices", "fields": ["invoice_number", "due_date", "amount"], "calc_filters": [{{"expr": "due_date - CURRENT_DATE", "op": "gte", "value": 0}}, {{"expr": "due_date - CURRENT_DATE", "op": "lte", "value": 30}}], "edges": [{{"name": "suppliers", "fields": ["name"]}}], "order_by": [{{"field": "due_date", "direction": "ASC"}}]}}
 ```
 
-Q: "top 5 most ordered products" (EDGE AGGREGATION — quantity is on order_items, not product)
-```json
-{{"node": "product", "fields": ["id", "name", "sku"], "edges": [{{"name": "order_items", "aggregations": [{{"alias": "total_ordered", "func": "sum", "field": "quantity"}}]}}], "order_by": [{{"field": "total_ordered", "direction": "DESC"}}], "limit": 5}}
-```
-
-Q: "customers with their total order count"
-```json
-{{"node": "customer", "fields": ["name", "email"], "edges": [{{"name": "orders", "aggregations": [{{"alias": "order_count", "func": "count"}}]}}], "order_by": [{{"field": "order_count", "direction": "DESC"}}]}}
-```
+{_build_dynamic_examples(ontology)}
 
 Respond with ONLY the JSON object in a ```json block. No explanation needed."""
