@@ -111,6 +111,10 @@ def create_app() -> FastAPI:
         async def spa_admin_catchall(rest: str):
             return FileResponse(str(index_html))
 
+        @app.get("/v2/{rest:path}")
+        async def spa_v2_catchall(rest: str):
+            return FileResponse(str(index_html))
+
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
 
     return app
