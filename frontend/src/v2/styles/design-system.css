@@ -466,3 +466,8 @@
   background: var(--v2-bg-hover);
   color: var(--v2-text-primary);
 }
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes v2-spin {
+  to { transform: rotate(360deg); }
+}
