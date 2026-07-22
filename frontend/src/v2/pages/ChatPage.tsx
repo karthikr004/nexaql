@@ -183,6 +183,7 @@ export default function ChatPage() {
     <div
       style={{
         display: 'flex',
+        width: '100%',
         height: '100%',
         background: 'var(--v2-bg-app)',
         overflow: 'hidden',
@@ -309,10 +310,10 @@ export default function ChatPage() {
         >
           <div
             style={{
-              maxWidth: traceOpen ? 'none' : 720,
-              margin: traceOpen ? 0 : '0 auto',
+              maxWidth: traceOpen ? 'none' : 640,
+              margin: '0 auto',
               padding: '12px 24px 16px',
-              transition: 'max-width 0.2s ease, margin 0.2s ease',
+              transition: 'max-width 0.2s ease',
             }}
           >
             {turns.length > 0 && (
