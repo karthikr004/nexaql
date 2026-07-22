@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDomain } from '../contexts/DomainContext';
-import SchemaDetailView from '../../components/admin/SchemaDetailView';
+import SchemaDetailPage from './SchemaDetailPage';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -529,7 +529,7 @@ export default function DomainsPage() {
     if (selectedDomain) fetchSchemas(selectedDomain);
   }, [fetchDomains, refreshDomains, fetchSchemas, selectedDomain]);
 
-  // ── Schema detail view — delegates to existing SchemaDetailView ─────────
+  // ── Schema detail view ──────────────────────────────────────────────────
 
   if (selectedDomain && selectedSchema) {
     return (
@@ -571,15 +571,12 @@ export default function DomainsPage() {
           </span>
         </div>
 
-        {/* Reuse existing SchemaDetailView wrapped in legacy bridge for CSS compat */}
-        <div className="v2-legacy-bridge" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
-          <SchemaDetailView
+        {/* Fresh v2 schema detail — no legacy bridge needed */}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <SchemaDetailPage
             domainName={selectedDomain}
             schema={selectedSchema}
             connectors={connectors}
-            onBack={() => setSelectedSchema(null)}
-            onRegenerate={() => handleRegenerate(selectedSchema)}
-            regenerating={regeneratingSchema === selectedSchema.name}
             onToast={onToast}
             onOntologyChanged={() => {
               if (selectedDomain) fetchSchemas(selectedDomain);
@@ -709,7 +706,7 @@ export default function DomainsPage() {
                       onClick={() => setSelectedSchema(s)}
                     >
                       <td>
-                        <span style={{ fontFamily: 'var(--v2-font-mono)', fontWeight: 500 }}>{s.name}</span>
+                        <span style={{ fontWeight: 500, color: 'var(--v2-text-primary)' }}>{s.name}</span>
                       </td>
                       <td>
                         {s.connector_name ? (
