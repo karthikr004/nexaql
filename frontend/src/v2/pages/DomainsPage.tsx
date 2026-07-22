@@ -571,8 +571,8 @@ export default function DomainsPage() {
           </span>
         </div>
 
-        {/* Reuse existing SchemaDetailView (old styling) wrapped in v2 context */}
-        <div style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
+        {/* Reuse existing SchemaDetailView wrapped in legacy bridge for CSS compat */}
+        <div className="v2-legacy-bridge" style={{ flex: 1, overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
           <SchemaDetailView
             domainName={selectedDomain}
             schema={selectedSchema}
