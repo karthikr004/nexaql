@@ -1,6 +1,5 @@
 import Markdown from 'react-markdown';
 import type { ChatTurn } from '../../types';
-import ProcessingStep from './ProcessingStep';
 import ChatResultTable from './ChatResultTable';
 
 function FormattedMarkdown({ text }: { text: string }) {
@@ -121,9 +120,61 @@ function LoadingIndicator() {
   );
 }
 
-function AssistantMessage({ turn }: { turn: ChatTurn }) {
-  const hasProcessingSteps = turn.intent || turn.nexaqlQuery || turn.queryPreview;
+function ThinkingPill({ turn, isActive, onClick }: { turn: ChatTurn; isActive: boolean; onClick: () => void }) {
+  const hasTrace = turn.intent || turn.nexaqlQuery || turn.queryPreview;
+  if (!hasTrace) return null;
 
+  const stepCount = [turn.intent, turn.nexaqlQuery, turn.queryPreview].filter(Boolean).length;
+
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        padding: '5px 10px',
+        borderRadius: 'var(--v2-radius-full)',
+        border: '1px solid ' + (isActive ? 'var(--v2-accent)' : 'var(--v2-border)'),
+        background: isActive ? 'var(--v2-accent-subtle)' : 'var(--v2-bg-surface)',
+        color: isActive ? 'var(--v2-accent-text)' : 'var(--v2-text-tertiary)',
+        fontSize: 12,
+        fontFamily: 'var(--v2-font-sans)',
+        fontWeight: 500,
+        cursor: 'pointer',
+        transition: 'all var(--v2-transition-fast)',
+      }}
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
+      </svg>
+      <span>{stepCount} step{stepCount !== 1 ? 's' : ''}</span>
+      <svg
+        width="10"
+        height="10"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        style={{
+          transform: isActive ? 'rotate(180deg)' : 'rotate(0deg)',
+          transition: 'transform var(--v2-transition-fast)',
+        }}
+      >
+        <polyline points="9 18 15 12 9 6" />
+      </svg>
+    </button>
+  );
+}
+
+function AssistantMessage({ turn, isTraceActive, onTraceClick }: {
+  turn: ChatTurn;
+  isTraceActive: boolean;
+  onTraceClick: () => void;
+}) {
   return (
     <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
       <div
@@ -143,32 +194,8 @@ function AssistantMessage({ turn }: { turn: ChatTurn }) {
         </svg>
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 10 }}>
-        {/* Processing steps (collapsible) */}
-        {hasProcessingSteps && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {turn.intent && (
-              <ProcessingStep label="Intent analysis" icon="🎯" badge={turn.generationMode || undefined} badgeVariant="purple">
-                <pre className="v2-code-block" style={{ fontSize: 12 }}>
-                  {JSON.stringify(turn.intent, null, 2)}
-                </pre>
-              </ProcessingStep>
-            )}
-            {turn.nexaqlQuery && (
-              <ProcessingStep label="Generated query" icon="⚡">
-                <pre className="v2-code-block" style={{ fontSize: 12 }}>
-                  {turn.nexaqlQuery}
-                </pre>
-              </ProcessingStep>
-            )}
-            {turn.queryPreview && (
-              <ProcessingStep label="SQL preview" icon="🗄️" badge={turn.adapterType || undefined} badgeVariant="teal">
-                <pre className="v2-code-block" style={{ fontSize: 12 }}>
-                  {turn.queryPreview}
-                </pre>
-              </ProcessingStep>
-            )}
-          </div>
-        )}
+        {/* Thinking pill — click to open trace panel */}
+        <ThinkingPill turn={turn} isActive={isTraceActive} onClick={onTraceClick} />
 
         {/* Summary */}
         {turn.summary && <FormattedMarkdown text={turn.summary} />}
@@ -214,11 +241,21 @@ function AssistantMessage({ turn }: { turn: ChatTurn }) {
   );
 }
 
-export default function ChatMessage({ turn }: { turn: ChatTurn }) {
+interface ChatMessageProps {
+  turn: ChatTurn;
+  isTraceActive: boolean;
+  onTraceClick: () => void;
+}
+
+export default function ChatMessage({ turn, isTraceActive, onTraceClick }: ChatMessageProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <UserMessage text={turn.question} />
-      {turn.loading ? <LoadingIndicator /> : <AssistantMessage turn={turn} />}
+      {turn.loading ? (
+        <LoadingIndicator />
+      ) : (
+        <AssistantMessage turn={turn} isTraceActive={isTraceActive} onTraceClick={onTraceClick} />
+      )}
     </div>
   );
 }

@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback } from 'react';
 import type { ChatTurn } from '../../types';
 import { useDomain } from '../contexts/DomainContext';
 import ChatMessage from '../components/ChatMessage';
+import TracePanel from '../components/TracePanel';
 
 const SUGGESTIONS = [
   'Show me all available data',
@@ -16,8 +17,12 @@ export default function ChatPage() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
+  const [traceTurnId, setTraceTurnId] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  const traceOpen = traceTurnId !== null;
+  const traceTurn = traceTurnId ? turns.find((t) => t.id === traceTurnId) : null;
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -32,6 +37,14 @@ export default function ChatPage() {
       })
       .catch(() => {});
   }, []);
+
+  const handleTraceClick = useCallback((turnId: string) => {
+    if (traceTurnId === turnId) {
+      setTraceTurnId(null);
+    } else {
+      setTraceTurnId(turnId);
+    }
+  }, [traceTurnId]);
 
   const sendMessage = useCallback(
     async (question: string) => {
@@ -170,213 +183,243 @@ export default function ChatPage() {
     <div
       style={{
         display: 'flex',
-        flexDirection: 'column',
         height: '100%',
         background: 'var(--v2-bg-app)',
+        overflow: 'hidden',
       }}
     >
-      {/* Message thread */}
-      <div style={{ flex: 1, overflowY: 'auto' }}>
-        {turns.length === 0 ? (
+      {/* Chat column — full width, content centered when trace closed */}
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          minWidth: 0,
+          overflow: 'hidden',
+        }}
+      >
+        {/* Message thread */}
+        <div style={{ flex: 1, overflowY: 'auto' }}>
+          {turns.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                height: '100%',
+                gap: 24,
+                padding: 32,
+              }}
+            >
+              {apiKeyMissing && (
+                <div
+                  style={{
+                    maxWidth: 480,
+                    width: '100%',
+                    padding: '12px 16px',
+                    borderRadius: 'var(--v2-radius-md)',
+                    background: 'var(--v2-amber-50)',
+                    border: '1px solid var(--v2-amber-100)',
+                    color: 'var(--v2-amber-700)',
+                    fontSize: 13,
+                  }}
+                >
+                  <strong>LLM API key required.</strong> Add one in Settings &gt; API Keys to enable chat.
+                </div>
+              )}
+
+              <div style={{ textAlign: 'center' }}>
+                <div
+                  style={{
+                    width: 48,
+                    height: 48,
+                    borderRadius: 'var(--v2-radius-lg)',
+                    background: 'var(--v2-accent-subtle)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    margin: '0 auto 12px',
+                  }}
+                >
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--v2-accent)" strokeWidth="2">
+                    <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
+                  </svg>
+                </div>
+                <h2 className="v2-heading-lg">Ask anything about your data</h2>
+                <p className="v2-body-sm" style={{ marginTop: 6 }}>
+                  {activeDomain
+                    ? `Querying ${activeDomain} domain`
+                    : 'Natural language queries, powered by your ontology'}
+                </p>
+              </div>
+
+              <div style={{ maxWidth: 480, width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s}
+                    type="button"
+                    onClick={() => sendMessage(s)}
+                    className="v2-btn-secondary"
+                    style={{
+                      width: '100%',
+                      justifyContent: 'flex-start',
+                      padding: '10px 14px',
+                      fontSize: 13,
+                      fontWeight: 400,
+                      textAlign: 'left',
+                    }}
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                maxWidth: traceOpen ? 'none' : 720,
+                margin: traceOpen ? 0 : '0 auto',
+                padding: '20px 24px',
+                transition: 'max-width 0.2s ease, margin 0.2s ease',
+              }}
+            >
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+                {turns.map((turn) => (
+                  <ChatMessage
+                    key={turn.id}
+                    turn={turn}
+                    isTraceActive={traceTurnId === turn.id}
+                    onTraceClick={() => handleTraceClick(turn.id)}
+                  />
+                ))}
+              </div>
+              <div ref={bottomRef} />
+            </div>
+          )}
+        </div>
+
+        {/* Input area */}
+        <div
+          style={{
+            borderTop: '1px solid var(--v2-border)',
+            background: 'var(--v2-bg-app)',
+            flexShrink: 0,
+          }}
+        >
           <div
             style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-              justifyContent: 'center',
-              height: '100%',
-              gap: 24,
-              padding: 32,
+              maxWidth: traceOpen ? 'none' : 720,
+              margin: traceOpen ? 0 : '0 auto',
+              padding: '12px 24px 16px',
+              transition: 'max-width 0.2s ease, margin 0.2s ease',
             }}
           >
-            {/* API key warning */}
-            {apiKeyMissing && (
-              <div
-                style={{
-                  maxWidth: 480,
-                  width: '100%',
-                  padding: '12px 16px',
-                  borderRadius: 'var(--v2-radius-md)',
-                  background: 'var(--v2-amber-50)',
-                  border: '1px solid var(--v2-amber-100)',
-                  color: 'var(--v2-amber-700)',
-                  fontSize: 13,
-                }}
-              >
-                <strong>LLM API key required.</strong> Add one in Settings &gt; API Keys to enable chat.
+            {turns.length > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                <button
+                  type="button"
+                  onClick={() => { setTurns([]); setTraceTurnId(null); }}
+                  className="v2-btn-ghost v2-btn-sm"
+                  style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}
+                >
+                  Clear chat
+                </button>
               </div>
             )}
 
-            {/* Logo + heading */}
-            <div style={{ textAlign: 'center' }}>
-              <div
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                alignItems: 'flex-end',
+                padding: '10px 14px',
+                borderRadius: 'var(--v2-radius-lg)',
+                border: '1px solid var(--v2-border)',
+                background: 'var(--v2-bg-input)',
+                transition: 'border-color var(--v2-transition-fast)',
+              }}
+              onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--v2-border-focus)'; }}
+              onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--v2-border)'; }}
+            >
+              <textarea
+                ref={inputRef}
+                value={input}
+                onChange={handleTextareaInput}
+                onKeyDown={handleKeyDown}
+                placeholder="Ask a question about your data..."
+                rows={1}
                 style={{
-                  width: 48,
-                  height: 48,
-                  borderRadius: 'var(--v2-radius-lg)',
-                  background: 'var(--v2-accent-subtle)',
+                  flex: 1,
+                  resize: 'none',
+                  border: 'none',
+                  outline: 'none',
+                  background: 'transparent',
+                  fontFamily: 'var(--v2-font-sans)',
+                  fontSize: 14,
+                  lineHeight: 1.6,
+                  color: 'var(--v2-text-primary)',
+                  padding: 0,
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => sendMessage(input)}
+                disabled={!input.trim() || loading}
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 'var(--v2-radius-md)',
+                  border: 'none',
+                  cursor: !input.trim() || loading ? 'not-allowed' : 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  margin: '0 auto 12px',
+                  flexShrink: 0,
+                  background: !input.trim() || loading ? 'var(--v2-bg-hover)' : 'var(--v2-accent)',
+                  transition: 'all var(--v2-transition-fast)',
                 }}
               >
-                <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--v2-accent)" strokeWidth="2">
-                  <polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2" />
-                </svg>
-              </div>
-              <h2 className="v2-heading-lg">Ask anything about your data</h2>
-              <p className="v2-body-sm" style={{ marginTop: 6 }}>
-                {activeDomain
-                  ? `Querying ${activeDomain} domain`
-                  : 'Natural language queries, powered by your ontology'}
-              </p>
-            </div>
-
-            {/* Suggestions */}
-            <div style={{ maxWidth: 480, width: '100%', display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {SUGGESTIONS.map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  onClick={() => sendMessage(s)}
-                  className="v2-btn-secondary"
-                  style={{
-                    width: '100%',
-                    justifyContent: 'flex-start',
-                    padding: '10px 14px',
-                    fontSize: 13,
-                    fontWeight: 400,
-                    textAlign: 'left',
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div style={{ maxWidth: 800, margin: '0 auto', padding: '20px 24px' }}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              {turns.map((turn) => (
-                <ChatMessage key={turn.id} turn={turn} />
-              ))}
-            </div>
-            <div ref={bottomRef} />
-          </div>
-        )}
-      </div>
-
-      {/* Input area */}
-      <div
-        style={{
-          borderTop: '1px solid var(--v2-border)',
-          background: 'var(--v2-bg-app)',
-          flexShrink: 0,
-        }}
-      >
-        <div style={{ maxWidth: 800, margin: '0 auto', padding: '12px 24px 16px' }}>
-          {/* Clear chat */}
-          {turns.length > 0 && (
-            <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-              <button
-                type="button"
-                onClick={() => setTurns([])}
-                className="v2-btn-ghost v2-btn-sm"
-                style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}
-              >
-                Clear chat
+                {loading ? (
+                  <div
+                    style={{
+                      width: 14,
+                      height: 14,
+                      borderRadius: '50%',
+                      border: '2px solid var(--v2-text-tertiary)',
+                      borderTopColor: 'transparent',
+                      animation: 'v2-spin 0.8s linear infinite',
+                    }}
+                  />
+                ) : (
+                  <svg
+                    width="16"
+                    height="16"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke={!input.trim() ? 'var(--v2-text-tertiary)' : 'white'}
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <line x1="22" y1="2" x2="11" y2="13" />
+                    <polygon points="22 2 15 22 11 13 2 9 22 2" />
+                  </svg>
+                )}
               </button>
             </div>
-          )}
 
-          {/* Input row */}
-          <div
-            style={{
-              display: 'flex',
-              gap: 10,
-              alignItems: 'flex-end',
-              padding: '10px 14px',
-              borderRadius: 'var(--v2-radius-lg)',
-              border: '1px solid var(--v2-border)',
-              background: 'var(--v2-bg-input)',
-              transition: 'border-color var(--v2-transition-fast)',
-            }}
-            onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--v2-border-focus)'; }}
-            onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--v2-border)'; }}
-          >
-            <textarea
-              ref={inputRef}
-              value={input}
-              onChange={handleTextareaInput}
-              onKeyDown={handleKeyDown}
-              placeholder="Ask a question about your data..."
-              rows={1}
-              style={{
-                flex: 1,
-                resize: 'none',
-                border: 'none',
-                outline: 'none',
-                background: 'transparent',
-                fontFamily: 'var(--v2-font-sans)',
-                fontSize: 14,
-                lineHeight: 1.6,
-                color: 'var(--v2-text-primary)',
-                padding: 0,
-              }}
-            />
-            <button
-              type="button"
-              onClick={() => sendMessage(input)}
-              disabled={!input.trim() || loading}
-              style={{
-                width: 32,
-                height: 32,
-                borderRadius: 'var(--v2-radius-md)',
-                border: 'none',
-                cursor: !input.trim() || loading ? 'not-allowed' : 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-                background: !input.trim() || loading ? 'var(--v2-bg-hover)' : 'var(--v2-accent)',
-                transition: 'all var(--v2-transition-fast)',
-              }}
-            >
-              {loading ? (
-                <div
-                  style={{
-                    width: 14,
-                    height: 14,
-                    borderRadius: '50%',
-                    border: '2px solid var(--v2-text-tertiary)',
-                    borderTopColor: 'transparent',
-                    animation: 'v2-spin 0.8s linear infinite',
-                  }}
-                />
-              ) : (
-                <svg
-                  width="16"
-                  height="16"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke={!input.trim() ? 'var(--v2-text-tertiary)' : 'white'}
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="22" y1="2" x2="11" y2="13" />
-                  <polygon points="22 2 15 22 11 13 2 9 22 2" />
-                </svg>
-              )}
-            </button>
+            <p style={{ fontSize: 11, color: 'var(--v2-text-tertiary)', marginTop: 6, textAlign: 'center' }}>
+              Press Enter to send, Shift+Enter for new line
+            </p>
           </div>
-
-          <p style={{ fontSize: 11, color: 'var(--v2-text-tertiary)', marginTop: 6, textAlign: 'center' }}>
-            Press Enter to send, Shift+Enter for new line
-          </p>
         </div>
       </div>
+
+      {/* Trace panel — slides in from right */}
+      {traceOpen && traceTurn && (
+        <TracePanel turn={traceTurn} onClose={() => setTraceTurnId(null)} />
+      )}
     </div>
   );
 }
