@@ -604,12 +604,12 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
         )}
 
         {!isIdle && !error && rows.length > 0 && tab === 'table' && (
-          <div>
+          <div style={{ overflowX: 'auto' }}>
             <table className="v2-table">
               <thead>
                 <tr>
                   {columns.map((col) => (
-                    <th key={col.name} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11, maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={col.name.replace(/__/g, '.')}>
+                    <th key={col.name} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={col.name.replace(/__/g, '.')}>
                       {col.name.replace(/__/g, '.')}
                     </th>
                   ))}
@@ -624,7 +624,7 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
                       return (
                         <td key={col.name} style={{
                           fontFamily: 'var(--v2-font-mono)', fontSize: 12,
-                          maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
+                          overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
                           color: cellColor(col.type, val),
                           fontStyle: val === null || val === undefined ? 'italic' : 'normal',
                         }} title={text}>
@@ -656,7 +656,7 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
 
         {!isIdle && !error && rows.length > 0 && tab === 'json' && (
           <pre
-            style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, lineHeight: 1.6, padding: 14, margin: 0, tabSize: 2 }}
+            style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, lineHeight: 1.6, padding: 14, margin: 0, tabSize: 2, overflowX: 'auto' }}
             dangerouslySetInnerHTML={{ __html: highlightJson(jsonText) }}
           />
         )}
@@ -975,7 +975,7 @@ export default function PlaygroundPage() {
   const examples = ontology?.examples ?? [];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--v2-bg-app)', overflow: 'hidden' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minWidth: 0, height: '100%', background: 'var(--v2-bg-app)', overflow: 'hidden' }}>
       {/* Toolbar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
@@ -1163,7 +1163,7 @@ export default function PlaygroundPage() {
       {/* Two-pane split: Editor | Results */}
       <div id="pg-split-container" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Left: Query Editor */}
-        <div style={{ width: `${editorWidth}%`, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
+        <div style={{ width: `${editorWidth}%`, minWidth: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Suspense fallback={
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
@@ -1203,7 +1203,7 @@ export default function PlaygroundPage() {
         </div>
 
         {/* Right: Results */}
-        <div style={{ flex: 1, overflow: 'hidden' }}>
+        <div style={{ width: `${100 - editorWidth}%`, minWidth: 0, overflow: 'hidden' }}>
           <V2ResultsPanel result={result} isRunning={isRunning} isIdle={isIdle} />
         </div>
       </div>
