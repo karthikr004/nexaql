@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 
 interface Toast {
   message: string;
@@ -9,7 +9,7 @@ const STEPS = [
   { key: 'connector', label: 'Connect Database', icon: 'db' },
   { key: 'llm', label: 'Configure LLM', icon: 'key' },
   { key: 'domain', label: 'Define Domain', icon: 'schema' },
-  { key: 'test', label: 'Test Query', icon: 'play' },
+  { key: 'test', label: 'Try It Out', icon: 'chat' },
 ] as const;
 
 const PROVIDER_OPTIONS = [
@@ -39,6 +39,8 @@ function StepIcon({ step, size = 18 }: { step: string; size?: number }) {
       return <svg {...props}><rect width="18" height="18" x="3" y="3" rx="2" /><path d="M3 9h18" /><path d="M9 21V9" /></svg>;
     case 'play':
       return <svg {...props}><polygon points="5 3 19 12 5 21 5 3" /></svg>;
+    case 'chat':
+      return <svg {...props}><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" /></svg>;
     case 'check':
       return <svg {...props}><polyline points="20 6 9 17 4 12" /></svg>;
     default:
@@ -408,145 +410,254 @@ function DomainStep({ connectorName, onComplete, showToast }: { connectorName: s
   );
 }
 
-// ── Step 4: Test Query ──────────────────────────────────────────────────────
+// ── Step 4: Try It Out (Agent Chat) ─────────────────────────────────────────
 
-function TestStep({ domain }: { domain: string }) {
-  const [query, setQuery] = useState('');
-  const [running, setRunning] = useState(false);
-  const [result, setResult] = useState<{ rows: Record<string, unknown>[]; columns: string[]; error?: string } | null>(null);
-  const [nodes, setNodes] = useState<string[]>([]);
+interface ChatResult {
+  question: string;
+  summary: string;
+  rows: Record<string, unknown>[];
+  columns: string[];
+  rowCount: number;
+  nexaqlQuery: string | null;
+  error: string | null;
+  loading: boolean;
+}
+
+const SUGGESTIONS = [
+  'Show me all available data',
+  'What tables and fields are available?',
+  'Show me the first 10 records',
+  'Summarize the key metrics',
+];
+
+function TryItStep({ domain }: { domain: string }) {
+  const [input, setInput] = useState('');
+  const [messages, setMessages] = useState<ChatResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    fetch(`/api/admin/ontology?domain=${encodeURIComponent(domain)}`)
-      .then(r => r.ok ? r.json() : null)
-      .then(d => {
-        if (d?.nodes) {
-          const names: string[] = [];
-          for (const key of Object.keys(d.nodes)) names.push(key);
-          setNodes(names);
-          if (names.length > 0) {
-            setQuery(`query {\n  ${names[0]} @limit(5) {\n    *\n  }\n}`);
-          }
-        }
-      })
-      .catch(() => {});
-  }, [domain]);
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [messages]);
 
-  const run = async () => {
-    if (!query.trim()) return;
-    setRunning(true);
-    setResult(null);
+  const send = async (question: string) => {
+    if (!question.trim() || loading) return;
+    setInput('');
+
+    const placeholder: ChatResult = {
+      question,
+      summary: '',
+      rows: [],
+      columns: [],
+      rowCount: 0,
+      nexaqlQuery: null,
+      error: null,
+      loading: true,
+    };
+    setMessages(prev => [...prev, placeholder]);
+    setLoading(true);
+
+    const history = messages.flatMap(m => [
+      { role: 'user' as const, content: m.question },
+      { role: 'assistant' as const, content: m.summary },
+    ]);
+
     try {
-      const res = await fetch('/api/execute', {
+      const res = await fetch('/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          query: query.trim(),
-          domain,
-          context: { user_id: 'admin', roles: ['admin'], attributes: {} },
-        }),
+        body: JSON.stringify({ question, history }),
       });
-      const body = await res.json();
-      if (!res.ok || body.error) {
-        setResult({ rows: [], columns: [], error: body.error || 'Query failed' });
-      } else {
-        const cols: string[] = [];
-        if (body.rows?.length) {
-          for (const k of Object.keys(body.rows[0])) cols.push(k);
-        }
-        setResult({ rows: body.rows ?? [], columns: cols });
+      const data = await res.json();
+
+      const cols: string[] = [];
+      if (data.rows?.length) {
+        for (const k of Object.keys(data.rows[0])) cols.push(k);
       }
+
+      const completed: ChatResult = {
+        question,
+        summary: data.summary ?? data.explanation ?? '',
+        rows: data.rows ?? [],
+        columns: data.columns ?? cols,
+        rowCount: data.rowCount ?? 0,
+        nexaqlQuery: data.nexaqlQuery ?? null,
+        error: data.error ?? null,
+        loading: false,
+      };
+      setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? completed : m));
     } catch {
-      setResult({ rows: [], columns: [], error: 'Network error' });
+      const errResult: ChatResult = {
+        question,
+        summary: '',
+        rows: [],
+        columns: [],
+        rowCount: 0,
+        nexaqlQuery: null,
+        error: 'Network error — check that the server is running.',
+        loading: false,
+      };
+      setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? errResult : m));
     } finally {
-      setRunning(false);
+      setLoading(false);
     }
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p className="v2-body-sm" style={{ color: 'var(--v2-text-secondary)', margin: 0 }}>
-        Run a quick query to verify everything is working. Domain: <strong>{domain}</strong>
+        Ask a question in plain English — NexaQL translates it to a query and returns data from your <strong>{domain}</strong> domain.
       </p>
 
-      {nodes.length > 0 && (
+      {messages.length === 0 && (
         <div>
-          <div className="v2-label" style={{ marginBottom: 6 }}>Available nodes</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {nodes.map(n => (
-              <span key={n} className="v2-badge v2-badge-gray" style={{ fontSize: 11 }}>{n}</span>
+          <div className="v2-label" style={{ marginBottom: 8 }}>Try asking</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {SUGGESTIONS.map(s => (
+              <button
+                key={s}
+                type="button"
+                onClick={() => send(s)}
+                style={{
+                  background: 'var(--v2-bg-hover)',
+                  border: '1px solid var(--v2-border)',
+                  borderRadius: 'var(--v2-radius-md)',
+                  padding: '8px 14px',
+                  fontSize: 13,
+                  color: 'var(--v2-text-secondary)',
+                  cursor: 'pointer',
+                }}
+                onMouseEnter={e => { e.currentTarget.style.borderColor = 'var(--v2-accent)'; e.currentTarget.style.color = 'var(--v2-accent)'; }}
+                onMouseLeave={e => { e.currentTarget.style.borderColor = 'var(--v2-border)'; e.currentTarget.style.color = 'var(--v2-text-secondary)'; }}
+              >
+                {s}
+              </button>
             ))}
           </div>
         </div>
       )}
 
-      <div>
-        <label className="v2-label">Query</label>
-        <textarea
-          className="v2-input"
-          value={query}
-          onChange={e => setQuery(e.target.value)}
-          rows={5}
-          style={{ marginTop: 4, width: '100%', fontFamily: 'var(--v2-font-mono)', fontSize: 12, resize: 'vertical' }}
-        />
+      {/* Chat messages */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 16, maxHeight: 400, overflowY: 'auto' }}>
+        {messages.map((msg, i) => (
+          <div key={i} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {/* User question */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+              <div style={{
+                background: 'var(--v2-accent)', color: '#fff',
+                padding: '8px 14px', borderRadius: '16px 16px 4px 16px',
+                fontSize: 13, maxWidth: '80%',
+              }}>
+                {msg.question}
+              </div>
+            </div>
+
+            {/* Assistant response */}
+            <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
+              <div style={{
+                background: 'var(--v2-bg-hover)',
+                padding: '12px 16px', borderRadius: '16px 16px 16px 4px',
+                fontSize: 13, maxWidth: '100%', width: '100%',
+                color: 'var(--v2-text-primary)',
+              }}>
+                {msg.loading && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--v2-text-tertiary)' }}>
+                    <div style={{
+                      width: 14, height: 14, borderRadius: '50%',
+                      border: '2px solid var(--v2-accent)', borderTopColor: 'transparent',
+                      animation: 'v2-spin 0.8s linear infinite',
+                    }} />
+                    Thinking...
+                  </div>
+                )}
+
+                {!msg.loading && msg.error && (
+                  <div style={{ color: 'var(--v2-red-600)', fontSize: 13 }}>{msg.error}</div>
+                )}
+
+                {!msg.loading && !msg.error && (
+                  <>
+                    {msg.summary && (
+                      <div style={{ marginBottom: msg.rows.length > 0 ? 12 : 0, lineHeight: 1.6 }}>{msg.summary}</div>
+                    )}
+
+                    {msg.nexaqlQuery && (
+                      <pre className="v2-code-block" style={{ margin: msg.rows.length > 0 ? '0 0 12px' : 0, fontSize: 11 }}>
+                        {msg.nexaqlQuery}
+                      </pre>
+                    )}
+
+                    {msg.rows.length > 0 && (
+                      <div style={{ overflowX: 'auto' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--v2-teal-500)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                            <polyline points="20 6 9 17 4 12" />
+                          </svg>
+                          <span style={{ fontSize: 11, color: 'var(--v2-teal-500)', fontWeight: 500 }}>
+                            {msg.rowCount} row{msg.rowCount === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <table className="v2-table" style={{ fontSize: 12 }}>
+                          <thead>
+                            <tr>
+                              {msg.columns.map(c => (
+                                <th key={c} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 10 }}>{c.replace(/__/g, '.')}</th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {msg.rows.slice(0, 5).map((row, ri) => (
+                              <tr key={ri}>
+                                {msg.columns.map(c => (
+                                  <td key={c} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11 }}>
+                                    {row[c] === null || row[c] === undefined
+                                      ? <span style={{ color: 'var(--v2-text-tertiary)', fontStyle: 'italic' }}>null</span>
+                                      : String(row[c])}
+                                  </td>
+                                ))}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                        {msg.rows.length > 5 && (
+                          <div style={{ fontSize: 11, color: 'var(--v2-text-tertiary)', marginTop: 4 }}>
+                            ...and {msg.rows.length - 5} more rows
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        ))}
+        <div ref={bottomRef} />
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      {/* Input */}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <input
+          className="v2-input"
+          placeholder="Ask a question about your data..."
+          value={input}
+          onChange={e => setInput(e.target.value)}
+          onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(input); } }}
+          disabled={loading}
+          style={{ flex: 1 }}
+        />
         <button
           type="button"
           className="v2-btn v2-btn-primary"
-          disabled={!query.trim() || running}
-          onClick={run}
-          style={{ opacity: query.trim() && !running ? 1 : 0.5 }}
+          disabled={!input.trim() || loading}
+          onClick={() => send(input)}
+          style={{ opacity: input.trim() && !loading ? 1 : 0.5, flexShrink: 0 }}
         >
-          {running ? 'Running...' : 'Run query'}
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" />
+          </svg>
         </button>
       </div>
-
-      {result && result.error && (
-        <div className="v2-card-flat" style={{ padding: 12, border: '1px solid var(--v2-red-500)', background: 'var(--v2-red-50)' }}>
-          <pre style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, color: 'var(--v2-red-600)', margin: 0, whiteSpace: 'pre-wrap' }}>{result.error}</pre>
-        </div>
-      )}
-
-      {result && !result.error && result.rows.length > 0 && (
-        <div style={{ overflowX: 'auto' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--v2-teal-500)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <polyline points="20 6 9 17 4 12" />
-            </svg>
-            <span className="v2-body-sm" style={{ color: 'var(--v2-teal-500)' }}>
-              {result.rows.length} row{result.rows.length === 1 ? '' : 's'} returned
-            </span>
-          </div>
-          <table className="v2-table">
-            <thead>
-              <tr>
-                {result.columns.map(c => (
-                  <th key={c} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11 }}>{c.replace(/__/g, '.')}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {result.rows.slice(0, 5).map((row, i) => (
-                <tr key={i}>
-                  {result.columns.map(c => (
-                    <td key={c} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12 }}>
-                      {row[c] === null ? <span style={{ color: 'var(--v2-text-tertiary)', fontStyle: 'italic' }}>null</span> : String(row[c])}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-
-      {result && !result.error && result.rows.length === 0 && (
-        <div className="v2-card-flat" style={{ padding: 12, textAlign: 'center' }}>
-          <span className="v2-body-sm" style={{ color: 'var(--v2-text-tertiary)' }}>No rows returned</span>
-        </div>
-      )}
     </div>
   );
 }
@@ -669,7 +780,7 @@ export default function SetupPage() {
               />
             )}
             {currentStep === 3 && (
-              <TestStep domain={domainName} />
+              <TryItStep domain={domainName} />
             )}
           </div>
 
