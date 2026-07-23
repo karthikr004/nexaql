@@ -1163,7 +1163,7 @@ export default function PlaygroundPage() {
       {/* Two-pane split: Editor | Results */}
       <div id="pg-split-container" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         {/* Left: Query Editor */}
-        <div style={{ width: `${editorWidth}%`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <div style={{ width: `${editorWidth}%`, display: 'flex', flexDirection: 'column', overflow: 'hidden', position: 'relative' }}>
           <div style={{ flex: 1, overflow: 'hidden' }}>
             <Suspense fallback={
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
@@ -1191,15 +1191,16 @@ export default function PlaygroundPage() {
               onClose={() => setShowSQL(false)}
             />
           )}
-        </div>
 
-        {/* Resize handle */}
-        <div
-          style={{ width: 4, cursor: 'col-resize', background: 'transparent', flexShrink: 0 }}
-          onMouseDown={startDrag}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--v2-accent-subtle)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        />
+          {/* Resize handle (invisible, sits on the right edge) */}
+          <div
+            style={{
+              position: 'absolute', top: 0, right: -2, bottom: 0, width: 4,
+              cursor: 'col-resize', zIndex: 10,
+            }}
+            onMouseDown={startDrag}
+          />
+        </div>
 
         {/* Right: Results */}
         <div style={{ flex: 1, overflow: 'hidden' }}>
