@@ -11,7 +11,7 @@ import type {
   NodeShape,
 } from '../../types';
 
-const QueryEditor = lazy(() => import('../../components/QueryEditor'));
+const V2QueryEditor = lazy(() => import('../components/V2QueryEditor'));
 
 const HISTORY_KEY = 'nexaql-v2-query-history';
 const MAX_HISTORY = 50;
@@ -193,7 +193,7 @@ function cellColor(type: string, value: unknown): string {
   return 'var(--v2-text-primary)';
 }
 
-// ── Schema Explorer ─────────────────────────────────────────────────────────
+// ── Schema Explorer (used in drawer) ────────────────────────────────────────
 
 type SchemaTab = 'fields' | 'edges' | 'filters';
 
@@ -211,7 +211,6 @@ function V2SchemaExplorer({ nodes, onInsert }: { nodes: NodeInfo[]; onInsert: (t
   if (node) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-        {/* Back + node name */}
         <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0 }}>
           <button
             type="button"
@@ -233,7 +232,6 @@ function V2SchemaExplorer({ nodes, onInsert }: { nodes: NodeInfo[]; onInsert: (t
           </div>
         </div>
 
-        {/* Tabs */}
         <div style={{ display: 'flex', gap: 0, borderBottom: '1px solid var(--v2-border)', flexShrink: 0, padding: '0 14px' }}>
           {(['fields', 'edges', 'filters'] as const).map((t) => {
             const count = t === 'fields' ? node.fields.length : t === 'edges' ? node.edges.length : node.specialFilters.length;
@@ -257,7 +255,6 @@ function V2SchemaExplorer({ nodes, onInsert }: { nodes: NodeInfo[]; onInsert: (t
           })}
         </div>
 
-        {/* Tab content */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {activeTab === 'fields' && node.fields.map((f) => (
             <button
@@ -353,7 +350,6 @@ function V2SchemaExplorer({ nodes, onInsert }: { nodes: NodeInfo[]; onInsert: (t
           )}
         </div>
 
-        {/* Insert template button */}
         <div style={{ padding: '8px 14px', borderTop: '1px solid var(--v2-border)', flexShrink: 0 }}>
           <button
             type="button"
@@ -373,7 +369,6 @@ function V2SchemaExplorer({ nodes, onInsert }: { nodes: NodeInfo[]; onInsert: (t
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Search */}
       <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0 }}>
         <input
           type="text"
@@ -384,8 +379,6 @@ function V2SchemaExplorer({ nodes, onInsert }: { nodes: NodeInfo[]; onInsert: (t
           style={{ fontSize: 12, padding: '6px 10px' }}
         />
       </div>
-
-      {/* Node list */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {filtered.length === 0 && (
           <div style={{ padding: '16px 14px', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>No nodes match "{search}"</div>
@@ -523,10 +516,9 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      {/* Header */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 14px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0,
+        padding: '8px 16px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="v2-label">Results</span>
@@ -577,7 +569,6 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
         </div>
       </div>
 
-      {/* Warnings */}
       {warnings.length > 0 && (
         <div style={{ padding: '6px 14px', borderBottom: '1px solid var(--v2-border)', background: 'var(--v2-amber-50)', flexShrink: 0 }}>
           {warnings.map((w, i) => (
@@ -588,7 +579,6 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
         </div>
       )}
 
-      {/* Content */}
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {isIdle && (
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '100%', gap: 8, color: 'var(--v2-text-tertiary)' }}>
@@ -613,7 +603,6 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
           </div>
         )}
 
-        {/* Table view */}
         {!isIdle && !error && rows.length > 0 && tab === 'table' && (
           <div>
             <table className="v2-table">
@@ -665,7 +654,6 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
           </div>
         )}
 
-        {/* JSON view */}
         {!isIdle && !error && rows.length > 0 && tab === 'json' && (
           <pre
             style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, lineHeight: 1.6, padding: 14, margin: 0, tabSize: 2 }}
@@ -674,7 +662,6 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
         )}
       </div>
 
-      {/* Footer */}
       {rows.length > 0 && (
         <div style={{
           display: 'flex', alignItems: 'center', gap: 12, padding: '4px 14px',
@@ -692,7 +679,7 @@ function V2ResultsPanel({ result, isRunning, isIdle }: { result: ExecuteResult |
   );
 }
 
-// ── SQL Preview Panel ───────────────────────────────────────────────────────
+// ── SQL Preview (inline collapsible) ────────────────────────────────────────
 
 const ADAPTER_LABELS: Record<string, { label: string; color: string }> = {
   postgresql: { label: 'PostgreSQL', color: 'var(--v2-teal-500)' },
@@ -701,7 +688,12 @@ const ADAPTER_LABELS: Record<string, { label: string; color: string }> = {
   rest: { label: 'REST API', color: 'var(--v2-purple-400)' },
 };
 
-function V2SQLPreview({ queryPreview, adapterType, isLoading }: { queryPreview: string | null; adapterType: string | null; isLoading: boolean }) {
+function V2SQLPreview({ queryPreview, adapterType, isLoading, onClose }: {
+  queryPreview: string | null;
+  adapterType: string | null;
+  isLoading: boolean;
+  onClose: () => void;
+}) {
   const [copied, setCopied] = useState(false);
 
   const isREST = adapterType === 'rest';
@@ -717,22 +709,40 @@ function V2SQLPreview({ queryPreview, adapterType, isLoading }: { queryPreview: 
   };
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
+    <div style={{
+      borderTop: '1px solid var(--v2-border)',
+      background: 'var(--v2-bg-surface)',
+      maxHeight: 200,
+      display: 'flex',
+      flexDirection: 'column',
+    }}>
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        padding: '6px 14px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0,
+        padding: '6px 16px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0,
       }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <span className="v2-label">{isREST ? 'Request Preview' : 'SQL Preview'}</span>
           <span className="v2-badge v2-badge-gray" style={{ fontSize: 10, color: meta.color }}>{meta.label}</span>
         </div>
-        {queryPreview && (
-          <button type="button" onClick={copy} className="v2-btn v2-btn-ghost v2-btn-sm" style={{ fontSize: 10, color: copied ? 'var(--v2-teal-500)' : undefined }}>
-            {copied ? 'Copied' : 'Copy'}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {queryPreview && (
+            <button type="button" onClick={copy} className="v2-btn v2-btn-ghost v2-btn-sm" style={{ fontSize: 10, color: copied ? 'var(--v2-teal-500)' : undefined }}>
+              {copied ? 'Copied' : 'Copy'}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--v2-text-tertiary)', padding: '2px', display: 'flex' }}
+            title="Close SQL Preview"
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
           </button>
-        )}
+        </div>
       </div>
-      <div style={{ flex: 1, overflowY: 'auto', padding: 14 }}>
+      <div style={{ flex: 1, overflowY: 'auto', padding: '8px 16px' }}>
         {isLoading && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
             <div style={{
@@ -744,18 +754,65 @@ function V2SQLPreview({ queryPreview, adapterType, isLoading }: { queryPreview: 
           </div>
         )}
         {!isLoading && !queryPreview && (
-          <div style={{ textAlign: 'center', marginTop: 32, fontFamily: 'var(--v2-font-mono)', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
+          <div style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
             {isREST ? 'Write a REST query to see the request' : 'Write a query to see the generated SQL'}
           </div>
         )}
         {!isLoading && highlighted && (
           <pre
-            style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, lineHeight: 1.6, whiteSpace: 'pre-wrap', margin: 0, color: 'var(--v2-text-primary)' }}
+            style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 12, lineHeight: 1.5, whiteSpace: 'pre-wrap', margin: 0, color: 'var(--v2-text-primary)' }}
             dangerouslySetInnerHTML={{ __html: highlighted }}
           />
         )}
       </div>
     </div>
+  );
+}
+
+// ── Slide-over Drawer ───────────────────────────────────────────────────────
+
+function Drawer({ open, onClose, title, children }: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  children: React.ReactNode;
+}) {
+  if (!open) return null;
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.2)', zIndex: 40,
+        }}
+      />
+      <div style={{
+        position: 'fixed', top: 0, left: 56, bottom: 0, width: 340,
+        background: 'var(--v2-bg-surface)', borderRight: '1px solid var(--v2-border)',
+        zIndex: 50, display: 'flex', flexDirection: 'column',
+        boxShadow: '4px 0 24px rgba(0,0,0,0.12)',
+      }}>
+        <div style={{
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          padding: '12px 16px', borderBottom: '1px solid var(--v2-border)', flexShrink: 0,
+        }}>
+          <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--v2-text-primary)' }}>{title}</span>
+          <button
+            type="button"
+            onClick={onClose}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--v2-text-tertiary)', padding: '2px', display: 'flex' }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          {children}
+        </div>
+      </div>
+    </>
   );
 }
 
@@ -774,14 +831,15 @@ export default function PlaygroundPage() {
   const [isRunning, setIsRunning] = useState(false);
   const [isIdle, setIsIdle] = useState(true);
   const [activeRole, setActiveRole] = useState('anonymous');
-  const [leftView, setLeftView] = useState<'schema' | 'history'>('schema');
   const [history, setHistory] = useState<HistoryEntry[]>([]);
 
-  // Panel widths (percentages)
-  const [leftWidth, setLeftWidth] = useState(22);
-  const [rightWidth, setRightWidth] = useState(28);
-  const [resultsH, setResultsH] = useState(40);
-  const dragRef = useRef<{ type: string; startX: number; startVal: number } | null>(null);
+  // Drawer / panel state
+  const [drawerOpen, setDrawerOpen] = useState<'schema' | 'history' | null>(null);
+  const [showSQL, setShowSQL] = useState(false);
+
+  // Horizontal split: editor width %
+  const [editorWidth, setEditorWidth] = useState(50);
+  const dragRef = useRef<{ startX: number; startVal: number } | null>(null);
 
   useEffect(() => { setHistory(loadHistory()); }, []);
 
@@ -894,14 +952,16 @@ export default function PlaygroundPage() {
     }
   }, [query, isRunning, userContextHeaders, addToHistory]);
 
-  const startHDrag = (type: 'left' | 'right', e: React.MouseEvent) => {
+  const startDrag = (e: React.MouseEvent) => {
     e.preventDefault();
-    dragRef.current = { type, startX: e.clientX, startVal: type === 'left' ? leftWidth : rightWidth };
+    dragRef.current = { startX: e.clientX, startVal: editorWidth };
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current) return;
-      const delta = ((ev.clientX - dragRef.current.startX) / window.innerWidth) * 100;
-      if (dragRef.current.type === 'left') setLeftWidth(Math.min(35, Math.max(15, dragRef.current.startVal + delta)));
-      else setRightWidth(Math.min(40, Math.max(18, dragRef.current.startVal - delta)));
+      const containerEl = document.getElementById('pg-split-container');
+      if (!containerEl) return;
+      const rect = containerEl.getBoundingClientRect();
+      const delta = ((ev.clientX - dragRef.current.startX) / rect.width) * 100;
+      setEditorWidth(Math.min(70, Math.max(30, dragRef.current.startVal + delta)));
     };
     const onUp = () => {
       dragRef.current = null;
@@ -912,46 +972,111 @@ export default function PlaygroundPage() {
     window.addEventListener('mouseup', onUp);
   };
 
-  const startVDrag = (e: React.MouseEvent) => {
-    e.preventDefault();
-    const startY = e.clientY;
-    const startH = resultsH;
-    const onMove = (ev: MouseEvent) => {
-      const delta = -((ev.clientY - startY) / window.innerHeight) * 100;
-      setResultsH(Math.min(70, Math.max(15, startH + delta)));
-    };
-    const onUp = () => {
-      window.removeEventListener('mousemove', onMove);
-      window.removeEventListener('mouseup', onUp);
-    };
-    window.addEventListener('mousemove', onMove);
-    window.addEventListener('mouseup', onUp);
-  };
-
-  const centerWidth = 100 - leftWidth - rightWidth;
+  const examples = ontology?.examples ?? [];
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: 'var(--v2-bg-app)', overflow: 'hidden' }}>
-      {/* Top toolbar */}
+      {/* Toolbar */}
       <div style={{
         display: 'flex', alignItems: 'center', justifyContent: 'space-between',
         padding: '8px 16px', borderBottom: '1px solid var(--v2-border)',
-        background: 'var(--v2-bg-surface)', flexShrink: 0,
+        background: 'var(--v2-bg-surface)', flexShrink: 0, gap: 12,
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <span className="v2-heading-sm">Query Playground</span>
+        {/* Left: title + actions */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <span className="v2-heading-sm">Playground</span>
           {activeDomain && <span className="v2-badge v2-badge-purple">{activeDomain}</span>}
+
+          {/* Divider */}
+          <div style={{ width: 1, height: 20, background: 'var(--v2-border)', margin: '0 2px' }} />
+
+          {/* Schema drawer toggle */}
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(drawerOpen === 'schema' ? null : 'schema')}
+            title="Schema explorer"
+            style={{
+              background: drawerOpen === 'schema' ? 'var(--v2-accent-subtle)' : 'none',
+              border: '1px solid transparent',
+              borderColor: drawerOpen === 'schema' ? 'var(--v2-accent)' : 'transparent',
+              borderRadius: 'var(--v2-radius-sm)',
+              cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4,
+              color: drawerOpen === 'schema' ? 'var(--v2-accent)' : 'var(--v2-text-secondary)',
+              fontSize: 12, fontWeight: 500,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <ellipse cx="12" cy="5" rx="9" ry="3" />
+              <path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3" />
+              <path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5" />
+            </svg>
+            Schema
+          </button>
+
+          {/* History drawer toggle */}
+          <button
+            type="button"
+            onClick={() => setDrawerOpen(drawerOpen === 'history' ? null : 'history')}
+            title="Query history"
+            style={{
+              background: drawerOpen === 'history' ? 'var(--v2-accent-subtle)' : 'none',
+              border: '1px solid transparent',
+              borderColor: drawerOpen === 'history' ? 'var(--v2-accent)' : 'transparent',
+              borderRadius: 'var(--v2-radius-sm)',
+              cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4,
+              color: drawerOpen === 'history' ? 'var(--v2-accent)' : 'var(--v2-text-secondary)',
+              fontSize: 12, fontWeight: 500,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" /><polyline points="12 6 12 12 16 14" />
+            </svg>
+            History
+            {history.length > 0 && (
+              <span style={{
+                background: 'var(--v2-accent)', color: 'white', borderRadius: 999,
+                fontSize: 9, fontWeight: 600, padding: '1px 5px', minWidth: 16, textAlign: 'center',
+              }}>
+                {history.length}
+              </span>
+            )}
+          </button>
+
+          {/* SQL preview toggle */}
+          <button
+            type="button"
+            onClick={() => setShowSQL((v) => !v)}
+            title="Toggle SQL preview"
+            style={{
+              background: showSQL ? 'var(--v2-accent-subtle)' : 'none',
+              border: '1px solid transparent',
+              borderColor: showSQL ? 'var(--v2-accent)' : 'transparent',
+              borderRadius: 'var(--v2-radius-sm)',
+              cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center', gap: 4,
+              color: showSQL ? 'var(--v2-accent)' : 'var(--v2-text-secondary)',
+              fontSize: 12, fontWeight: 500,
+            }}
+          >
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <polyline points="16 18 22 12 16 6" /><polyline points="8 6 2 12 8 18" />
+            </svg>
+            SQL
+          </button>
+
+          {/* Validation status */}
           {validLoaded && (
             validation.valid
-              ? <span style={{ fontSize: 11, color: 'var(--v2-teal-500)', display: 'flex', alignItems: 'center', gap: 4 }}>
+              ? <span style={{ fontSize: 11, color: 'var(--v2-teal-500)', display: 'flex', alignItems: 'center', gap: 4, marginLeft: 4 }}>
                   <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
                   Valid
                 </span>
-              : <span style={{ fontSize: 11, color: 'var(--v2-red-500)', maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {validation.errors[0]?.slice(0, 60)}
+              : <span style={{ fontSize: 11, color: 'var(--v2-red-500)', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginLeft: 4 }}>
+                  {validation.errors[0]?.slice(0, 50)}
                 </span>
           )}
         </div>
+
+        {/* Right: role + run */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}>Role:</span>
@@ -992,113 +1117,129 @@ export default function PlaygroundPage() {
         </div>
       </div>
 
-      {/* Main three-panel layout */}
-      <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
-        {/* Left panel: Schema / History */}
-        <div style={{ width: `${leftWidth}%`, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--v2-border)', flexShrink: 0 }}>
-          <div style={{ display: 'flex', borderBottom: '1px solid var(--v2-border)', flexShrink: 0 }}>
-            {(['schema', 'history'] as const).map((v) => (
-              <button
-                key={v}
-                type="button"
-                onClick={() => setLeftView(v)}
-                style={{
-                  flex: 1, background: 'none', border: 'none', cursor: 'pointer',
-                  padding: '8px 0', fontSize: 11, fontWeight: 500, textTransform: 'uppercase', letterSpacing: '0.04em',
-                  color: leftView === v ? 'var(--v2-accent)' : 'var(--v2-text-tertiary)',
-                  borderBottom: leftView === v ? '2px solid var(--v2-accent)' : '2px solid transparent',
-                }}
-              >
-                {v === 'schema' ? 'Schema' : 'History'}
-                {v === 'history' && history.length > 0 && (
-                  <span style={{ marginLeft: 4, opacity: 0.6 }}>{history.length}</span>
-                )}
-              </button>
-            ))}
-          </div>
-          <div style={{ flex: 1, overflow: 'hidden' }}>
-            {leftView === 'schema' && ontology ? (
-              <V2SchemaExplorer nodes={ontology.nodes} onInsert={(text) => setInsertText(text)} />
-            ) : leftView === 'schema' ? (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
-                Loading schema...
-              </div>
-            ) : (
-              <V2HistoryPanel
-                history={history}
-                onLoad={(q) => { setQuery(q); setLeftView('schema'); }}
-                onDelete={(id) => {
-                  setHistory((prev) => {
-                    const next = prev.filter((h) => h.id !== id);
-                    saveHistory(next);
-                    return next;
-                  });
-                }}
-                onClear={() => { setHistory([]); saveHistory([]); }}
-              />
-            )}
-          </div>
+      {/* Examples bar */}
+      {examples.length > 0 && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: 8,
+          padding: '6px 16px', borderBottom: '1px solid var(--v2-border)',
+          background: 'var(--v2-bg-app)', flexShrink: 0, overflowX: 'auto',
+        }}>
+          <span style={{ fontSize: 11, color: 'var(--v2-text-tertiary)', flexShrink: 0, fontWeight: 500 }}>Examples</span>
+          {examples.map((ex, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setQuery(ex.query)}
+              style={{
+                background: 'var(--v2-bg-surface)',
+                border: '1px solid var(--v2-border)',
+                borderRadius: 'var(--v2-radius-sm)',
+                padding: '4px 10px',
+                fontSize: 12,
+                fontWeight: 500,
+                color: 'var(--v2-text-secondary)',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.borderColor = 'var(--v2-accent)';
+                e.currentTarget.style.color = 'var(--v2-accent)';
+                e.currentTarget.style.background = 'var(--v2-accent-subtle)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.borderColor = 'var(--v2-border)';
+                e.currentTarget.style.color = 'var(--v2-text-secondary)';
+                e.currentTarget.style.background = 'var(--v2-bg-surface)';
+              }}
+            >
+              {ex.name}
+            </button>
+          ))}
         </div>
+      )}
 
-        {/* Left resize handle */}
-        <div
-          style={{ width: 4, cursor: 'col-resize', background: 'transparent', flexShrink: 0 }}
-          onMouseDown={(e) => startHDrag('left', e)}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--v2-accent-subtle)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-        />
-
-        {/* Center panel: Editor + Results (stacked) */}
-        <div style={{ width: `${centerWidth}%`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <div className="v2-legacy-bridge" style={{ height: `${100 - resultsH}%`, borderBottom: '1px solid var(--v2-border)', overflow: 'hidden' }}>
+      {/* Two-pane split: Editor | Results */}
+      <div id="pg-split-container" style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
+        {/* Left: Query Editor */}
+        <div style={{ width: `${editorWidth}%`, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+          <div style={{ flex: 1, overflow: 'hidden' }}>
             <Suspense fallback={
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
                 Loading editor...
               </div>
             }>
-              <QueryEditor
+              <V2QueryEditor
                 value={query}
                 onChange={setQuery}
                 onRun={runQuery}
                 insertText={insertText}
                 onInsertConsumed={() => setInsertText(undefined)}
                 ontologyNodes={ontology?.nodes ?? []}
-                examples={ontology?.examples}
                 theme={theme}
               />
             </Suspense>
           </div>
 
-          {/* Vertical resize handle */}
-          <div
-            style={{ height: 4, cursor: 'row-resize', background: 'transparent', flexShrink: 0 }}
-            onMouseDown={startVDrag}
-            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--v2-accent-subtle)'; }}
-            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-          />
-
-          <div style={{ height: `${resultsH}%`, overflow: 'hidden' }}>
-            <V2ResultsPanel result={result} isRunning={isRunning} isIdle={isIdle} />
-          </div>
+          {/* SQL Preview (collapsible, below editor) */}
+          {showSQL && (
+            <V2SQLPreview
+              queryPreview={validation.queryPreview ?? result?.queryPreview ?? null}
+              adapterType={validation.adapterType ?? result?.adapterType ?? null}
+              isLoading={isRunning}
+              onClose={() => setShowSQL(false)}
+            />
+          )}
         </div>
 
-        {/* Right resize handle */}
+        {/* Resize handle */}
         <div
           style={{ width: 4, cursor: 'col-resize', background: 'transparent', flexShrink: 0 }}
-          onMouseDown={(e) => startHDrag('right', e)}
+          onMouseDown={startDrag}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--v2-accent-subtle)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         />
 
-        {/* Right panel: SQL Preview */}
-        <div style={{ width: `${rightWidth}%`, borderLeft: '1px solid var(--v2-border)', overflow: 'hidden', flexShrink: 0 }}>
-          <V2SQLPreview
-            queryPreview={validation.queryPreview ?? result?.queryPreview ?? null}
-            adapterType={validation.adapterType ?? result?.adapterType ?? null}
-            isLoading={isRunning}
-          />
+        {/* Right: Results */}
+        <div style={{ flex: 1, overflow: 'hidden' }}>
+          <V2ResultsPanel result={result} isRunning={isRunning} isIdle={isIdle} />
         </div>
       </div>
+
+      {/* Drawers */}
+      <Drawer
+        open={drawerOpen === 'schema'}
+        onClose={() => setDrawerOpen(null)}
+        title="Schema Explorer"
+      >
+        {ontology ? (
+          <V2SchemaExplorer nodes={ontology.nodes} onInsert={(text) => { setInsertText(text); setDrawerOpen(null); }} />
+        ) : (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
+            Loading schema...
+          </div>
+        )}
+      </Drawer>
+
+      <Drawer
+        open={drawerOpen === 'history'}
+        onClose={() => setDrawerOpen(null)}
+        title="Query History"
+      >
+        <V2HistoryPanel
+          history={history}
+          onLoad={(q) => { setQuery(q); setDrawerOpen(null); }}
+          onDelete={(id) => {
+            setHistory((prev) => {
+              const next = prev.filter((h) => h.id !== id);
+              saveHistory(next);
+              return next;
+            });
+          }}
+          onClear={() => { setHistory([]); saveHistory([]); }}
+        />
+      </Drawer>
     </div>
   );
 }
