@@ -131,6 +131,14 @@
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+  font-family: inherit;
+}
+
+.v2-shell input,
+.v2-shell textarea,
+.v2-shell select,
+.v2-shell button {
+  font-family: var(--v2-font-sans);
 }
 
 .v2-shell ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -465,4 +473,106 @@
 .v2-icon-btn:hover {
   background: var(--v2-bg-hover);
   color: var(--v2-text-primary);
+}
+
+/* ── Legacy admin bridge ───────────────────────────────────────────────
+   Maps old admin component CSS variables to v2 tokens so that
+   SchemaDetailView, NodeEditor, RolesEditor, PolicyFunctionsPanel
+   render correctly inside the v2 shell without rewriting them.       */
+
+.v2-legacy-bridge {
+  font-family: var(--v2-font-sans);
+  color: var(--v2-text-primary);
+  -webkit-font-smoothing: antialiased;
+
+  --bg-primary: var(--v2-bg-app);
+  --bg-secondary: var(--v2-bg-surface);
+  --bg-elevated: var(--v2-bg-elevated);
+  --bg-hover: var(--v2-bg-hover);
+  --bg-input: var(--v2-bg-input);
+
+  --border: var(--v2-border);
+  --border-focus: var(--v2-border-focus);
+
+  --text-primary: var(--v2-text-primary);
+  --text-secondary: var(--v2-text-secondary);
+  --text-muted: var(--v2-text-tertiary);
+  --text-placeholder: var(--v2-text-tertiary);
+
+  --accent: var(--v2-accent);
+  --accent-hover: var(--v2-accent-hover);
+  --success: var(--v2-teal-500);
+  --error: var(--v2-red-500);
+  --warning: var(--v2-amber-500);
+
+  --badge-green-bg: var(--v2-teal-50);
+  --badge-green-border: var(--v2-teal-500);
+  --badge-green-text: var(--v2-teal-700);
+
+  --badge-amber-bg: var(--v2-amber-50);
+  --badge-amber-border: var(--v2-amber-500);
+  --badge-amber-text: var(--v2-amber-700);
+
+  --badge-red-bg: var(--v2-red-50);
+  --badge-red-border: var(--v2-red-500);
+  --badge-red-text: var(--v2-red-600);
+
+  --badge-pii-bg: var(--v2-amber-50);
+  --badge-pii-border: var(--v2-amber-500);
+  --badge-pii-text: var(--v2-amber-700);
+
+  --type-string: #fb923c;
+  --type-integer: #22d3ee;
+  --type-numeric: #22d3ee;
+  --type-boolean: #c084fc;
+  --type-date: #fbbf24;
+  --type-enum: #4ade80;
+  --field-filterable: var(--v2-teal-500);
+  --field-filter: #fbbf24;
+  --field-edge: #fb923c;
+  --field-special: #f472b6;
+
+  --scrollbar-track: transparent;
+  --scrollbar-thumb: var(--v2-border);
+}
+
+[data-theme="dark"] .v2-legacy-bridge {
+  --badge-green-bg: rgba(20, 184, 166, 0.12);
+  --badge-green-border: var(--v2-teal-500);
+  --badge-green-text: var(--v2-teal-500);
+
+  --badge-amber-bg: rgba(245, 158, 11, 0.12);
+  --badge-amber-border: var(--v2-amber-500);
+  --badge-amber-text: var(--v2-amber-500);
+
+  --badge-red-bg: rgba(239, 68, 68, 0.12);
+  --badge-red-border: var(--v2-red-500);
+  --badge-red-text: var(--v2-red-500);
+
+  --badge-pii-bg: rgba(245, 158, 11, 0.12);
+  --badge-pii-border: var(--v2-amber-500);
+  --badge-pii-text: var(--v2-amber-500);
+}
+
+.v2-legacy-bridge *,
+.v2-legacy-bridge input,
+.v2-legacy-bridge select,
+.v2-legacy-bridge textarea,
+.v2-legacy-bridge button {
+  font-family: var(--v2-font-sans);
+}
+
+.v2-legacy-bridge .font-mono,
+.v2-legacy-bridge [class*="font-mono"] {
+  font-family: var(--v2-font-mono);
+}
+
+/* Hide SchemaDetailView's own header + back bar (redundant with v2 breadcrumb) */
+.v2-legacy-bridge > div > .shrink-0.border-b.px-4.py-2 {
+  display: none;
+}
+
+/* ── Animations ────────────────────────────────────────────────────────── */
+@keyframes v2-spin {
+  to { transform: rotate(360deg); }
 }
