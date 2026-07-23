@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef, lazy, Suspense } from 'react';
 import { useDomain } from '../contexts/DomainContext';
+import { useTheme } from '../../ThemeContext';
 import type {
   OntologySummary,
   NodeInfo,
@@ -762,6 +763,7 @@ function V2SQLPreview({ queryPreview, adapterType, isLoading }: { queryPreview: 
 
 export default function PlaygroundPage() {
   const { activeDomain } = useDomain();
+  const { theme } = useTheme();
   const [query, setQuery] = useState(WELCOME_QUERY);
   const initialQuerySet = useRef(false);
   const [insertText, setInsertText] = useState<string | undefined>(undefined);
@@ -1062,7 +1064,7 @@ export default function PlaygroundPage() {
                 onInsertConsumed={() => setInsertText(undefined)}
                 ontologyNodes={ontology?.nodes ?? []}
                 examples={ontology?.examples}
-                theme="dark"
+                theme={theme}
               />
             </Suspense>
           </div>
