@@ -3,6 +3,7 @@ import { useDomain } from '../contexts/DomainContext';
 import SchemaDetailPage, { TabBar, RolesEditor, AccessFunctionsEditor } from './SchemaDetailPage';
 import Toast from '../components/Toast';
 import GenerateModal from '../components/GenerateModal';
+import EntityGraph from '../components/EntityGraph';
 import type { ToastData } from '../components/Toast';
 import type {
   OntologyData,
@@ -66,6 +67,7 @@ export default function DomainsPage() {
   const [showGenerateModal, setShowGenerateModal] = useState<'new-domain' | 'add-schema' | null>(null);
   const [toast, setToast] = useState<ToastData | null>(null);
   const [domainTab, setDomainTab] = useState<DomainTab>('nodes');
+  const [nodesView, setNodesView] = useState<'table' | 'graph'>('graph');
 
   // Ontology state for the selected domain (merged from all schemas)
   const [ontology, setOntology] = useState<OntologyData | null>(null);
@@ -412,7 +414,41 @@ export default function DomainsPage() {
                   marginBottom: 12,
                 }}
               >
-                <span className="v2-body-sm">{nodeNames.length} node{nodeNames.length !== 1 ? 's' : ''}</span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <span className="v2-body-sm">{nodeNames.length} node{nodeNames.length !== 1 ? 's' : ''}</span>
+                  <div style={{ display: 'flex', border: '1px solid var(--v2-border)', borderRadius: 'var(--v2-radius-sm)', overflow: 'hidden' }}>
+                    <button
+                      type="button"
+                      onClick={() => setNodesView('table')}
+                      title="Table view"
+                      style={{
+                        background: nodesView === 'table' ? 'var(--v2-bg-hover)' : 'none',
+                        border: 'none', cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center',
+                        color: nodesView === 'table' ? 'var(--v2-text-primary)' : 'var(--v2-text-tertiary)',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <rect x="3" y="3" width="18" height="18" rx="2" /><line x1="3" y1="9" x2="21" y2="9" /><line x1="3" y1="15" x2="21" y2="15" /><line x1="9" y1="3" x2="9" y2="21" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setNodesView('graph')}
+                      title="Graph view"
+                      style={{
+                        background: nodesView === 'graph' ? 'var(--v2-bg-hover)' : 'none',
+                        border: 'none', cursor: 'pointer', padding: '4px 8px', display: 'flex', alignItems: 'center',
+                        color: nodesView === 'graph' ? 'var(--v2-text-primary)' : 'var(--v2-text-tertiary)',
+                        borderLeft: '1px solid var(--v2-border)',
+                      }}
+                    >
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="6" cy="6" r="3" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="18" r="3" />
+                        <line x1="8.5" y1="7.5" x2="15.5" y2="16.5" /><line x1="15.5" y1="7.5" x2="8.5" y2="16.5" />
+                      </svg>
+                    </button>
+                  </div>
+                </div>
                 <button
                   type="button"
                   onClick={() => setShowGenerateModal('add-schema')}
@@ -425,8 +461,10 @@ export default function DomainsPage() {
                 </button>
               </div>
 
-              {/* Nodes table */}
-              {nodeNames.length === 0 ? (
+              {/* Graph view */}
+              {nodesView === 'graph' ? (
+                <EntityGraph nodes={nodes} onNodeClick={setSelectedNodeName} />
+              ) : nodeNames.length === 0 ? (
                 <div
                   style={{
                     padding: 48,
