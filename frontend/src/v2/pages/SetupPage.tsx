@@ -416,7 +416,7 @@ interface ChatResult {
   question: string;
   summary: string;
   rows: Record<string, unknown>[];
-  columns: string[];
+  columnNames: string[];
   rowCount: number;
   nexaqlQuery: string | null;
   error: string | null;
@@ -448,7 +448,7 @@ function TryItStep({ domain }: { domain: string }) {
       question,
       summary: '',
       rows: [],
-      columns: [],
+      columnNames: [],
       rowCount: 0,
       nexaqlQuery: null,
       error: null,
@@ -470,16 +470,20 @@ function TryItStep({ domain }: { domain: string }) {
       });
       const data = await res.json();
 
-      const cols: string[] = [];
-      if (data.rows?.length) {
-        for (const k of Object.keys(data.rows[0])) cols.push(k);
+      const colNames: string[] = [];
+      if (data.columns?.length) {
+        for (const col of data.columns) {
+          colNames.push(typeof col === 'string' ? col : col.name);
+        }
+      } else if (data.rows?.length) {
+        for (const k of Object.keys(data.rows[0])) colNames.push(k);
       }
 
       const completed: ChatResult = {
         question,
         summary: data.summary ?? data.explanation ?? '',
         rows: data.rows ?? [],
-        columns: data.columns ?? cols,
+        columnNames: colNames,
         rowCount: data.rowCount ?? 0,
         nexaqlQuery: data.nexaqlQuery ?? null,
         error: data.error ?? null,
@@ -491,7 +495,7 @@ function TryItStep({ domain }: { domain: string }) {
         question,
         summary: '',
         rows: [],
-        columns: [],
+        columnNames: [],
         rowCount: 0,
         nexaqlQuery: null,
         error: 'Network error — check that the server is running.',
@@ -600,7 +604,7 @@ function TryItStep({ domain }: { domain: string }) {
                         <table className="v2-table" style={{ fontSize: 12 }}>
                           <thead>
                             <tr>
-                              {msg.columns.map(c => (
+                              {msg.columnNames.map(c => (
                                 <th key={c} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 10 }}>{c.replace(/__/g, '.')}</th>
                               ))}
                             </tr>
@@ -608,7 +612,7 @@ function TryItStep({ domain }: { domain: string }) {
                           <tbody>
                             {msg.rows.slice(0, 5).map((row, ri) => (
                               <tr key={ri}>
-                                {msg.columns.map(c => (
+                                {msg.columnNames.map(c => (
                                   <td key={c} style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11 }}>
                                     {row[c] === null || row[c] === undefined
                                       ? <span style={{ color: 'var(--v2-text-tertiary)', fontStyle: 'italic' }}>null</span>
