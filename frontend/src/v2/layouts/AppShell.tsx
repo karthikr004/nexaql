@@ -5,12 +5,12 @@ import '../styles/design-system.css';
 import '../styles/layout.css';
 
 const VIEW_TITLES: Record<string, string> = {
-  '/v2/chat': 'Chat',
-  '/v2/domains': 'Domains & schemas',
-  '/v2/connectors': 'Connectors',
-  '/v2/playground': 'Query playground',
-  '/v2/setup': 'Setup wizard',
-  '/v2/settings': 'Settings',
+  '/chat': 'Chat',
+  '/domains': 'Domains & schemas',
+  '/connectors': 'Connectors',
+  '/playground': 'Query playground',
+  '/setup': 'Setup wizard',
+  '/settings': 'Settings',
 };
 
 export default function AppShell() {

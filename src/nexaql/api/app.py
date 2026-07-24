@@ -104,20 +104,19 @@ def create_app() -> FastAPI:
         index_html = static_dir / "index.html"
 
         # SPA catch-all: serve index.html for client-side routes
-        # Must be registered before the static mount so /admin/... paths are caught
+        # Must be registered before the static mount so paths are caught
         from starlette.responses import FileResponse
 
-        @app.get("/admin/{rest:path}")
-        async def spa_admin_catchall(rest: str):
-            return FileResponse(str(index_html))
+        spa_paths = ["chat", "domains", "connectors", "playground", "setup", "settings", "admin", "v2"]
 
-        @app.get("/v2")
-        async def spa_v2_root():
-            return FileResponse(str(index_html))
+        for _p in spa_paths:
+            @app.get(f"/{_p}", name=f"spa_{_p}_root")
+            async def spa_root(p=_p):
+                return FileResponse(str(index_html))
 
-        @app.get("/v2/{rest:path}")
-        async def spa_v2_catchall(rest: str):
-            return FileResponse(str(index_html))
+            @app.get(f"/{_p}/{{rest:path}}", name=f"spa_{_p}_catchall")
+            async def spa_catchall(rest: str, p=_p):
+                return FileResponse(str(index_html))
 
         app.mount("/", StaticFiles(directory=str(static_dir), html=True), name="frontend")
 
