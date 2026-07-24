@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
+import Markdown from 'react-markdown';
 
 interface Toast {
   message: string;
@@ -582,13 +583,23 @@ function TryItStep({ domain }: { domain: string }) {
                 {!msg.loading && !msg.error && (
                   <>
                     {msg.summary && (
-                      <div style={{ marginBottom: msg.rows.length > 0 ? 12 : 0, lineHeight: 1.6 }}>{msg.summary}</div>
+                      <div style={{ marginBottom: msg.rows.length > 0 ? 12 : 0, lineHeight: 1.6 }}>
+                        <Markdown>{msg.summary}</Markdown>
+                      </div>
                     )}
 
                     {msg.nexaqlQuery && (
-                      <pre className="v2-code-block" style={{ margin: msg.rows.length > 0 ? '0 0 12px' : 0, fontSize: 11 }}>
-                        {msg.nexaqlQuery}
-                      </pre>
+                      <details style={{ margin: msg.rows.length > 0 ? '0 0 12px' : 0 }}>
+                        <summary style={{
+                          cursor: 'pointer', fontSize: 11, color: 'var(--v2-text-tertiary)',
+                          fontFamily: 'var(--v2-font-mono)', userSelect: 'none',
+                        }}>
+                          Show NexaQL query
+                        </summary>
+                        <pre className="v2-code-block" style={{ marginTop: 6, fontSize: 11 }}>
+                          {msg.nexaqlQuery}
+                        </pre>
+                      </details>
                     )}
 
                     {msg.rows.length > 0 && (
@@ -797,8 +808,8 @@ export default function SetupPage() {
                 </svg>
                 <span className="v2-heading-sm" style={{ color: 'var(--v2-teal-500)' }}>All set! NexaQL is ready.</span>
               </div>
-              <a href="/v2/playground" className="v2-btn v2-btn-primary" style={{ textDecoration: 'none' }}>
-                Go to Playground
+              <a href="/v2/chat" className="v2-btn v2-btn-primary" style={{ textDecoration: 'none' }}>
+                Go to Agent Chat
               </a>
             </div>
           )}
