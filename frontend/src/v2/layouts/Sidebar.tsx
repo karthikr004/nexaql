@@ -16,18 +16,18 @@ export default function Sidebar() {
   const showWizardBadge = domains.length === 0;
 
   const navItems: NavItem[] = [
-    { icon: 'chat', label: 'Chat', path: '/v2/chat' },
-    { icon: 'database', label: 'Domains', path: '/v2/domains' },
-    { icon: 'plug', label: 'Connectors', path: '/v2/connectors' },
-    { icon: 'code', label: 'Playground', path: '/v2/playground' },
-    { icon: 'wand', label: 'Setup', path: '/v2/setup', badge: showWizardBadge },
+    { icon: 'chat', label: 'Chat', path: '/chat' },
+    { icon: 'database', label: 'Domains', path: '/domains' },
+    { icon: 'plug', label: 'Connectors', path: '/connectors' },
+    { icon: 'code', label: 'Playground', path: '/playground' },
+    { icon: 'wand', label: 'Setup', path: '/setup', badge: showWizardBadge },
   ];
 
   const isActive = (path: string) => location.pathname.startsWith(path);
 
   return (
     <aside className="v2-sidebar">
-      <div className="v2-sidebar-logo" onClick={() => navigate('/v2/chat')} title="NexaQL">
+      <div className="v2-sidebar-logo" onClick={() => navigate('/chat')} title="NexaQL">
         <span>N</span>
       </div>
 
@@ -48,8 +48,8 @@ export default function Sidebar() {
       <div className="v2-sidebar-spacer" />
 
       <button
-        className={`v2-sidebar-item ${isActive('/v2/settings') ? 'active' : ''}`}
-        onClick={() => navigate('/v2/settings')}
+        className={`v2-sidebar-item ${isActive('/settings') ? 'active' : ''}`}
+        onClick={() => navigate('/settings')}
         title="Settings"
       >
         <SidebarIcon name="settings" />

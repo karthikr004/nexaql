@@ -808,7 +808,7 @@ export default function SetupPage() {
                 </svg>
                 <span className="v2-heading-sm" style={{ color: 'var(--v2-teal-500)' }}>All set! NexaQL is ready.</span>
               </div>
-              <a href="/v2/chat" className="v2-btn v2-btn-primary" style={{ textDecoration: 'none' }}>
+              <a href="/chat" className="v2-btn v2-btn-primary" style={{ textDecoration: 'none' }}>
                 Done
               </a>
             </div>

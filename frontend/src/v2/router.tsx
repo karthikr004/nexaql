@@ -1,4 +1,4 @@
-import { type RouteObject } from 'react-router-dom';
+import { Navigate, type RouteObject } from 'react-router-dom';
 import AppShell from './layouts/AppShell';
 import HomeRedirect from './components/HomeRedirect';
 import ChatPage from './pages/ChatPage';
@@ -8,9 +8,9 @@ import PlaygroundPage from './pages/PlaygroundPage';
 import SetupPage from './pages/SetupPage';
 import SettingsPage from './pages/SettingsPage';
 
-export const v2Routes: RouteObject[] = [
+export const routes: RouteObject[] = [
   {
-    path: '/v2',
+    path: '/',
     element: <AppShell />,
     children: [
       { index: true, element: <HomeRedirect /> },
@@ -22,4 +22,11 @@ export const v2Routes: RouteObject[] = [
       { path: 'settings', element: <SettingsPage /> },
     ],
   },
+  { path: '/v2', element: <Navigate to="/" replace /> },
+  { path: '/v2/*', element: <V2Redirect /> },
 ];
+
+function V2Redirect() {
+  const path = window.location.pathname.replace(/^\/v2/, '') || '/';
+  return <Navigate to={path} replace />;
+}

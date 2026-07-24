@@ -28,12 +28,12 @@ export default function HomeRedirect() {
         const hasDomain = Array.isArray(domList) && domList.length > 0;
 
         if (hasConnector && hasApiKey && hasDomain) {
-          setTarget('/v2/chat');
+          setTarget('/chat');
         } else {
-          setTarget('/v2/setup');
+          setTarget('/setup');
         }
       } catch {
-        setTarget('/v2/setup');
+        setTarget('/setup');
       }
     }
 
