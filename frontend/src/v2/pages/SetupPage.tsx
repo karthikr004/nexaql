@@ -809,7 +809,7 @@ export default function SetupPage() {
                 <span className="v2-heading-sm" style={{ color: 'var(--v2-teal-500)' }}>All set! NexaQL is ready.</span>
               </div>
               <a href="/v2/chat" className="v2-btn v2-btn-primary" style={{ textDecoration: 'none' }}>
-                Go to Agent Chat
+                Done
               </a>
             </div>
           )}
