@@ -1,5 +1,6 @@
-import { Navigate, type RouteObject } from 'react-router-dom';
+import { type RouteObject } from 'react-router-dom';
 import AppShell from './layouts/AppShell';
+import HomeRedirect from './components/HomeRedirect';
 import ChatPage from './pages/ChatPage';
 import DomainsPage from './pages/DomainsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
@@ -12,7 +13,7 @@ export const v2Routes: RouteObject[] = [
     path: '/v2',
     element: <AppShell />,
     children: [
-      { index: true, element: <Navigate to="/v2/chat" replace /> },
+      { index: true, element: <HomeRedirect /> },
       { path: 'chat', element: <ChatPage /> },
       { path: 'domains', element: <DomainsPage /> },
       { path: 'connectors', element: <ConnectorsPage /> },
