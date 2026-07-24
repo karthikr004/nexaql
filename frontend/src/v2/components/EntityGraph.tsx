@@ -3,6 +3,7 @@ import {
   ReactFlow,
   ReactFlowProvider,
   Background,
+  Controls,
   type Node,
   type Edge,
   type NodeTypes,
@@ -13,11 +14,23 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import dagre from 'dagre';
-import type { NodeData } from '../../types';
+import type { NodeData, EdgeData } from '../../types';
 
 interface EntityGraphProps {
   nodes: Record<string, NodeData>;
   onNodeClick: (nodeName: string) => void;
+}
+
+function extractJoinKey(edgeData: EdgeData): string {
+  const steps = edgeData.join_steps;
+  if (!steps || steps.length === 0) return '';
+  const condition = steps[0]!.condition;
+  const match = condition.match(/\{[^}]+\}\.(\w+)\s*=\s*\{[^}]+\}\.(\w+)/);
+  if (!match) return '';
+  const col1 = match[1]!;
+  const col2 = match[2]!;
+  if (col1 === 'id') return col2;
+  return col1;
 }
 
 const NODE_WIDTH = 180;
@@ -101,11 +114,12 @@ function buildFlowGraph(
       if (edgeSet.has(key)) continue;
       edgeSet.add(key);
       g.setEdge(name, target);
+      const joinKey = extractJoinKey(edgeData);
       flowEdges.push({
         id: `${name}-${target}`,
         source: name,
         target,
-        label: edgeName,
+        label: joinKey || edgeName,
         type: 'default',
         style: { stroke: 'var(--v2-accent)', strokeWidth: 1.5 },
         labelStyle: {
@@ -160,7 +174,10 @@ export default function EntityGraph({ nodes: ontologyNodes, onNodeClick }: Entit
     [onNodeClick]
   );
 
-  if (Object.keys(ontologyNodes).length === 0) {
+  const nodeCount = Object.keys(ontologyNodes).length;
+  const containerHeight = Math.min(700, Math.max(500, nodeCount * 60));
+
+  if (nodeCount === 0) {
     return (
       <div style={{
         padding: 48, textAlign: 'center', borderRadius: 'var(--v2-radius-lg)',
@@ -174,7 +191,7 @@ export default function EntityGraph({ nodes: ontologyNodes, onNodeClick }: Entit
 
   return (
     <div style={{
-      width: '100%', height: 500, borderRadius: 'var(--v2-radius-lg)',
+      width: '100%', height: containerHeight, borderRadius: 'var(--v2-radius-lg)',
       border: '1px solid var(--v2-border)', overflow: 'hidden',
       background: 'var(--v2-bg-surface)',
     }}>
@@ -190,12 +207,14 @@ export default function EntityGraph({ nodes: ontologyNodes, onNodeClick }: Entit
           nodesDraggable={false}
           nodesConnectable={false}
           elementsSelectable={false}
-          zoomOnScroll={false}
-          panOnDrag={false}
-          minZoom={0.5}
-          maxZoom={1.5}
+          minZoom={0.2}
+          maxZoom={2}
         >
           <Background gap={20} size={1} color="var(--v2-border)" />
+          <Controls
+            showInteractive={false}
+            style={{ background: 'var(--v2-bg-elevated)', border: '1px solid var(--v2-border)', borderRadius: 8 }}
+          />
         </ReactFlow>
       </ReactFlowProvider>
     </div>
