@@ -49,7 +49,7 @@ function countFilters(node: NodeData): number {
 
 // ── Exported shared components ──────────────────────────────────────────────
 
-export function InlineInput({
+function InlineInput({
   value,
   onChange,
   placeholder,

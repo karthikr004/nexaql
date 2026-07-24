@@ -85,7 +85,7 @@ function ConnectorStep({ onComplete, showToast }: { onComplete: (name: string) =
         showToast({ message: body.error || 'Failed to connect', type: 'error' });
         return;
       }
-      showToast({ message: `Connected — ${body.table_count ?? 0} tables found`, type: 'success' });
+      showToast({ message: `Connected: ${body.table_count ?? 0} tables found`, type: 'success' });
       onComplete(name.trim());
     } catch {
       showToast({ message: 'Network error', type: 'error' });
@@ -274,7 +274,7 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
               style={{ marginTop: 4, width: '100%' }}
             />
             <div className="v2-caption" style={{ marginTop: 4, color: 'var(--v2-text-tertiary)' }}>
-              Stored locally — never sent to NexaQL servers.
+              Stored locally. Never sent to NexaQL servers.
             </div>
           </div>
         )}
@@ -358,7 +358,7 @@ function DomainStep({ connectorName, onComplete, showToast }: { connectorName: s
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
       <p className="v2-body-sm" style={{ color: 'var(--v2-text-secondary)', margin: 0 }}>
-        A domain defines the query schema — which tables, fields, and relationships NexaQL exposes.
+        A domain defines the query schema: which tables, fields, and relationships NexaQL exposes.
         The LLM will auto-generate it from your database structure.
       </p>
 
@@ -499,7 +499,7 @@ function TryItStep({ domain }: { domain: string }) {
         columnNames: [],
         rowCount: 0,
         nexaqlQuery: null,
-        error: 'Network error — check that the server is running.',
+        error: 'Network error. Check that the server is running.',
         loading: false,
       };
       setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? errResult : m));
@@ -511,7 +511,7 @@ function TryItStep({ domain }: { domain: string }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
       <p className="v2-body-sm" style={{ color: 'var(--v2-text-secondary)', margin: 0 }}>
-        Ask a question in plain English — NexaQL translates it to a query and returns data from your <strong>{domain}</strong> domain.
+        Ask a question in plain English. NexaQL translates it to a query and returns data from your <strong>{domain}</strong> domain.
       </p>
 
       {messages.length === 0 && (
@@ -712,7 +712,7 @@ export default function SetupPage() {
           <div style={{ marginBottom: 32 }}>
             <h1 className="v2-heading-lg" style={{ margin: '0 0 6px' }}>Setup wizard</h1>
             <p className="v2-body-sm" style={{ color: 'var(--v2-text-secondary)', margin: 0 }}>
-              Get NexaQL running in 4 steps — connect your data, configure LLM, and start querying.
+              Get NexaQL running in 4 steps: connect your data, configure LLM, and start querying.
             </p>
           </div>
 

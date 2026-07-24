@@ -197,31 +197,3 @@
   display: flex;
 }
 
-/* ── Placeholder page ───────────────────────────────────────────────────── */
-.v2-page {
-  flex: 1;
-  overflow-y: auto;
-  padding: 24px 28px;
-}
-
-.v2-page-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 24px;
-}
-
-.v2-page-empty {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 12px;
-  color: var(--v2-text-tertiary);
-  font-size: 14px;
-}
-
-.v2-page-empty svg {
-  opacity: 0.3;
-}
