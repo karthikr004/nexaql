@@ -175,13 +175,19 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
   const [model, setModel] = useState('claude-sonnet-4-6');
   const [apiKey, setApiKey] = useState('');
   const [saving, setSaving] = useState(false);
-  const [hasKey, setHasKey] = useState(false);
+  const [configuredProviders, setConfiguredProviders] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetch('/api/api-keys')
       .then(r => r.ok ? r.json() : null)
       .then(d => {
-        if (d?.api_keys?.length) setHasKey(true);
+        if (d?.api_keys?.length) {
+          const providers = new Set<string>();
+          for (const k of d.api_keys) {
+            if (k.provider) providers.add(k.provider);
+          }
+          setConfiguredProviders(providers);
+        }
       })
       .catch(() => {});
 
@@ -195,6 +201,8 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
       })
       .catch(() => {});
   }, []);
+
+  const providerHasKey = configuredProviders.has(provider);
 
   const submit = async () => {
     setSaving(true);
@@ -211,6 +219,7 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
           setSaving(false);
           return;
         }
+        setConfiguredProviders(prev => new Set(prev).add(provider));
       }
 
       const cfgRes = await fetch('/api/llm-config', {
@@ -235,7 +244,7 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
   };
 
   const suggestions = MODEL_SUGGESTIONS[provider] ?? [];
-  const canSubmit = provider && model.trim() && (apiKey.trim() || hasKey);
+  const canSubmit = provider && model.trim() && (apiKey.trim() || providerHasKey);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
@@ -243,12 +252,22 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
         NexaQL uses an LLM to translate natural language into queries. Configure your preferred provider.
       </p>
 
-      {hasKey && (
+      {providerHasKey && (
         <div className="v2-card-flat" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--v2-teal-500)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polyline points="20 6 9 17 4 12" />
           </svg>
-          <span className="v2-body-sm" style={{ color: 'var(--v2-teal-500)' }}>API key already configured</span>
+          <span className="v2-body-sm" style={{ color: 'var(--v2-teal-500)' }}>API key configured for {PROVIDER_OPTIONS.find(o => o.value === provider)?.label ?? provider}</span>
+        </div>
+      )}
+
+      {!providerHasKey && configuredProviders.size > 0 && (
+        <div className="v2-card-flat" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--v2-amber-500, #F59E0B)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+            <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+          </svg>
+          <span className="v2-body-sm" style={{ color: 'var(--v2-amber-500, #F59E0B)' }}>No API key for {PROVIDER_OPTIONS.find(o => o.value === provider)?.label ?? provider} — enter one below</span>
         </div>
       )}
 
@@ -260,6 +279,7 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
             value={provider}
             onChange={e => {
               setProvider(e.target.value);
+              setApiKey('');
               const models = MODEL_SUGGESTIONS[e.target.value];
               if (models?.length) setModel(models[0] ?? '');
             }}
@@ -278,7 +298,7 @@ function LLMStep({ onComplete, showToast }: { onComplete: () => void; showToast:
           </select>
         </div>
 
-        {!hasKey && (
+        {!providerHasKey && (
           <div>
             <label className="v2-label">API key</label>
             <input
