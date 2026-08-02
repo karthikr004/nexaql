@@ -103,14 +103,30 @@ function ConnectorStep({ onComplete, showToast }: { onComplete: (name: string) =
       </p>
 
       {existing.length > 0 && (
-        <div className="v2-card-flat" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <div>
+        <div className="v2-card-flat" style={{ padding: '12px 16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+          <div style={{ flex: 1 }}>
             <div className="v2-label">Existing connectors</div>
-            <div className="v2-body-sm" style={{ color: 'var(--v2-text-secondary)', marginTop: 2 }}>
-              {existing.join(', ')}
-            </div>
+            <select
+              className="v2-select"
+              style={{ marginTop: 6, width: '100%' }}
+              defaultValue={existing[0]}
+              id="existing-connector-select"
+            >
+              {existing.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
           </div>
-          <button type="button" className="v2-btn v2-btn-secondary v2-btn-sm" onClick={() => { if (existing[0]) onComplete(existing[0]); }}>
+          <button
+            type="button"
+            className="v2-btn v2-btn-secondary v2-btn-sm"
+            style={{ alignSelf: 'flex-end', marginBottom: 2 }}
+            onClick={() => {
+              const el = document.getElementById('existing-connector-select') as HTMLSelectElement | null;
+              const selected = el?.value || existing[0];
+              if (selected) onComplete(selected);
+            }}
+          >
             Use existing
           </button>
         </div>
@@ -303,8 +319,24 @@ function DomainStep({ connectorName, onComplete, showToast }: { connectorName: s
   const [schemaName, setSchemaName] = useState('default');
   const [saving, setSaving] = useState(false);
   const [existing, setExisting] = useState<string[]>([]);
+  const [connectors, setConnectors] = useState<string[]>([]);
+  const [selectedConnector, setSelectedConnector] = useState(connectorName);
 
   useEffect(() => {
+    fetch('/api/connectors')
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (d?.connectors?.length) {
+          const names: string[] = [];
+          for (const c of d.connectors) names.push(c.name);
+          setConnectors(names);
+          if (!names.includes(connectorName) && names.length > 0) {
+            setSelectedConnector(names[0]!);
+          }
+        }
+      })
+      .catch(() => {});
+
     fetch('/api/domains')
       .then(r => r.ok ? r.json() : null)
       .then(d => {
@@ -315,7 +347,7 @@ function DomainStep({ connectorName, onComplete, showToast }: { connectorName: s
         }
       })
       .catch(() => {});
-  }, []);
+  }, [connectorName]);
 
   const submit = async () => {
     setSaving(true);
@@ -324,7 +356,7 @@ function DomainStep({ connectorName, onComplete, showToast }: { connectorName: s
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          connector_name: connectorName,
+          connector_name: selectedConnector,
           domain: domain.trim(),
           description: description.trim(),
           output_schema_name: schemaName.trim() || 'default',
@@ -389,10 +421,22 @@ function DomainStep({ connectorName, onComplete, showToast }: { connectorName: s
           <label className="v2-label">Schema name</label>
           <input className="v2-input" placeholder="default" value={schemaName} onChange={e => setSchemaName(e.target.value)} style={{ marginTop: 4, width: '100%' }} />
         </div>
-        <div className="v2-card-flat" style={{ padding: '12px 16px' }}>
-          <div className="v2-caption" style={{ color: 'var(--v2-text-tertiary)' }}>
-            Using connector: <strong style={{ color: 'var(--v2-text-primary)' }}>{connectorName}</strong>
-          </div>
+        <div>
+          <label className="v2-label">Connector</label>
+          {connectors.length > 1 ? (
+            <select
+              className="v2-select"
+              value={selectedConnector}
+              onChange={e => setSelectedConnector(e.target.value)}
+              style={{ marginTop: 4, width: '100%' }}
+            >
+              {connectors.map(c => (
+                <option key={c} value={c}>{c}</option>
+              ))}
+            </select>
+          ) : (
+            <input className="v2-input" value={selectedConnector} readOnly style={{ marginTop: 4, width: '100%' }} />
+          )}
         </div>
       </div>
 
