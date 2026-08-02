@@ -57,11 +57,9 @@ class ServerConfig(BaseModel):
 
 
 class AuthConfig(BaseModel):
-    mode: str = "dev"  # "dev" | "jwt"
-    # JWT settings (future):
-    # jwks_url: Optional[str] = None
-    # role_claim: str = "roles"
-    # attribute_claims: list[str] = []
+    mode: str = "dev"  # "dev" | "oauth"
+    session_secret: Optional[str] = None
+    session_expiry_hours: int = 24
 
 
 class NexaQLConfig(BaseModel):
