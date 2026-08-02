@@ -222,14 +222,29 @@ CREATE TABLE IF NOT EXISTS api_keys (
 );
 
 CREATE TABLE IF NOT EXISTS server_config (
-    id             INTEGER PRIMARY KEY DEFAULT 1 CHECK(id = 1),
-    host           TEXT DEFAULT '0.0.0.0',
-    port           INTEGER DEFAULT 3717,
-    cors_origins   TEXT DEFAULT '["*"]',
-    auth_mode      TEXT DEFAULT 'dev',
-    active_domain  TEXT,
-    auth_secret    TEXT,
-    auth_algorithm TEXT DEFAULT 'HS256'
+    id                   INTEGER PRIMARY KEY DEFAULT 1 CHECK(id = 1),
+    host                 TEXT DEFAULT '0.0.0.0',
+    port                 INTEGER DEFAULT 3717,
+    cors_origins         TEXT DEFAULT '["*"]',
+    auth_mode            TEXT DEFAULT 'dev',
+    active_domain        TEXT,
+    auth_secret          TEXT,
+    auth_algorithm       TEXT DEFAULT 'HS256',
+    oauth_providers_json TEXT DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    email          TEXT UNIQUE NOT NULL,
+    name           TEXT,
+    avatar_url     TEXT,
+    oauth_provider TEXT NOT NULL,
+    oauth_sub      TEXT NOT NULL,
+    roles_json     TEXT DEFAULT '[]',
+    is_active      BOOLEAN DEFAULT 1,
+    created_at     TEXT,
+    last_login_at  TEXT,
+    UNIQUE(oauth_provider, oauth_sub)
 );
 """
 
@@ -249,8 +264,12 @@ def _ensure_tables(conn: sqlite3.Connection) -> None:
     if row and row[0] == 0:
         conn.execute("INSERT INTO server_config (id) VALUES (1)")
 
-    # Migrate: add auth columns if missing (existing DBs from pre-0.7.10)
-    for col, default in [("auth_secret", "NULL"), ("auth_algorithm", "'HS256'")]:
+    # Migrate: add columns if missing (existing DBs)
+    for col, default in [
+        ("auth_secret", "NULL"),
+        ("auth_algorithm", "'HS256'"),
+        ("oauth_providers_json", "'[]'"),
+    ]:
         try:
             conn.execute(f"SELECT {col} FROM server_config LIMIT 1")
         except Exception:
@@ -733,7 +752,8 @@ def get_server_config() -> dict:
     """Get the server configuration (singleton row)."""
     conn = _get_conn()
     row = conn.execute(
-        "SELECT host, port, cors_origins, auth_mode, active_domain, auth_secret, auth_algorithm"
+        "SELECT host, port, cors_origins, auth_mode, active_domain,"
+        " auth_secret, auth_algorithm, oauth_providers_json"
         " FROM server_config WHERE id = 1"
     ).fetchone()
     if row is None:
@@ -741,11 +761,16 @@ def get_server_config() -> dict:
             "host": "0.0.0.0", "port": 3717, "cors_origins": ["*"],
             "auth_mode": "dev", "active_domain": None,
             "auth_secret": None, "auth_algorithm": "HS256",
+            "oauth_providers_json": [],
         }
     try:
         cors = json.loads(row[2]) if row[2] else ["*"]
     except (json.JSONDecodeError, TypeError):
         cors = ["*"]
+    try:
+        oauth_providers = json.loads(row[7]) if row[7] else []
+    except (json.JSONDecodeError, TypeError):
+        oauth_providers = []
     return {
         "host": row[0] or "0.0.0.0",
         "port": row[1] or 3717,
@@ -754,13 +779,17 @@ def get_server_config() -> dict:
         "active_domain": row[4],
         "auth_secret": row[5],
         "auth_algorithm": row[6] or "HS256",
+        "oauth_providers": oauth_providers,
     }
 
 
 def update_server_config(**kwargs: Any) -> None:
     """Update server config fields."""
     conn = _get_conn()
-    allowed = {"host", "port", "cors_origins", "auth_mode", "active_domain", "auth_secret", "auth_algorithm"}
+    allowed = {
+        "host", "port", "cors_origins", "auth_mode", "active_domain",
+        "auth_secret", "auth_algorithm", "oauth_providers_json",
+    }
     updates = {k: v for k, v in kwargs.items() if k in allowed}
     if not updates:
         return
@@ -780,6 +809,160 @@ def get_active_domain() -> str | None:
 def set_active_domain(domain_name: str) -> None:
     """Set the active domain."""
     update_server_config(active_domain=domain_name)
+
+
+# ── Users CRUD ────────────────────────────────────────────────────────────────
+
+
+def list_users() -> list[dict]:
+    """List all users."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, email, name, avatar_url, oauth_provider, oauth_sub,"
+        " roles_json, is_active, created_at, last_login_at"
+        " FROM users ORDER BY id"
+    ).fetchall()
+    return [_user_row_to_dict(r) for r in rows]
+
+
+def get_user_by_id(user_id: int) -> dict | None:
+    """Get a user by internal ID."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id, email, name, avatar_url, oauth_provider, oauth_sub,"
+        " roles_json, is_active, created_at, last_login_at"
+        " FROM users WHERE id = ?",
+        (user_id,),
+    ).fetchone()
+    return _user_row_to_dict(row) if row else None
+
+
+def get_user_by_oauth(provider: str, sub: str) -> dict | None:
+    """Get a user by OAuth provider and subject ID."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id, email, name, avatar_url, oauth_provider, oauth_sub,"
+        " roles_json, is_active, created_at, last_login_at"
+        " FROM users WHERE oauth_provider = ? AND oauth_sub = ?",
+        (provider, sub),
+    ).fetchone()
+    return _user_row_to_dict(row) if row else None
+
+
+def upsert_user(
+    email: str,
+    name: str | None,
+    avatar_url: str | None,
+    oauth_provider: str,
+    oauth_sub: str,
+) -> dict:
+    """Create or update a user from OAuth login. Returns the user dict."""
+    conn = _get_conn()
+    now = _now()
+    existing = get_user_by_oauth(oauth_provider, oauth_sub)
+    if existing:
+        conn.execute(
+            "UPDATE users SET email = ?, name = ?, avatar_url = ?, last_login_at = ?"
+            " WHERE id = ?",
+            (email, name, avatar_url, now, existing["id"]),
+        )
+        existing.update(email=email, name=name, avatar_url=avatar_url, last_login_at=now)
+        return existing
+
+    conn.execute(
+        "INSERT INTO users (email, name, avatar_url, oauth_provider, oauth_sub,"
+        " roles_json, is_active, created_at, last_login_at)"
+        " VALUES (?, ?, ?, ?, ?, '[]', 1, ?, ?)",
+        (email, name, avatar_url, oauth_provider, oauth_sub, now, now),
+    )
+    return get_user_by_oauth(oauth_provider, oauth_sub)  # type: ignore[return-value]
+
+
+def update_user_roles(user_id: int, roles: list[str]) -> bool:
+    """Update the roles assigned to a user."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "UPDATE users SET roles_json = ? WHERE id = ?",
+        (json.dumps(roles), user_id),
+    )
+    return cur.rowcount > 0
+
+
+def deactivate_user(user_id: int, active: bool = False) -> bool:
+    """Activate or deactivate a user."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "UPDATE users SET is_active = ? WHERE id = ?",
+        (1 if active else 0, user_id),
+    )
+    return cur.rowcount > 0
+
+
+def count_users() -> int:
+    """Count total registered users."""
+    conn = _get_conn()
+    row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+    return row[0] if row else 0
+
+
+def _user_row_to_dict(row: tuple) -> dict:
+    """Convert a users table row tuple to a dict."""
+    try:
+        roles = json.loads(row[6]) if row[6] else []
+    except (json.JSONDecodeError, TypeError):
+        roles = []
+    return {
+        "id": row[0],
+        "email": row[1],
+        "name": row[2],
+        "avatar_url": row[3],
+        "oauth_provider": row[4],
+        "oauth_sub": row[5],
+        "roles": roles,
+        "is_active": bool(row[7]),
+        "created_at": row[8],
+        "last_login_at": row[9],
+    }
+
+
+# ── OAuth Provider Config ────────────────────────────────────────────────────
+
+
+def get_oauth_providers() -> list[dict]:
+    """Get configured OAuth providers."""
+    cfg = get_server_config()
+    return cfg.get("oauth_providers", [])
+
+
+def save_oauth_provider(provider: str, client_id: str, client_secret: str, enabled: bool = True) -> None:
+    """Add or update an OAuth provider configuration."""
+    providers = get_oauth_providers()
+    updated = False
+    for p in providers:
+        if p.get("provider") == provider:
+            p["client_id"] = client_id
+            p["client_secret"] = client_secret
+            p["enabled"] = enabled
+            updated = True
+            break
+    if not updated:
+        providers.append({
+            "provider": provider,
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "enabled": enabled,
+        })
+    update_server_config(oauth_providers_json=json.dumps(providers))
+
+
+def delete_oauth_provider(provider: str) -> bool:
+    """Remove an OAuth provider configuration."""
+    providers = get_oauth_providers()
+    filtered = [p for p in providers if p.get("provider") != provider]
+    if len(filtered) == len(providers):
+        return False
+    update_server_config(oauth_providers_json=json.dumps(filtered))
+    return True
 
 
 # ── Legacy migration ─────────────────────────────────────────────────────────
