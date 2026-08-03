@@ -11,8 +11,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from fastapi import Depends
+
 from nexaql.api.deps import get_config
-from nexaql.api.routes import admin, chat, connectors, datasource, execute, ontology, store, suggest, validate
+from nexaql.api.middleware import require_admin
+from nexaql.api.routes import admin, auth, chat, connectors, datasource, execute, ontology, store, suggest, users, validate
 
 
 def _load_api_keys_into_env() -> None:
@@ -58,12 +61,14 @@ def create_app() -> FastAPI:
     )
 
     # ── API routes ──────────────────────────────────────────────────────────
+    app.include_router(auth.router, prefix="/api")
     app.include_router(execute.router, prefix="/api")
     app.include_router(validate.router, prefix="/api")
     app.include_router(ontology.router, prefix="/api")
     app.include_router(suggest.router, prefix="/api")
     app.include_router(chat.router, prefix="/api")
-    app.include_router(admin.router, prefix="/api")
+    app.include_router(admin.router, prefix="/api", dependencies=[Depends(require_admin)])
+    app.include_router(users.router, prefix="/api", dependencies=[Depends(require_admin)])
     app.include_router(datasource.router, prefix="/api")
     app.include_router(connectors.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
@@ -107,7 +112,7 @@ def create_app() -> FastAPI:
         # Must be registered before the static mount so paths are caught
         from starlette.responses import FileResponse
 
-        spa_paths = ["chat", "domains", "connectors", "playground", "setup", "settings", "admin", "v2"]
+        spa_paths = ["chat", "domains", "connectors", "playground", "setup", "settings", "admin", "login", "v2"]
 
         for _p in spa_paths:
             @app.get(f"/{_p}", name=f"spa_{_p}_root")
