@@ -1,4 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
+import CsvUploadForm from '../components/CsvUploadForm';
+
+type AddMode = 'database' | 'csv';
 
 interface ConnectorInfo {
   id?: number;
@@ -21,6 +24,7 @@ export default function ConnectorsPage() {
   const [connectors, setConnectors] = useState<ConnectorInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [addMode, setAddMode] = useState<AddMode>('database');
   const [name, setName] = useState('');
   const [url, setUrl] = useState('');
   const [schema, setSchema] = useState('public');
@@ -153,24 +157,47 @@ export default function ConnectorsPage() {
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 24 }}>
         <div>
           <h1 className="v2-heading-lg">Connectors</h1>
-          <p className="v2-body-sm" style={{ marginTop: 4 }}>Manage database connections</p>
+          <p className="v2-body-sm" style={{ marginTop: 4 }}>Manage database connections and spreadsheet uploads</p>
         </div>
         {!showAdd && (
-          <button
-            type="button"
-            className="v2-btn v2-btn-primary"
-            onClick={() => setShowAdd(true)}
-          >
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            Add Connector
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button
+              type="button"
+              className="v2-btn v2-btn-primary"
+              onClick={() => { setAddMode('database'); setShowAdd(true); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
+              </svg>
+              Add Database
+            </button>
+            <button
+              type="button"
+              className="v2-btn v2-btn-secondary"
+              onClick={() => { setAddMode('csv'); setShowAdd(true); }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+                <polyline points="17 8 12 3 7 8" />
+                <line x1="12" y1="3" x2="12" y2="15" />
+              </svg>
+              Upload CSV
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Add connector form */}
-      {showAdd && (
+      {/* CSV upload form */}
+      {showAdd && addMode === 'csv' && (
+        <CsvUploadForm
+          onUploaded={() => { setShowAdd(false); fetchConnectors(); }}
+          onCancel={() => setShowAdd(false)}
+          onToast={showToast}
+        />
+      )}
+
+      {/* Database connector form */}
+      {showAdd && addMode === 'database' && (
         <div className="v2-card" style={{ padding: 24, marginBottom: 24 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
             <h2 className="v2-heading-md">New Connector</h2>
@@ -334,7 +361,7 @@ export default function ConnectorsPage() {
           lineHeight: 1.5,
         }}
       >
-        Connection credentials are stored locally in <code style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11, color: 'var(--v2-accent-text)' }}>~/.nexaql/connectors.json</code> and never leave your machine.
+        Connection credentials and uploaded files are stored locally in <code style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11, color: 'var(--v2-accent-text)' }}>~/.nexaql/</code> and never leave your machine.
       </div>
     </div>
   );
