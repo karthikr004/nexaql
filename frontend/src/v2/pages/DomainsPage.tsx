@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { useDomain } from '../contexts/DomainContext';
 import SchemaDetailPage, { TabBar, RolesEditor, AccessFunctionsEditor } from './SchemaDetailPage';
+import BusinessOntologyEditor from '../components/BusinessOntologyEditor';
 import Toast from '../components/Toast';
 import GenerateModal from '../components/GenerateModal';
 import EntityGraph from '../components/EntityGraph';
@@ -37,7 +38,7 @@ interface ConnectorInfo {
   db_type: string;
 }
 
-type DomainTab = 'nodes' | 'roles' | 'access';
+type DomainTab = 'nodes' | 'roles' | 'access' | 'business';
 
 function countFields(node: NodeData): number {
   return Object.keys(node.fields ?? {}).length;
@@ -320,6 +321,7 @@ export default function DomainsPage() {
       { key: 'nodes', label: 'Nodes', count: nodeNames.length },
       { key: 'roles', label: 'Roles', count: Object.keys(roles).length },
       { key: 'access', label: 'Access Functions', count: Object.keys(accessFunctions).length },
+      { key: 'business', label: 'Business Context' },
     ];
 
     const handleUpdateRoles = (updated: Record<string, RoleDefData>) => {
@@ -608,6 +610,8 @@ export default function DomainsPage() {
                 onUpdate={handleUpdateAccessFunctions}
               />
             </div>
+          ) : domainTab === 'business' ? (
+            <BusinessOntologyEditor domainName={selectedDomain} />
           ) : null}
         </div>
 
