@@ -55,7 +55,40 @@ export default function GenerateModal({
     row_count: number;
     header_row: number;
   } | null>(null);
+  const [existingTables, setExistingTables] = useState<{ name: string; row_count: number }[]>([]);
+  const [deletingTable, setDeletingTable] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchExistingTables = useCallback(async () => {
+    try {
+      const res = await fetch('/api/spreadsheet/tables', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        setExistingTables(data.tables ?? []);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  const handleDeleteTable = useCallback(async (tableName: string) => {
+    setDeletingTable(tableName);
+    try {
+      const res = await fetch(`/api/spreadsheet/tables/${encodeURIComponent(tableName)}`, {
+        method: 'DELETE',
+        credentials: 'include',
+      });
+      if (res.ok) {
+        onToast({ message: `Table "${tableName}" deleted`, type: 'success' });
+        fetchExistingTables();
+      } else {
+        const body = await res.json();
+        onToast({ message: body.error || 'Delete failed', type: 'error' });
+      }
+    } catch (err) {
+      onToast({ message: `Error: ${err}`, type: 'error' });
+    } finally {
+      setDeletingTable(null);
+    }
+  }, [onToast, fetchExistingTables]);
 
   const resetTables = () => {
     setTables([]);
@@ -69,6 +102,7 @@ export default function GenerateModal({
     setUploadedConnector('');
     setUploadMeta(null);
     resetTables();
+    if (type === 'csv') fetchExistingTables();
   };
 
   const handleFileSelect = useCallback((f: File) => {
@@ -130,10 +164,12 @@ export default function GenerateModal({
         }
         setSelected(selectedNames);
         const skipNote = body.header_row > 0 ? ` (header detected at row ${body.header_row + 1})` : '';
+        const verb = body.status === 'replaced' ? 'replaced' : 'uploaded';
         onToast({
-          message: `"${file.name}" uploaded — ${body.row_count} rows, ${body.column_count} columns${skipNote}`,
+          message: `"${file.name}" ${verb} — ${body.row_count} rows, ${body.column_count} columns${skipNote}`,
           type: 'success',
         });
+        fetchExistingTables();
       } else {
         onToast({ message: introBody.error || 'Introspection failed', type: 'error' });
       }
@@ -187,7 +223,7 @@ export default function GenerateModal({
           description,
           include_tables: includeTables,
           output_schema_name: name,
-          replace: false,
+          replace: sourceType === 'csv',
         }),
       });
       const body = await res.json();
@@ -415,6 +451,58 @@ export default function GenerateModal({
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {/* Existing spreadsheet tables */}
+          {sourceType === 'csv' && existingTables.length > 0 && !uploadedConnector && (
+            <div>
+              <label className="v2-label" style={{ display: 'block', marginBottom: 6 }}>
+                Uploaded tables
+              </label>
+              <div style={{
+                borderRadius: 'var(--v2-radius-md)',
+                border: '1px solid var(--v2-border)',
+                overflow: 'hidden',
+              }}>
+                {existingTables.map((t) => (
+                  <div
+                    key={t.name}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      padding: '6px 12px',
+                      borderBottom: '1px solid var(--v2-border-light)',
+                      fontSize: 12,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <span style={{ fontFamily: 'var(--v2-font-mono)', color: 'var(--v2-text-primary)' }}>
+                        {t.name}
+                      </span>
+                      <span className="v2-caption">{t.row_count} rows</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDeleteTable(t.name)}
+                      disabled={deletingTable === t.name}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        cursor: 'pointer',
+                        color: 'var(--v2-red-500)',
+                        fontSize: 11,
+                        fontWeight: 500,
+                        opacity: deletingTable === t.name ? 0.5 : 1,
+                        padding: '2px 6px',
+                      }}
+                    >
+                      {deletingTable === t.name ? 'Deleting...' : 'Delete'}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
 

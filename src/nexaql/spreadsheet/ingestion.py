@@ -439,7 +439,7 @@ def list_tables() -> list[dict[str, str | int]]:
     if not os.path.exists(db_path):
         return []
 
-    conn = duckdb.connect(db_path, read_only=True)
+    conn = duckdb.connect(db_path)
     try:
         rows = conn.execute(
             "SELECT table_name FROM information_schema.tables "
@@ -474,7 +474,7 @@ def table_exists(table_name: str) -> bool:
     if not os.path.exists(db_path):
         return False
 
-    conn = duckdb.connect(db_path, read_only=True)
+    conn = duckdb.connect(db_path)
     try:
         row = conn.execute(
             "SELECT COUNT(*) FROM information_schema.tables "

@@ -66,11 +66,7 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
         f.write(content)
 
     table_name = _clean_table_name(file.filename)
-    if table_exists(table_name):
-        return JSONResponse(
-            {"error": f"Table '{table_name}' already exists. Delete it first or rename your file."},
-            status_code=409,
-        )
+    replaced = table_exists(table_name)
 
     delimiter = "\t" if ext == ".tsv" else None
 
@@ -93,7 +89,7 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     ]
 
     return JSONResponse({
-        "status": "uploaded",
+        "status": "replaced" if replaced else "uploaded",
         "connector_id": connector_id,
         "connector_name": SPREADSHEETS_CONNECTOR_NAME,
         "table_name": result.table_name,

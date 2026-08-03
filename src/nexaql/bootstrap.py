@@ -556,15 +556,18 @@ def save_schema(
     if isinstance(ontology_json, dict):
         ontology_json = json.dumps(ontology_json)
 
-    # Upsert by (domain, schema_name)
-    existing = get_schema(domain_name, schema_name)
-    if existing:
+    # Upsert by (domain_id, name) — direct check without connector JOIN
+    row = conn.execute(
+        "SELECT id FROM schemas WHERE domain_id = ? AND name = ?",
+        [domain_id, schema_name],
+    ).fetchone()
+    if row:
         conn.execute(
             "UPDATE schemas SET connector_id = ?, ontology_json = ?, updated_at = ? "
             "WHERE id = ?",
-            [connector_id, ontology_json, _now(), existing["id"]],
+            [connector_id, ontology_json, _now(), row[0]],
         )
-        return existing["id"]
+        return row[0]
     else:
         now = _now()
         conn.execute(
