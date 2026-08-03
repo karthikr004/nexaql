@@ -106,6 +106,14 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
     else:
         history = [{"role": m.role, "content": m.content} for m in body.history]
 
+    # Lookup relevant business ontology entries for this question
+    business_context: list[dict] = []
+    domain_name = getattr(ontology, "domain", None)
+    if domain_name:
+        domain_record = bs.get_domain(domain_name)
+        if domain_record:
+            business_context = bs.lookup_business_ontology(domain_record["id"], body.question)
+
     try:
         result: ChatResponse = await ask(
             question=body.question,
@@ -114,6 +122,7 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
             adapter=adapter,
             llm_config=cfg.llm,
             user=user,
+            business_context=business_context or None,
         )
     except Exception as e:
         return ChatResponseBody(error=str(e), threadId=thread_id)
