@@ -11,9 +11,10 @@ interface RoleEditorProps {
   userId: number;
   currentRoles: string[];
   onSave: (userId: number, roles: string[]) => Promise<void>;
+  disabled?: boolean;
 }
 
-export default function RoleEditor({ userId, currentRoles, onSave }: RoleEditorProps) {
+export default function RoleEditor({ userId, currentRoles, onSave, disabled }: RoleEditorProps) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(currentRoles[0] ?? '');
   const [saving, setSaving] = useState(false);
@@ -69,8 +70,9 @@ export default function RoleEditor({ userId, currentRoles, onSave }: RoleEditorP
       <div
         ref={triggerRef}
         className="v2-role-trigger"
-        onClick={() => setOpen(!open)}
-        title="Click to change role"
+        onClick={() => !disabled && setOpen(!open)}
+        title={disabled ? 'Last admin — cannot change role' : 'Click to change role'}
+        style={disabled ? { cursor: 'default', opacity: 0.7 } : undefined}
       >
         {currentRole ? (
           <span className={`v2-role-badge ${currentRole === 'admin' ? 'v2-role-admin' : ''}`}>
@@ -79,13 +81,15 @@ export default function RoleEditor({ userId, currentRoles, onSave }: RoleEditorP
         ) : (
           <span className="v2-role-none">no role</span>
         )}
-        <svg
-          width="12" height="12" viewBox="0 0 24 24" fill="none"
-          stroke="var(--v2-text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
-        >
-          <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
-          <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
-        </svg>
+        {!disabled && (
+          <svg
+            width="12" height="12" viewBox="0 0 24 24" fill="none"
+            stroke="var(--v2-text-tertiary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"
+          >
+            <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+            <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+          </svg>
+        )}
       </div>
 
       {open && createPortal(
