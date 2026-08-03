@@ -21,6 +21,7 @@ export default function ChatPage() {
   const [traceTurnId, setTraceTurnId] = useState<string | null>(null);
   const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
   const [threadRefreshKey, setThreadRefreshKey] = useState(0);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -203,12 +204,15 @@ export default function ChatPage() {
         overflow: 'hidden',
       }}
     >
-      <ThreadSidebar
-        activeThreadId={activeThreadId}
-        onSelectThread={loadThread}
-        onNewChat={handleNewChat}
-        refreshKey={threadRefreshKey}
-      />
+      {sidebarOpen && (
+        <ThreadSidebar
+          activeThreadId={activeThreadId}
+          onSelectThread={loadThread}
+          onNewChat={handleNewChat}
+          onClose={() => setSidebarOpen(false)}
+          refreshKey={threadRefreshKey}
+        />
+      )}
 
       {/* Chat column */}
       <div
@@ -351,6 +355,30 @@ export default function ChatPage() {
               onFocus={(e) => { e.currentTarget.style.borderColor = 'var(--v2-border-focus)'; }}
               onBlur={(e) => { e.currentTarget.style.borderColor = 'var(--v2-border)'; }}
             >
+              <button
+                type="button"
+                onClick={() => setSidebarOpen((o) => !o)}
+                title="Chat history"
+                style={{
+                  width: 32,
+                  height: 32,
+                  borderRadius: 'var(--v2-radius-md)',
+                  border: 'none',
+                  background: sidebarOpen ? 'var(--v2-accent-subtle)' : 'transparent',
+                  color: sidebarOpen ? 'var(--v2-accent)' : 'var(--v2-text-tertiary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                  transition: 'all var(--v2-transition-fast)',
+                }}
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 8v4l3 3" />
+                  <circle cx="12" cy="12" r="10" />
+                </svg>
+              </button>
               <textarea
                 ref={inputRef}
                 value={input}
