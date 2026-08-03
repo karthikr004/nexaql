@@ -164,6 +164,139 @@ def _clean_column_name(raw: str) -> str:
     return name
 
 
+_CAST_THRESHOLD = 0.7  # 70% of non-null values must cast successfully
+
+_DATE_FORMATS = [
+    "%Y-%m-%d",       # 2024-01-15
+    "%m/%d/%Y",       # 01/15/2024
+    "%d/%m/%Y",       # 15/01/2024
+    "%m-%d-%Y",       # 01-15-2024
+    "%Y/%m/%d",       # 2024/01/15
+    "%b %d, %Y",      # Jan 15, 2024
+    "%B %d, %Y",      # January 15, 2024
+    "%m/%d",          # 05/30 (no year — common in spreadsheets)
+    "%d-%b-%Y",       # 15-Jan-2024
+]
+
+
+def _try_date_upgrade(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    col_name: str,
+    non_null_count: int,
+) -> bool:
+    """Try to upgrade a VARCHAR column to DATE using various format patterns."""
+    for fmt in _DATE_FORMATS:
+        cast_expr = f'TRY_STRPTIME("{col_name}", \'{fmt}\')'
+        cast_count = conn.execute(
+            f'SELECT COUNT(*) FROM {table_name} '
+            f'WHERE {cast_expr} IS NOT NULL '
+            f'AND "{col_name}" IS NOT NULL AND TRIM("{col_name}") != \'\''
+        ).fetchone()
+
+        if not cast_count or cast_count[0] / non_null_count < _CAST_THRESHOLD:
+            continue
+
+        try:
+            tmp_col = f"__{col_name}_cast"
+            conn.execute(
+                f'ALTER TABLE {table_name} ADD COLUMN "{tmp_col}" DATE'
+            )
+            conn.execute(
+                f'UPDATE {table_name} SET "{tmp_col}" = CAST({cast_expr} AS DATE)'
+            )
+            conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{col_name}"')
+            conn.execute(
+                f'ALTER TABLE {table_name} RENAME COLUMN "{tmp_col}" TO "{col_name}"'
+            )
+            return True
+        except Exception:
+            try:
+                conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{tmp_col}"')
+            except Exception:
+                pass
+    return False
+
+
+def _try_numeric_upgrade(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    col_name: str,
+    non_null_count: int,
+) -> bool:
+    """Try to upgrade a VARCHAR column to DOUBLE."""
+    cast_count = conn.execute(
+        f'SELECT COUNT(*) FROM {table_name} '
+        f'WHERE TRY_CAST("{col_name}" AS DOUBLE) IS NOT NULL '
+        f'AND "{col_name}" IS NOT NULL AND TRIM("{col_name}") != \'\''
+    ).fetchone()
+
+    if not cast_count or cast_count[0] / non_null_count < _CAST_THRESHOLD:
+        return False
+
+    try:
+        tmp_col = f"__{col_name}_cast"
+        conn.execute(
+            f'ALTER TABLE {table_name} ADD COLUMN "{tmp_col}" DOUBLE'
+        )
+        conn.execute(
+            f'UPDATE {table_name} SET "{tmp_col}" = TRY_CAST("{col_name}" AS DOUBLE)'
+        )
+        conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{col_name}"')
+        conn.execute(
+            f'ALTER TABLE {table_name} RENAME COLUMN "{tmp_col}" TO "{col_name}"'
+        )
+        return True
+    except Exception:
+        try:
+            conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{tmp_col}"')
+        except Exception:
+            pass
+    return False
+
+
+def _upgrade_column_types(conn: duckdb.DuckDBPyConnection, table_name: str) -> None:
+    """Try to upgrade VARCHAR columns to DATE or numeric types.
+
+    For each VARCHAR column, samples values and attempts parsing with
+    multiple date formats (via TRY_STRPTIME) and numeric casting.
+    If enough values parse successfully, replaces the column in-place.
+    """
+    col_rows = conn.execute(
+        f"SELECT column_name, data_type "
+        f"FROM information_schema.columns "
+        f"WHERE table_name = '{table_name}' AND table_schema = 'main' "
+        f"AND data_type = 'VARCHAR' "
+        f"ORDER BY ordinal_position"
+    ).fetchall()
+
+    if not col_rows:
+        return
+
+    for col_name, _ in col_rows:
+        non_null = conn.execute(
+            f'SELECT COUNT(*) FROM {table_name} WHERE "{col_name}" IS NOT NULL '
+            f'AND TRIM("{col_name}") != \'\''
+        ).fetchone()
+        if not non_null or non_null[0] < 3:
+            continue
+        non_null_count = non_null[0]
+
+        # Try date formats first (column names containing "date", "time", etc. get priority)
+        name_lower = col_name.lower()
+        is_date_hint = any(
+            kw in name_lower for kw in ("date", "time", "created", "updated", "timestamp", "day", "month")
+        )
+
+        if is_date_hint:
+            if _try_date_upgrade(conn, table_name, col_name, non_null_count):
+                continue
+
+        if not _try_numeric_upgrade(conn, table_name, col_name, non_null_count):
+            if not is_date_hint:
+                _try_date_upgrade(conn, table_name, col_name, non_null_count)
+
+
 def get_uploads_dir() -> str:
     _ensure_dirs()
     return _UPLOADS_DIR
@@ -246,7 +379,10 @@ def ingest_csv(
                 f'ALTER TABLE {table_name} RENAME COLUMN "{old_name}" TO "{new_name}"'
             )
 
-        # Re-fetch column metadata after renames
+        # Try to upgrade VARCHAR columns to proper types (DATE, DOUBLE, etc.)
+        _upgrade_column_types(conn, table_name)
+
+        # Re-fetch column metadata after renames and type upgrades
         col_rows = conn.execute(
             f"SELECT column_name, data_type, is_nullable "
             f"FROM information_schema.columns "
