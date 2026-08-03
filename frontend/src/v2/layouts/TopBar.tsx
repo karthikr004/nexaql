@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect } from 'react';
 import { useTheme } from '../../ThemeContext';
+import { useAuth } from '../contexts/AuthContext';
 import { useDomain } from '../contexts/DomainContext';
+import UserMenu from '../components/UserMenu';
 
 interface TopBarProps {
   title: string;
@@ -8,6 +10,7 @@ interface TopBarProps {
 
 export default function TopBar({ title }: TopBarProps) {
   const { theme, toggle } = useTheme();
+  const { user, authMode } = useAuth();
   const { domains, activeDomain, switchDomain } = useDomain();
   const [showMenu, setShowMenu] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -67,6 +70,8 @@ export default function TopBar({ title }: TopBarProps) {
           )}
         </div>
       )}
+
+      {user && <UserMenu user={user} authMode={authMode} />}
 
       <button
         className="v2-icon-btn"
