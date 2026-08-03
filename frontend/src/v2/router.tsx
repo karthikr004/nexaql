@@ -4,11 +4,13 @@ import HomeRedirect from './components/HomeRedirect';
 import ChatPage from './pages/ChatPage';
 import DomainsPage from './pages/DomainsPage';
 import ConnectorsPage from './pages/ConnectorsPage';
+import LoginPage from './pages/LoginPage';
 import PlaygroundPage from './pages/PlaygroundPage';
 import SetupPage from './pages/SetupPage';
 import SettingsPage from './pages/SettingsPage';
 
 export const routes: RouteObject[] = [
+  { path: '/login', element: <LoginPage /> },
   {
     path: '/',
     element: <AppShell />,
