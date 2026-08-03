@@ -34,18 +34,29 @@ async def get_user_context(request: Request) -> UserContext:
 
 
 def _oauth_mode_context(request: Request) -> UserContext:
-    """Extract user from session cookie in oauth mode."""
+    """Extract user from session cookie in oauth mode.
+
+    Roles are always fetched from the database so that role changes
+    by an admin take effect immediately without requiring re-login.
+    """
     token = request.cookies.get(_SESSION_COOKIE)
     if not token:
         raise HTTPException(status_code=401, detail="Authentication required")
 
     claims = _verify_session_token(token)
-    roles = claims.get("roles", [])
+    user_id = claims.get("sub", "")
+
+    db_user = bs.get_user_by_id(int(user_id)) if user_id else None
+    if db_user and not db_user.get("is_active", True):
+        raise HTTPException(status_code=403, detail="Account is deactivated")
+
+    roles = db_user["roles"] if db_user else claims.get("roles", [])
+
     return UserContext(
-        user_id=str(claims.get("sub", "")),
+        user_id=str(user_id),
         roles=roles,
-        name=claims.get("name"),
-        email=claims.get("email"),
+        name=db_user.get("name") if db_user else claims.get("name"),
+        email=db_user.get("email") if db_user else claims.get("email"),
     )
 
 
