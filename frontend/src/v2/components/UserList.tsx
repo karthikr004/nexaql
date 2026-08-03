@@ -12,6 +12,11 @@ interface User {
   last_login_at: string | null;
 }
 
+interface RoleOption {
+  value: string;
+  description: string;
+}
+
 interface Toast {
   message: string;
   type: 'success' | 'error' | 'info';
@@ -23,6 +28,7 @@ interface UserListProps {
 
 export default function UserList({ showToast }: UserListProps) {
   const [users, setUsers] = useState<User[]>([]);
+  const [roles, setRoles] = useState<RoleOption[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchUsers = useCallback(async () => {
@@ -38,7 +44,22 @@ export default function UserList({ showToast }: UserListProps) {
     }
   }, []);
 
-  useEffect(() => { fetchUsers(); }, [fetchUsers]);
+  const fetchRoles = useCallback(async () => {
+    try {
+      const res = await fetch('/api/admin/roles', { credentials: 'include' });
+      if (res.ok) {
+        const data = await res.json();
+        const entries: RoleOption[] = Object.entries(data.roles ?? {}).map(
+          ([value, defn]) => ({ value, description: (defn as { description?: string }).description ?? '' }),
+        );
+        setRoles(entries);
+      }
+    } catch {
+      // ignore
+    }
+  }, []);
+
+  useEffect(() => { fetchUsers(); fetchRoles(); }, [fetchUsers, fetchRoles]);
 
   const adminCount = users.filter(
     (u) => u.is_active && u.roles.includes('admin'),
@@ -157,6 +178,7 @@ export default function UserList({ showToast }: UserListProps) {
                     <RoleEditor
                       userId={u.id}
                       currentRoles={u.roles}
+                      roles={roles}
                       onSave={handleRoleSave}
                       disabled={isLastAdmin}
                     />

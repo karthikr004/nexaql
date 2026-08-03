@@ -142,7 +142,7 @@ class GitHubOAuth:
             provider="github",
             sub=str(user_data["id"]),
             email=email or "",
-            name=user_data.get("name"),
+            name=user_data.get("name") or user_data.get("login"),
             avatar_url=user_data.get("avatar_url"),
         )
 

@@ -1,20 +1,20 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 
-const SYSTEM_ROLES = [
-  { value: 'admin', label: 'Admin', description: 'Full access' },
-  { value: 'analyst', label: 'Analyst', description: 'Query & view' },
-  { value: 'viewer', label: 'Viewer', description: 'Read-only' },
-] as const;
+interface RoleOption {
+  value: string;
+  description: string;
+}
 
 interface RoleEditorProps {
   userId: number;
   currentRoles: string[];
+  roles: RoleOption[];
   onSave: (userId: number, roles: string[]) => Promise<void>;
   disabled?: boolean;
 }
 
-export default function RoleEditor({ userId, currentRoles, onSave, disabled }: RoleEditorProps) {
+export default function RoleEditor({ userId, currentRoles, roles, onSave, disabled }: RoleEditorProps) {
   const [open, setOpen] = useState(false);
   const [selected, setSelected] = useState(currentRoles[0] ?? '');
   const [saving, setSaving] = useState(false);
@@ -42,14 +42,14 @@ export default function RoleEditor({ userId, currentRoles, onSave, disabled }: R
   const getDropdownStyle = useCallback((): React.CSSProperties => {
     if (!triggerRef.current) return { position: 'fixed', top: 0, left: 0 };
     const rect = triggerRef.current.getBoundingClientRect();
-    const dropdownHeight = 180;
+    const dropdownHeight = 60 + roles.length * 40;
     const spaceBelow = window.innerHeight - rect.bottom;
     const top = spaceBelow < dropdownHeight
       ? rect.top - dropdownHeight
       : rect.bottom + 4;
 
     return { position: 'fixed', top, left: rect.left };
-  }, []);
+  }, [roles.length]);
 
   const handleSave = async () => {
     if (selected === (currentRoles[0] ?? '')) return;
@@ -95,7 +95,7 @@ export default function RoleEditor({ userId, currentRoles, onSave, disabled }: R
       {open && createPortal(
         <div ref={dropdownRef} className="v2-role-dropdown" style={getDropdownStyle()}>
           <div className="v2-role-dropdown-header">Select role</div>
-          {SYSTEM_ROLES.map((role) => (
+          {roles.map((role) => (
             <label key={role.value} className="v2-role-option">
               <input
                 type="radio"
@@ -104,7 +104,7 @@ export default function RoleEditor({ userId, currentRoles, onSave, disabled }: R
                 onChange={() => setSelected(role.value)}
                 className="v2-role-radio"
               />
-              <span className="v2-role-option-label">{role.label}</span>
+              <span className="v2-role-option-label">{role.value}</span>
               <span className="v2-role-option-desc">{role.description}</span>
             </label>
           ))}
