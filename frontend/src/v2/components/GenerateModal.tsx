@@ -49,6 +49,12 @@ export default function GenerateModal({
   const [uploading, setUploading] = useState(false);
   const [uploadedConnector, setUploadedConnector] = useState('');
   const [dragOver, setDragOver] = useState(false);
+  const [uploadMeta, setUploadMeta] = useState<{
+    columns: { name: string; type: string }[];
+    preview: Record<string, string | null>[];
+    row_count: number;
+    header_row: number;
+  } | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const resetTables = () => {
@@ -61,6 +67,7 @@ export default function GenerateModal({
     setConnector('');
     setFile(null);
     setUploadedConnector('');
+    setUploadMeta(null);
     resetTables();
   };
 
@@ -72,6 +79,7 @@ export default function GenerateModal({
     }
     setFile(f);
     setUploadedConnector('');
+    setUploadMeta(null);
     resetTables();
   }, [onToast]);
 
@@ -97,6 +105,13 @@ export default function GenerateModal({
       setUploadedConnector(connName);
       setConnector(connName);
 
+      setUploadMeta({
+        columns: body.columns ?? [],
+        preview: body.preview ?? [],
+        row_count: body.row_count ?? 0,
+        header_row: body.header_row ?? 0,
+      });
+
       // Auto-introspect the uploaded connector
       const introRes = await fetch(`/api/connectors/${encodeURIComponent(connName)}/introspect`, {
         method: 'POST',
@@ -110,8 +125,9 @@ export default function GenerateModal({
         const allNames = new Set<string>();
         for (const item of t) allNames.add(item.name);
         setSelected(allNames);
+        const skipNote = body.header_row > 0 ? ` (header detected at row ${body.header_row + 1})` : '';
         onToast({
-          message: `"${file.name}" uploaded — ${body.row_count} rows, ${body.column_count} columns`,
+          message: `"${file.name}" uploaded — ${body.row_count} rows, ${body.column_count} columns${skipNote}`,
           type: 'success',
         });
       } else {
@@ -415,6 +431,68 @@ export default function GenerateModal({
                 <polyline points="20 6 9 17 4 12" />
               </svg>
               <span>{file?.name} uploaded as <strong>{uploadedConnector}</strong></span>
+            </div>
+          )}
+
+          {/* Data preview after upload */}
+          {sourceType === 'csv' && uploadMeta && uploadMeta.preview.length > 0 && (
+            <div>
+              <label className="v2-label" style={{ display: 'block', marginBottom: 6 }}>
+                Data preview ({uploadMeta.row_count} rows, {uploadMeta.columns.length} columns)
+              </label>
+              <div style={{
+                borderRadius: 'var(--v2-radius-md)',
+                border: '1px solid var(--v2-border)',
+                overflowX: 'auto',
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      {uploadMeta.columns.map((col) => (
+                        <th key={col.name} style={{
+                          padding: '5px 8px',
+                          textAlign: 'left',
+                          fontWeight: 600,
+                          color: 'var(--v2-text-primary)',
+                          background: 'var(--v2-bg-hover)',
+                          borderBottom: '1px solid var(--v2-border)',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'var(--v2-font-mono)',
+                        }}>
+                          {col.name}
+                          <span style={{
+                            marginLeft: 4,
+                            fontSize: 9,
+                            fontWeight: 400,
+                            color: 'var(--v2-text-tertiary)',
+                            textTransform: 'uppercase',
+                          }}>{col.type}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uploadMeta.preview.map((row, i) => (
+                      <tr key={i}>
+                        {uploadMeta.columns.map((col) => (
+                          <td key={col.name} style={{
+                            padding: '4px 8px',
+                            color: row[col.name] != null ? 'var(--v2-text-secondary)' : 'var(--v2-text-tertiary)',
+                            borderBottom: '1px solid var(--v2-border-light)',
+                            whiteSpace: 'nowrap',
+                            maxWidth: 180,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            fontStyle: row[col.name] == null ? 'italic' : 'normal',
+                          }}>
+                            {row[col.name] ?? 'null'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           )}
 

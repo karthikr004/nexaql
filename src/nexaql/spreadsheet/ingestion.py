@@ -3,7 +3,9 @@
 
 from __future__ import annotations
 
+import csv
 import os
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -23,11 +25,17 @@ class IngestionResult:
     duckdb_path: str
     row_count: int
     columns: list[ColumnMeta] = field(default_factory=list)
+    preview: list[dict[str, str | None]] = field(default_factory=list)
+    header_row: int = 0
+    skipped_rows: int = 0
 
 
 _NEXAQL_DIR = os.path.join(Path.home(), ".nexaql")
 _UPLOADS_DIR = os.path.join(_NEXAQL_DIR, "uploads")
 _SPREADSHEETS_DIR = os.path.join(_NEXAQL_DIR, "spreadsheets")
+
+_MAX_SCAN_ROWS = 30
+_PREVIEW_ROWS = 5
 
 
 def _ensure_dirs() -> None:
@@ -35,12 +43,125 @@ def _ensure_dirs() -> None:
     os.makedirs(_SPREADSHEETS_DIR, exist_ok=True)
 
 
-def _sanitize_table_name(filename: str) -> str:
+def _detect_delimiter(file_path: str) -> str:
+    """Detect CSV delimiter by sniffing the first few KB."""
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        sample = f.read(8192)
+    try:
+        dialect = csv.Sniffer().sniff(sample, delimiters=",\t;|")
+        return dialect.delimiter
+    except csv.Error:
+        return ","
+
+
+def _is_header_row(cells: list[str], total_cols: int) -> bool:
+    """Score whether a row looks like a header.
+
+    A header row has mostly non-empty, non-numeric, unique text values.
+    """
+    if not cells or total_cols == 0:
+        return False
+
+    non_empty = [c.strip() for c in cells if c.strip()]
+    if len(non_empty) < max(1, total_cols * 0.5):
+        return False
+
+    numeric_count = sum(1 for c in non_empty if _is_numeric(c))
+    if numeric_count > len(non_empty) * 0.5:
+        return False
+
+    if len(set(c.lower() for c in non_empty)) < len(non_empty) * 0.8:
+        return False
+
+    return True
+
+
+def _is_numeric(val: str) -> bool:
+    """Check if a string looks like a number (including dates like 05/30)."""
+    val = val.strip().lstrip("$").replace(",", "")
+    try:
+        float(val)
+        return True
+    except ValueError:
+        return False
+
+
+def _is_empty_row(cells: list[str]) -> bool:
+    return all(not c.strip() for c in cells)
+
+
+def detect_header_row(file_path: str, delimiter: str) -> tuple[int, int]:
+    """Scan the first N rows to find the actual header row.
+
+    Returns (header_row_index, expected_column_count).
+    header_row_index is 0-based line number in the file.
+    """
+    rows: list[list[str]] = []
+    with open(file_path, "r", encoding="utf-8", errors="replace") as f:
+        reader = csv.reader(f, delimiter=delimiter)
+        for i, row in enumerate(reader):
+            if i >= _MAX_SCAN_ROWS:
+                break
+            rows.append(row)
+
+    if not rows:
+        return 0, 0
+
+    max_cols = max(len(r) for r in rows)
+
+    for i, row in enumerate(rows):
+        padded = row + [""] * (max_cols - len(row))
+        if _is_header_row(padded, max_cols):
+            return i, max_cols
+
+    return 0, max_cols
+
+
+def _clean_table_name(filename: str) -> str:
+    """Derive a short, readable table name from a filename.
+
+    Strips extensions, parenthetical content, deduplicates words,
+    and truncates to a reasonable length.
+    """
     stem = Path(filename).stem
-    name = "".join(c if c.isalnum() or c == "_" else "_" for c in stem)
-    if name and name[0].isdigit():
-        name = f"t_{name}"
-    return name.lower() or "uploaded_data"
+
+    # Remove content after common separators that indicate duplicated sheet names
+    # e.g. "Report - Sheet1" or "Expenses (personal) - Copy"
+    stem = re.split(r"\s*[-–—]\s+", stem)[0]
+
+    # Remove parenthetical content
+    stem = re.sub(r"\s*\([^)]*\)", "", stem)
+
+    # Replace non-alphanumeric with underscores
+    name = re.sub(r"[^a-zA-Z0-9]+", "_", stem)
+
+    # Collapse multiple underscores, strip leading/trailing
+    name = re.sub(r"_+", "_", name).strip("_")
+
+    # Lowercase
+    name = name.lower()
+
+    # Truncate to 60 chars at a word boundary
+    if len(name) > 60:
+        name = name[:60].rsplit("_", 1)[0]
+
+    if not name or name[0].isdigit():
+        name = f"t_{name}" if name else "uploaded_data"
+
+    return name
+
+
+def _clean_column_name(raw: str) -> str:
+    """Normalize a column name for SQL compatibility."""
+    name = raw.strip()
+    name = re.sub(r"[^a-zA-Z0-9_]+", "_", name)
+    name = re.sub(r"_+", "_", name).strip("_")
+    name = name.lower()
+    if not name:
+        return "unnamed"
+    if name[0].isdigit():
+        name = f"col_{name}"
+    return name
 
 
 def get_uploads_dir() -> str:
@@ -61,32 +182,71 @@ def ingest_csv(
 ) -> IngestionResult:
     """Load a CSV/TSV file into a DuckDB database.
 
-    Uses DuckDB's read_csv_auto for type inference and fast loading.
-    The DuckDB file is stored at ~/.nexaql/spreadsheets/{connector_name}.duckdb.
+    Performs smart header detection to skip leading blank/metadata rows,
+    then uses DuckDB's read_csv_auto for type inference and fast loading.
     """
     _ensure_dirs()
 
     if table_name is None:
-        table_name = _sanitize_table_name(os.path.basename(file_path))
+        table_name = _clean_table_name(os.path.basename(file_path))
+
+    if delimiter is None:
+        delimiter = _detect_delimiter(file_path)
+
+    header_row, _ = detect_header_row(file_path, delimiter)
 
     db_path = get_duckdb_path(connector_name)
     conn = duckdb.connect(db_path)
 
     try:
-        options = f"auto_detect=true, header=true"
-        if delimiter:
-            escaped = delimiter.replace("'", "''")
-            options += f", delim='{escaped}'"
+        escaped_path = file_path.replace("'", "''")
+        escaped_delim = delimiter.replace("'", "''")
 
         conn.execute(f"DROP TABLE IF EXISTS {table_name}")
         conn.execute(
             f"CREATE TABLE {table_name} AS "
-            f"SELECT * FROM read_csv_auto('{file_path}', {options})"
+            f"SELECT * FROM read_csv_auto("
+            f"'{escaped_path}', "
+            f"auto_detect=true, "
+            f"header=true, "
+            f"skip={header_row}, "
+            f"delim='{escaped_delim}'"
+            f")"
         )
 
-        row_count_result = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
-        row_count = row_count_result[0] if row_count_result else 0
+        # Drop rows where ALL columns are NULL (blank rows in the data)
+        col_rows = conn.execute(
+            f"SELECT column_name, data_type, is_nullable "
+            f"FROM information_schema.columns "
+            f"WHERE table_name = '{table_name}' AND table_schema = 'main' "
+            f"ORDER BY ordinal_position"
+        ).fetchall()
 
+        col_names = [r[0] for r in col_rows]
+        if col_names:
+            null_check = " AND ".join(f'"{c}" IS NULL' for c in col_names)
+            conn.execute(f"DELETE FROM {table_name} WHERE {null_check}")
+
+        # Rename columns to clean SQL-safe names if needed
+        rename_map: dict[str, str] = {}
+        seen: set[str] = set()
+        for raw_name, _, _ in col_rows:
+            clean = _clean_column_name(raw_name)
+            if clean in seen:
+                suffix = 2
+                while f"{clean}_{suffix}" in seen:
+                    suffix += 1
+                clean = f"{clean}_{suffix}"
+            seen.add(clean)
+            if clean != raw_name:
+                rename_map[raw_name] = clean
+
+        for old_name, new_name in rename_map.items():
+            conn.execute(
+                f'ALTER TABLE {table_name} RENAME COLUMN "{old_name}" TO "{new_name}"'
+            )
+
+        # Re-fetch column metadata after renames
         col_rows = conn.execute(
             f"SELECT column_name, data_type, is_nullable "
             f"FROM information_schema.columns "
@@ -95,19 +255,34 @@ def ingest_csv(
         ).fetchall()
 
         columns = [
-            ColumnMeta(
-                name=row[0],
-                dtype=str(row[1]),
-                nullable=row[2] == "YES",
-            )
-            for row in col_rows
+            ColumnMeta(name=r[0], dtype=str(r[1]), nullable=r[2] == "YES")
+            for r in col_rows
         ]
+
+        row_count_result = conn.execute(f"SELECT COUNT(*) FROM {table_name}").fetchone()
+        row_count = row_count_result[0] if row_count_result else 0
+
+        # Fetch preview rows
+        preview: list[dict[str, str | None]] = []
+        if col_rows:
+            preview_result = conn.execute(
+                f"SELECT * FROM {table_name} LIMIT {_PREVIEW_ROWS}"
+            ).fetchall()
+            col_names_clean = [c.name for c in columns]
+            for row in preview_result:
+                preview.append({
+                    col_names_clean[i]: (str(v) if v is not None else None)
+                    for i, v in enumerate(row)
+                })
 
         return IngestionResult(
             table_name=table_name,
             duckdb_path=db_path,
             row_count=row_count,
             columns=columns,
+            preview=preview,
+            header_row=header_row,
+            skipped_rows=header_row,
         )
     finally:
         conn.close()

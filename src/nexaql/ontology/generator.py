@@ -137,6 +137,19 @@ _TYPE_MAP: dict[str, str] = {
     # Array (treat as string)
     "array": "string",
     "user-defined": "string",
+    # DuckDB-specific types
+    "double": "numeric",
+    "hugeint": "integer",
+    "ubigint": "integer",
+    "uinteger": "integer",
+    "usmallint": "integer",
+    "utinyint": "integer",
+    "blob": "string",
+    "bit": "string",
+    "timestamp_s": "date",
+    "timestamp_ms": "date",
+    "timestamp_ns": "date",
+    "timestamp_tz": "date",
 }
 
 # Patterns that suggest a column is PII
