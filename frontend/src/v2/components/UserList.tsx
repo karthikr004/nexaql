@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import RoleEditor from './RoleEditor';
 
 interface User {
   id: number;
@@ -39,21 +40,40 @@ export default function UserList({ showToast }: UserListProps) {
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
 
-  const handleToggleActive = useCallback(async (user: User) => {
-    try {
-      const res = await fetch(`/api/admin/users/${user.id}/active`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_active: !user.is_active }),
-        credentials: 'include',
-      });
-      if (res.ok) {
-        showToast({ message: `${user.email} ${user.is_active ? 'deactivated' : 'activated'}`, type: 'success' });
-        fetchUsers();
-      }
-    } catch (err) {
-      showToast({ message: `Error: ${err}`, type: 'error' });
+  const adminCount = users.filter(
+    (u) => u.is_active && u.roles.includes('admin'),
+  ).length;
+
+  const handleRoleSave = useCallback(async (userId: number, roles: string[]) => {
+    const res = await fetch(`/api/admin/users/${userId}/roles`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roles }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to update roles' }));
+      showToast({ message: err.detail, type: 'error' });
+      return;
     }
+    showToast({ message: 'Roles updated', type: 'success' });
+    fetchUsers();
+  }, [fetchUsers, showToast]);
+
+  const handleToggleActive = useCallback(async (user: User) => {
+    const res = await fetch(`/api/admin/users/${user.id}/active`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ is_active: !user.is_active }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to update status' }));
+      showToast({ message: err.detail, type: 'error' });
+      return;
+    }
+    showToast({ message: `${user.email} ${user.is_active ? 'deactivated' : 'activated'}`, type: 'success' });
+    fetchUsers();
   }, [fetchUsers, showToast]);
 
   if (loading) {
@@ -102,73 +122,71 @@ export default function UserList({ showToast }: UserListProps) {
             </tr>
           </thead>
           <tbody>
-            {users.map((u) => (
-              <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5 }}>
-                <td>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                    {u.avatar_url ? (
-                      <img
-                        src={u.avatar_url}
-                        alt=""
-                        style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }}
-                      />
-                    ) : (
-                      <div style={{
-                        width: 28, height: 28, borderRadius: '50%',
-                        background: 'var(--v2-purple-100)', color: 'var(--v2-purple-700)',
-                        display: 'flex', alignItems: 'center', justifyContent: 'center',
-                        fontSize: 11, fontWeight: 600,
-                      }}>
-                        {(u.name ?? u.email).charAt(0).toUpperCase()}
+            {users.map((u) => {
+              const isLastAdmin = u.is_active && u.roles.includes('admin') && adminCount <= 1;
+              return (
+                <tr key={u.id} style={{ opacity: u.is_active ? 1 : 0.5 }}>
+                  <td>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      {u.avatar_url ? (
+                        <img
+                          src={u.avatar_url}
+                          alt=""
+                          style={{ width: 28, height: 28, borderRadius: '50%', objectFit: 'cover' }}
+                        />
+                      ) : (
+                        <div style={{
+                          width: 28, height: 28, borderRadius: '50%',
+                          background: 'var(--v2-purple-100)', color: 'var(--v2-purple-700)',
+                          display: 'flex', alignItems: 'center', justifyContent: 'center',
+                          fontSize: 11, fontWeight: 600,
+                        }}>
+                          {(u.name ?? u.email).charAt(0).toUpperCase()}
+                        </div>
+                      )}
+                      <div>
+                        <div style={{ fontWeight: 500, fontSize: 13 }}>{u.name ?? 'Unknown'}</div>
+                        <div style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}>{u.email}</div>
                       </div>
-                    )}
-                    <div>
-                      <div style={{ fontWeight: 500, fontSize: 13 }}>{u.name ?? 'Unknown'}</div>
-                      <div style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}>{u.email}</div>
                     </div>
-                  </div>
-                </td>
-                <td>
-                  <span className="v2-badge v2-badge-teal">{u.oauth_provider}</span>
-                </td>
-                <td>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {u.roles.length > 0 ? u.roles.map((r) => (
-                      <span
-                        key={r}
+                  </td>
+                  <td>
+                    <span className="v2-badge v2-badge-teal">{u.oauth_provider}</span>
+                  </td>
+                  <td>
+                    <RoleEditor
+                      userId={u.id}
+                      currentRoles={u.roles}
+                      onSave={handleRoleSave}
+                      disabled={isLastAdmin}
+                    />
+                  </td>
+                  <td>
+                    <span style={{ fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
+                      {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}
+                    </span>
+                  </td>
+                  <td>
+                    <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+                      <button
+                        type="button"
+                        className="v2-btn v2-btn-ghost v2-btn-sm"
+                        onClick={() => handleToggleActive(u)}
+                        disabled={isLastAdmin}
+                        title={isLastAdmin ? 'Cannot deactivate the last admin' : undefined}
                         style={{
-                          padding: '1px 6px', fontSize: 11, fontWeight: 500,
-                          borderRadius: 'var(--v2-radius-full)',
-                          background: r === 'admin' ? 'var(--v2-purple-50)' : 'var(--v2-bg-surface)',
-                          color: r === 'admin' ? 'var(--v2-purple-700)' : 'var(--v2-text-secondary)',
+                          color: u.is_active ? 'var(--v2-red-500)' : 'var(--v2-teal-600)',
+                          fontSize: 12,
+                          ...(isLastAdmin ? { opacity: 0.4, cursor: 'not-allowed' } : {}),
                         }}
                       >
-                        {r}
-                      </span>
-                    )) : (
-                      <span style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}>none</span>
-                    )}
-                  </div>
-                </td>
-                <td>
-                  <span style={{ fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
-                    {u.last_login_at ? new Date(u.last_login_at).toLocaleDateString() : 'Never'}
-                  </span>
-                </td>
-                <td>
-                  <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-                    <button
-                      type="button"
-                      className="v2-btn v2-btn-ghost v2-btn-sm"
-                      onClick={() => handleToggleActive(u)}
-                      style={{ color: u.is_active ? 'var(--v2-red-500)' : 'var(--v2-teal-600)', fontSize: 12 }}
-                    >
-                      {u.is_active ? 'Deactivate' : 'Activate'}
-                    </button>
-                  </div>
-                </td>
-              </tr>
-            ))}
+                        {u.is_active ? 'Deactivate' : 'Activate'}
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>

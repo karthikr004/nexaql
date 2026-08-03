@@ -49,7 +49,7 @@ def _issue_session_token(user: dict[str, Any]) -> str:
     secret = _get_session_secret()
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": user["id"],
+        "sub": str(user["id"]),
         "email": user["email"],
         "name": user.get("name"),
         "roles": user.get("roles", []),
@@ -190,7 +190,11 @@ async def logout() -> JSONResponse:
 
 @router.get("/auth/session")
 async def get_session(request: Request) -> dict[str, Any]:
-    """Return the current user from the session cookie, or unauthenticated status."""
+    """Return the current user from the session cookie, or unauthenticated status.
+
+    Roles are always fetched from the database so the frontend
+    reflects role changes without requiring re-login.
+    """
     token = request.cookies.get(_SESSION_COOKIE)
     if not token:
         return {"authenticated": False}
@@ -198,13 +202,20 @@ async def get_session(request: Request) -> dict[str, Any]:
         claims = _verify_session_token(token)
     except HTTPException:
         return {"authenticated": False}
+
+    user_id = int(claims["sub"])
+    db_user = bs.get_user_by_id(user_id)
+
+    if db_user and not db_user.get("is_active", True):
+        return {"authenticated": False}
+
     return {
         "authenticated": True,
         "user": {
-            "id": claims.get("sub"),
-            "email": claims.get("email"),
-            "name": claims.get("name"),
-            "roles": claims.get("roles", []),
-            "avatar_url": claims.get("avatar_url"),
+            "id": user_id,
+            "email": db_user["email"] if db_user else claims.get("email"),
+            "name": db_user.get("name") if db_user else claims.get("name"),
+            "roles": db_user["roles"] if db_user else claims.get("roles", []),
+            "avatar_url": db_user.get("avatar_url") if db_user else claims.get("avatar_url"),
         },
     }
