@@ -33,6 +33,9 @@ class IngestionResult:
 _NEXAQL_DIR = os.path.join(Path.home(), ".nexaql")
 _UPLOADS_DIR = os.path.join(_NEXAQL_DIR, "uploads")
 _SPREADSHEETS_DIR = os.path.join(_NEXAQL_DIR, "spreadsheets")
+_SHARED_DUCKDB = os.path.join(_SPREADSHEETS_DIR, "uploads.duckdb")
+
+SPREADSHEETS_CONNECTOR_NAME = "spreadsheets"
 
 _MAX_SCAN_ROWS = 30
 _PREVIEW_ROWS = 5
@@ -164,23 +167,147 @@ def _clean_column_name(raw: str) -> str:
     return name
 
 
+_CAST_THRESHOLD = 0.7
+
+_DATE_FORMATS = [
+    "%Y-%m-%d",
+    "%m/%d/%Y",
+    "%d/%m/%Y",
+    "%m-%d-%Y",
+    "%Y/%m/%d",
+    "%b %d, %Y",
+    "%B %d, %Y",
+    "%m/%d",
+    "%d-%b-%Y",
+]
+
+
+def _try_date_upgrade(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    col_name: str,
+    non_null_count: int,
+) -> bool:
+    for fmt in _DATE_FORMATS:
+        cast_expr = f'TRY_STRPTIME("{col_name}", \'{fmt}\')'
+        cast_count = conn.execute(
+            f'SELECT COUNT(*) FROM {table_name} '
+            f'WHERE {cast_expr} IS NOT NULL '
+            f'AND "{col_name}" IS NOT NULL AND TRIM("{col_name}") != \'\''
+        ).fetchone()
+
+        if not cast_count or cast_count[0] / non_null_count < _CAST_THRESHOLD:
+            continue
+
+        try:
+            tmp_col = f"__{col_name}_cast"
+            conn.execute(
+                f'ALTER TABLE {table_name} ADD COLUMN "{tmp_col}" DATE'
+            )
+            conn.execute(
+                f'UPDATE {table_name} SET "{tmp_col}" = CAST({cast_expr} AS DATE)'
+            )
+            conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{col_name}"')
+            conn.execute(
+                f'ALTER TABLE {table_name} RENAME COLUMN "{tmp_col}" TO "{col_name}"'
+            )
+            return True
+        except Exception:
+            try:
+                conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{tmp_col}"')
+            except Exception:
+                pass
+    return False
+
+
+def _try_numeric_upgrade(
+    conn: duckdb.DuckDBPyConnection,
+    table_name: str,
+    col_name: str,
+    non_null_count: int,
+) -> bool:
+    cast_count = conn.execute(
+        f'SELECT COUNT(*) FROM {table_name} '
+        f'WHERE TRY_CAST("{col_name}" AS DOUBLE) IS NOT NULL '
+        f'AND "{col_name}" IS NOT NULL AND TRIM("{col_name}") != \'\''
+    ).fetchone()
+
+    if not cast_count or cast_count[0] / non_null_count < _CAST_THRESHOLD:
+        return False
+
+    try:
+        tmp_col = f"__{col_name}_cast"
+        conn.execute(
+            f'ALTER TABLE {table_name} ADD COLUMN "{tmp_col}" DOUBLE'
+        )
+        conn.execute(
+            f'UPDATE {table_name} SET "{tmp_col}" = TRY_CAST("{col_name}" AS DOUBLE)'
+        )
+        conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{col_name}"')
+        conn.execute(
+            f'ALTER TABLE {table_name} RENAME COLUMN "{tmp_col}" TO "{col_name}"'
+        )
+        return True
+    except Exception:
+        try:
+            conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{tmp_col}"')
+        except Exception:
+            pass
+    return False
+
+
+def _upgrade_column_types(conn: duckdb.DuckDBPyConnection, table_name: str) -> None:
+    """Try to upgrade VARCHAR columns to DATE or numeric types."""
+    col_rows = conn.execute(
+        f"SELECT column_name, data_type "
+        f"FROM information_schema.columns "
+        f"WHERE table_name = '{table_name}' AND table_schema = 'main' "
+        f"AND data_type = 'VARCHAR' "
+        f"ORDER BY ordinal_position"
+    ).fetchall()
+
+    if not col_rows:
+        return
+
+    for col_name, _ in col_rows:
+        non_null = conn.execute(
+            f'SELECT COUNT(*) FROM {table_name} WHERE "{col_name}" IS NOT NULL '
+            f'AND TRIM("{col_name}") != \'\''
+        ).fetchone()
+        if not non_null or non_null[0] < 3:
+            continue
+        non_null_count = non_null[0]
+
+        name_lower = col_name.lower()
+        is_date_hint = any(
+            kw in name_lower for kw in ("date", "time", "created", "updated", "timestamp", "day", "month")
+        )
+
+        if is_date_hint:
+            if _try_date_upgrade(conn, table_name, col_name, non_null_count):
+                continue
+
+        if not _try_numeric_upgrade(conn, table_name, col_name, non_null_count):
+            if not is_date_hint:
+                _try_date_upgrade(conn, table_name, col_name, non_null_count)
+
+
 def get_uploads_dir() -> str:
     _ensure_dirs()
     return _UPLOADS_DIR
 
 
-def get_duckdb_path(connector_name: str) -> str:
+def get_shared_duckdb_path() -> str:
     _ensure_dirs()
-    return os.path.join(_SPREADSHEETS_DIR, f"{connector_name}.duckdb")
+    return _SHARED_DUCKDB
 
 
 def ingest_csv(
     file_path: str,
-    connector_name: str,
     table_name: str | None = None,
     delimiter: str | None = None,
 ) -> IngestionResult:
-    """Load a CSV/TSV file into a DuckDB database.
+    """Load a CSV/TSV file into the shared spreadsheets DuckDB.
 
     Performs smart header detection to skip leading blank/metadata rows,
     then uses DuckDB's read_csv_auto for type inference and fast loading.
@@ -195,7 +322,7 @@ def ingest_csv(
 
     header_row, _ = detect_header_row(file_path, delimiter)
 
-    db_path = get_duckdb_path(connector_name)
+    db_path = get_shared_duckdb_path()
     conn = duckdb.connect(db_path)
 
     try:
@@ -246,7 +373,9 @@ def ingest_csv(
                 f'ALTER TABLE {table_name} RENAME COLUMN "{old_name}" TO "{new_name}"'
             )
 
-        # Re-fetch column metadata after renames
+        _upgrade_column_types(conn, table_name)
+
+        # Re-fetch column metadata after renames and type upgrades
         col_rows = conn.execute(
             f"SELECT column_name, data_type, is_nullable "
             f"FROM information_schema.columns "
@@ -288,9 +417,9 @@ def ingest_csv(
         conn.close()
 
 
-def list_tables(connector_name: str) -> list[dict[str, str | int]]:
-    """List all tables in a spreadsheet connector's DuckDB file."""
-    db_path = get_duckdb_path(connector_name)
+def list_tables() -> list[dict[str, str | int]]:
+    """List all tables in the shared spreadsheets DuckDB."""
+    db_path = get_shared_duckdb_path()
     if not os.path.exists(db_path):
         return []
 
@@ -305,5 +434,36 @@ def list_tables(connector_name: str) -> list[dict[str, str | int]]:
             count = conn.execute(f"SELECT COUNT(*) FROM {tname}").fetchone()
             result.append({"name": tname, "row_count": count[0] if count else 0})
         return result
+    finally:
+        conn.close()
+
+
+def drop_table(table_name: str) -> bool:
+    """Drop a single table from the shared spreadsheets DuckDB."""
+    db_path = get_shared_duckdb_path()
+    if not os.path.exists(db_path):
+        return False
+
+    conn = duckdb.connect(db_path)
+    try:
+        conn.execute(f"DROP TABLE IF EXISTS {table_name}")
+        return True
+    finally:
+        conn.close()
+
+
+def table_exists(table_name: str) -> bool:
+    """Check if a table exists in the shared spreadsheets DuckDB."""
+    db_path = get_shared_duckdb_path()
+    if not os.path.exists(db_path):
+        return False
+
+    conn = duckdb.connect(db_path, read_only=True)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM information_schema.tables "
+            f"WHERE table_schema = 'main' AND table_name = '{table_name}'"
+        ).fetchone()
+        return bool(row and row[0] > 0)
     finally:
         conn.close()

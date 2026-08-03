@@ -1,10 +1,9 @@
 # Copyright (c) 2026-present NexaQL Contributors
-"""Spreadsheet connector — upload CSV/TSV files and query them via DuckDB."""
+"""Spreadsheet uploads — ingest CSV/TSV files into a shared DuckDB connector."""
 
 from __future__ import annotations
 
 import os
-import shutil
 
 from fastapi import APIRouter, UploadFile
 from fastapi.responses import JSONResponse
@@ -12,11 +11,14 @@ from fastapi.responses import JSONResponse
 from nexaql import bootstrap as bs
 from nexaql.api.deps import _adapter_cache, reload_config
 from nexaql.spreadsheet.ingestion import (
+    SPREADSHEETS_CONNECTOR_NAME,
     _clean_table_name,
-    get_duckdb_path,
+    drop_table,
+    get_shared_duckdb_path,
     get_uploads_dir,
     ingest_csv,
     list_tables,
+    table_exists,
 )
 
 router = APIRouter(tags=["spreadsheet"])
@@ -25,9 +27,22 @@ _ALLOWED_EXTENSIONS = {".csv", ".tsv", ".txt"}
 _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
+def _ensure_spreadsheets_connector() -> int:
+    """Get or create the shared spreadsheets connector."""
+    existing = bs.get_connector(SPREADSHEETS_CONNECTOR_NAME)
+    if existing:
+        return existing["id"]
+
+    return bs.save_connector(
+        name=SPREADSHEETS_CONNECTOR_NAME,
+        type="duckdb",
+        url=get_shared_duckdb_path(),
+    )
+
+
 @router.post("/connectors/upload")
 async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
-    """Upload a CSV/TSV file and create a connector backed by DuckDB."""
+    """Upload a CSV/TSV file into the shared spreadsheets DuckDB."""
     if not file.filename:
         return JSONResponse({"error": "No file provided"}, status_code=400)
 
@@ -50,14 +65,10 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     with open(file_path, "wb") as f:
         f.write(content)
 
-    connector_name = _clean_table_name(file.filename)
-    if not connector_name:
-        connector_name = "uploaded_csv"
-
-    existing = bs.get_connector(connector_name)
-    if existing:
+    table_name = _clean_table_name(file.filename)
+    if table_exists(table_name):
         return JSONResponse(
-            {"error": f"Connector '{connector_name}' already exists. Delete it first or rename your file."},
+            {"error": f"Table '{table_name}' already exists. Delete it first or rename your file."},
             status_code=409,
         )
 
@@ -66,7 +77,7 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     try:
         result = ingest_csv(
             file_path=file_path,
-            connector_name=connector_name,
+            table_name=table_name,
             delimiter=delimiter,
         )
     except Exception as e:
@@ -74,11 +85,7 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
             os.remove(file_path)
         return JSONResponse({"error": f"Failed to process file: {e}"}, status_code=400)
 
-    connector_id = bs.save_connector(
-        name=connector_name,
-        type="csv",
-        url=result.duckdb_path,
-    )
+    connector_id = _ensure_spreadsheets_connector()
 
     columns_info = [
         {"name": col.name, "type": col.dtype, "nullable": col.nullable}
@@ -88,7 +95,7 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     return JSONResponse({
         "status": "uploaded",
         "connector_id": connector_id,
-        "connector_name": connector_name,
+        "connector_name": SPREADSHEETS_CONNECTOR_NAME,
         "table_name": result.table_name,
         "row_count": result.row_count,
         "column_count": len(result.columns),
@@ -101,46 +108,32 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     })
 
 
-@router.get("/connectors/{name}/spreadsheet-tables")
-async def get_spreadsheet_tables(name: str) -> JSONResponse:
-    """List tables in a spreadsheet connector's DuckDB file."""
-    connector = bs.get_connector(name)
-    if connector is None:
-        return JSONResponse({"error": f"Connector '{name}' not found"}, status_code=404)
-
-    if connector.get("type") != "csv":
-        return JSONResponse(
-            {"error": f"Connector '{name}' is not a spreadsheet connector"},
-            status_code=400,
-        )
-
-    tables = list_tables(name)
+@router.get("/spreadsheet/tables")
+async def get_spreadsheet_tables() -> JSONResponse:
+    """List all tables in the shared spreadsheets DuckDB."""
+    tables = list_tables()
     return JSONResponse({"tables": tables})
 
 
-@router.delete("/connectors/{name}/spreadsheet")
-async def delete_spreadsheet_connector(name: str) -> JSONResponse:
-    """Delete a spreadsheet connector and its DuckDB file."""
-    connector = bs.get_connector(name)
-    if connector is None:
-        return JSONResponse({"error": f"Connector '{name}' not found"}, status_code=404)
+@router.delete("/spreadsheet/tables/{table_name}")
+async def delete_spreadsheet_table(table_name: str) -> JSONResponse:
+    """Drop a single table from the shared spreadsheets DuckDB."""
+    if not table_exists(table_name):
+        return JSONResponse({"error": f"Table '{table_name}' not found"}, status_code=404)
 
-    if connector.get("type") != "csv":
-        return JSONResponse(
-            {"error": f"Connector '{name}' is not a spreadsheet connector"},
-            status_code=400,
-        )
+    drop_table(table_name)
 
-    try:
-        bs.delete_connector(name)
-    except ValueError as e:
-        return JSONResponse({"error": str(e)}, status_code=409)
-
-    db_path = get_duckdb_path(name)
-    if os.path.exists(db_path):
-        os.remove(db_path)
+    # If no tables remain, clean up the connector
+    remaining = list_tables()
+    if not remaining:
+        connector = bs.get_connector(SPREADSHEETS_CONNECTOR_NAME)
+        if connector:
+            try:
+                bs.delete_connector(SPREADSHEETS_CONNECTOR_NAME)
+            except ValueError:
+                pass
 
     _adapter_cache.clear()
     reload_config()
 
-    return JSONResponse({"status": "deleted", "name": name})
+    return JSONResponse({"status": "deleted", "table_name": table_name})

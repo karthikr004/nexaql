@@ -112,19 +112,23 @@ export default function GenerateModal({
         header_row: body.header_row ?? 0,
       });
 
-      // Auto-introspect the uploaded connector
+      // Auto-introspect the shared spreadsheets connector
       const introRes = await fetch(`/api/connectors/${encodeURIComponent(connName)}/introspect`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schema_name: 'public' }),
+        body: JSON.stringify({ schema_name: 'main' }),
       });
       const introBody = await introRes.json();
       if (introRes.ok) {
+        // Only select the newly uploaded table, not all tables in the shared DuckDB
+        const uploadedTable = body.table_name as string;
         const t: TableInfoItem[] = introBody.tables ?? [];
         setTables(t);
-        const allNames = new Set<string>();
-        for (const item of t) allNames.add(item.name);
-        setSelected(allNames);
+        const selectedNames = new Set<string>();
+        for (const item of t) {
+          if (item.name === uploadedTable) selectedNames.add(item.name);
+        }
+        setSelected(selectedNames);
         const skipNote = body.header_row > 0 ? ` (header detected at row ${body.header_row + 1})` : '';
         onToast({
           message: `"${file.name}" uploaded — ${body.row_count} rows, ${body.column_count} columns${skipNote}`,
@@ -430,7 +434,7 @@ export default function GenerateModal({
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="20 6 9 17 4 12" />
               </svg>
-              <span>{file?.name} uploaded as <strong>{uploadedConnector}</strong></span>
+              <span>{file?.name} loaded into <strong>spreadsheets</strong> connector</span>
             </div>
           )}
 
