@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import RoleEditor from './RoleEditor';
 
 interface User {
   id: number;
@@ -38,6 +39,21 @@ export default function UserList({ showToast }: UserListProps) {
   }, []);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
+
+  const handleRoleSave = useCallback(async (userId: number, roles: string[]) => {
+    const res = await fetch(`/api/admin/users/${userId}/roles`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ roles }),
+      credentials: 'include',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to update roles' }));
+      throw new Error(err.detail);
+    }
+    showToast({ message: 'Roles updated', type: 'success' });
+    fetchUsers();
+  }, [fetchUsers, showToast]);
 
   const handleToggleActive = useCallback(async (user: User) => {
     try {
@@ -132,23 +148,11 @@ export default function UserList({ showToast }: UserListProps) {
                   <span className="v2-badge v2-badge-teal">{u.oauth_provider}</span>
                 </td>
                 <td>
-                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                    {u.roles.length > 0 ? u.roles.map((r) => (
-                      <span
-                        key={r}
-                        style={{
-                          padding: '1px 6px', fontSize: 11, fontWeight: 500,
-                          borderRadius: 'var(--v2-radius-full)',
-                          background: r === 'admin' ? 'var(--v2-purple-50)' : 'var(--v2-bg-surface)',
-                          color: r === 'admin' ? 'var(--v2-purple-700)' : 'var(--v2-text-secondary)',
-                        }}
-                      >
-                        {r}
-                      </span>
-                    )) : (
-                      <span style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}>none</span>
-                    )}
-                  </div>
+                  <RoleEditor
+                    userId={u.id}
+                    currentRoles={u.roles}
+                    onSave={handleRoleSave}
+                  />
                 </td>
                 <td>
                   <span style={{ fontSize: 12, color: 'var(--v2-text-tertiary)' }}>
