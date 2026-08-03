@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from nexaql import bootstrap as bs
 from nexaql.api.deps import _adapter_cache, reload_config
 from nexaql.spreadsheet.ingestion import (
+    _clean_table_name,
     get_duckdb_path,
     get_uploads_dir,
     ingest_csv,
@@ -49,8 +50,7 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     with open(file_path, "wb") as f:
         f.write(content)
 
-    stem = os.path.splitext(file.filename)[0]
-    connector_name = "".join(c if c.isalnum() or c == "_" or c == "-" else "_" for c in stem).lower()
+    connector_name = _clean_table_name(file.filename)
     if not connector_name:
         connector_name = "uploaded_csv"
 
@@ -93,8 +93,11 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
         "row_count": result.row_count,
         "column_count": len(result.columns),
         "columns": columns_info,
+        "preview": result.preview,
         "file_name": file.filename,
         "duckdb_path": result.duckdb_path,
+        "header_row": result.header_row,
+        "skipped_rows": result.skipped_rows,
     })
 
 
