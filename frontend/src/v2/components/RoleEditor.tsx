@@ -118,7 +118,7 @@ export default function RoleEditor({ userId, currentRoles, onSave }: RoleEditorP
             </button>
           </div>
         </div>,
-        document.body,
+        document.querySelector('.v2-shell') ?? document.body,
       )}
     </>
   );
