@@ -49,7 +49,7 @@ def _issue_session_token(user: dict[str, Any]) -> str:
     secret = _get_session_secret()
     now = datetime.now(timezone.utc)
     payload = {
-        "sub": user["id"],
+        "sub": str(user["id"]),
         "email": user["email"],
         "name": user.get("name"),
         "roles": user.get("roles", []),
@@ -201,7 +201,7 @@ async def get_session(request: Request) -> dict[str, Any]:
     return {
         "authenticated": True,
         "user": {
-            "id": claims.get("sub"),
+            "id": int(claims["sub"]),
             "email": claims.get("email"),
             "name": claims.get("name"),
             "roles": claims.get("roles", []),

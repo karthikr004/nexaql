@@ -42,7 +42,7 @@ def _oauth_mode_context(request: Request) -> UserContext:
     claims = _verify_session_token(token)
     roles = claims.get("roles", [])
     return UserContext(
-        user_id=claims.get("sub", ""),
+        user_id=str(claims.get("sub", "")),
         roles=roles,
         name=claims.get("name"),
         email=claims.get("email"),
