@@ -280,6 +280,25 @@ CREATE TABLE IF NOT EXISTS business_ontology (
     updated_at      TEXT,
     UNIQUE(domain_id, term)
 );
+
+CREATE TABLE IF NOT EXISTS cloud_drive_config (
+    provider        TEXT PRIMARY KEY,
+    client_id       TEXT NOT NULL,
+    client_secret   TEXT NOT NULL,
+    enabled         BOOLEAN DEFAULT 1
+);
+
+CREATE TABLE IF NOT EXISTS cloud_drive_accounts (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    provider        TEXT NOT NULL,
+    email           TEXT NOT NULL,
+    display_name    TEXT,
+    access_token    TEXT NOT NULL,
+    refresh_token   TEXT NOT NULL,
+    token_expires_at TEXT,
+    created_at      TEXT,
+    UNIQUE(provider, email)
+);
 """
 
 
@@ -1234,6 +1253,187 @@ def delete_oauth_provider(provider: str) -> bool:
         return False
     update_server_config(oauth_providers_json=json.dumps(filtered))
     return True
+
+
+# ── Cloud Drive Config ────────────────────────────────────────────────────────
+
+
+def save_cloud_drive_config(
+    provider: str,
+    client_id: str,
+    client_secret: str,
+    enabled: bool = True,
+) -> None:
+    """Save or update cloud drive OAuth client credentials."""
+    conn = _get_conn()
+    conn.execute(
+        "INSERT INTO cloud_drive_config (provider, client_id, client_secret, enabled) "
+        "VALUES (?, ?, ?, ?) "
+        "ON CONFLICT(provider) DO UPDATE SET "
+        "client_id = excluded.client_id, "
+        "client_secret = excluded.client_secret, "
+        "enabled = excluded.enabled",
+        [provider, client_id, client_secret, enabled],
+    )
+
+
+def get_cloud_drive_config(provider: str) -> dict | None:
+    """Get cloud drive config for a specific provider."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT provider, client_id, client_secret, enabled "
+        "FROM cloud_drive_config WHERE provider = ?",
+        [provider],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "provider": row[0],
+        "client_id": row[1],
+        "client_secret": row[2],
+        "enabled": bool(row[3]),
+    }
+
+
+def list_cloud_drive_configs() -> list[dict]:
+    """List all configured cloud drive providers."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT provider, client_id, client_secret, enabled "
+        "FROM cloud_drive_config ORDER BY provider"
+    ).fetchall()
+    return [
+        {
+            "provider": r[0],
+            "client_id": r[1],
+            "client_secret": r[2],
+            "enabled": bool(r[3]),
+        }
+        for r in rows
+    ]
+
+
+def delete_cloud_drive_config(provider: str) -> bool:
+    """Remove a cloud drive provider configuration."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "DELETE FROM cloud_drive_config WHERE provider = ?", [provider]
+    )
+    return cur.rowcount > 0
+
+
+# ── Cloud Drive Accounts ─────────────────────────────────────────────────────
+
+
+def save_cloud_drive_account(
+    provider: str,
+    email: str,
+    display_name: str | None,
+    access_token: str,
+    refresh_token: str,
+    token_expires_at: str | None = None,
+) -> int:
+    """Save or update a connected cloud drive account."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id FROM cloud_drive_accounts "
+        "WHERE provider = ? AND email = ?",
+        [provider, email],
+    ).fetchone()
+    if row:
+        conn.execute(
+            "UPDATE cloud_drive_accounts SET "
+            "display_name = ?, access_token = ?, refresh_token = ?, "
+            "token_expires_at = ? WHERE id = ?",
+            [display_name, access_token, refresh_token, token_expires_at, row[0]],
+        )
+        return row[0]
+    cur = conn.execute(
+        "INSERT INTO cloud_drive_accounts "
+        "(provider, email, display_name, access_token, refresh_token, "
+        "token_expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        [provider, email, display_name, access_token, refresh_token,
+         token_expires_at, _now()],
+    )
+    return cur.lastrowid  # type: ignore[return-value]
+
+
+def get_cloud_drive_account(account_id: int) -> dict | None:
+    """Get a cloud drive account by ID."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id, provider, email, display_name, access_token, "
+        "refresh_token, token_expires_at, created_at "
+        "FROM cloud_drive_accounts WHERE id = ?",
+        [account_id],
+    ).fetchone()
+    if not row:
+        return None
+    return {
+        "id": row[0],
+        "provider": row[1],
+        "email": row[2],
+        "display_name": row[3],
+        "access_token": row[4],
+        "refresh_token": row[5],
+        "token_expires_at": row[6],
+        "created_at": row[7],
+    }
+
+
+def list_cloud_drive_accounts() -> list[dict]:
+    """List all connected cloud drive accounts."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, provider, email, display_name, access_token, "
+        "refresh_token, token_expires_at, created_at "
+        "FROM cloud_drive_accounts ORDER BY created_at DESC"
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "provider": r[1],
+            "email": r[2],
+            "display_name": r[3],
+            "access_token": r[4],
+            "refresh_token": r[5],
+            "token_expires_at": r[6],
+            "created_at": r[7],
+        }
+        for r in rows
+    ]
+
+
+def update_cloud_drive_tokens(
+    account_id: int,
+    access_token: str,
+    refresh_token: str | None = None,
+    token_expires_at: str | None = None,
+) -> None:
+    """Update OAuth tokens for a cloud drive account after refresh."""
+    conn = _get_conn()
+    if refresh_token is not None:
+        conn.execute(
+            "UPDATE cloud_drive_accounts SET "
+            "access_token = ?, refresh_token = ?, token_expires_at = ? "
+            "WHERE id = ?",
+            [access_token, refresh_token, token_expires_at, account_id],
+        )
+    else:
+        conn.execute(
+            "UPDATE cloud_drive_accounts SET "
+            "access_token = ?, token_expires_at = ? WHERE id = ?",
+            [access_token, token_expires_at, account_id],
+        )
+
+
+def delete_cloud_drive_account(account_id: int) -> bool:
+    """Remove a connected cloud drive account."""
+    conn = _get_conn()
+    cur = conn.execute(
+        "DELETE FROM cloud_drive_accounts WHERE id = ?", [account_id]
+    )
+    return cur.rowcount > 0
 
 
 # ── Legacy migration ─────────────────────────────────────────────────────────
