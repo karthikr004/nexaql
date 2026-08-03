@@ -246,6 +246,27 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at  TEXT,
     UNIQUE(oauth_provider, oauth_sub)
 );
+
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id     INTEGER NOT NULL,
+    title       TEXT,
+    domain      TEXT,
+    is_archived BOOLEAN DEFAULT 0,
+    created_at  TEXT,
+    updated_at  TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    thread_id   INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    metadata_json TEXT DEFAULT '{}',
+    created_at  TEXT,
+    FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+);
 """
 
 
@@ -922,6 +943,110 @@ def _user_row_to_dict(row: tuple) -> dict:
         "is_active": bool(row[7]),
         "created_at": row[8],
         "last_login_at": row[9],
+    }
+
+
+# ── Chat Threads ────────────────────────────────────────────────────────────
+
+
+def create_thread(user_id: int, title: str | None = None, domain: str | None = None) -> dict:
+    conn = _get_conn()
+    now = _now()
+    conn.execute(
+        "INSERT INTO chat_threads (user_id, title, domain, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, title, domain, now, now),
+    )
+    thread_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    return {"id": thread_id, "user_id": user_id, "title": title, "domain": domain,
+            "is_archived": False, "created_at": now, "updated_at": now}
+
+
+def list_threads(user_id: int, include_archived: bool = False) -> list[dict]:
+    conn = _get_conn()
+    sql = "SELECT id, user_id, title, domain, is_archived, created_at, updated_at FROM chat_threads WHERE user_id = ?"
+    params: list = [user_id]
+    if not include_archived:
+        sql += " AND is_archived = 0"
+    sql += " ORDER BY updated_at DESC"
+    rows = conn.execute(sql, params).fetchall()
+    return [_thread_row_to_dict(r) for r in rows]
+
+
+def get_thread(thread_id: int, user_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id, user_id, title, domain, is_archived, created_at, updated_at "
+        "FROM chat_threads WHERE id = ? AND user_id = ?",
+        (thread_id, user_id),
+    ).fetchone()
+    return _thread_row_to_dict(row) if row else None
+
+
+def update_thread(thread_id: int, user_id: int, **kwargs: str | bool) -> dict | None:
+    conn = _get_conn()
+    allowed = {"title", "is_archived"}
+    updates = {k: v for k, v in kwargs.items() if k in allowed}
+    if not updates:
+        return get_thread(thread_id, user_id)
+    updates["updated_at"] = _now()
+    set_clause = ", ".join(f"{k} = ?" for k in updates)
+    conn.execute(
+        f"UPDATE chat_threads SET {set_clause} WHERE id = ? AND user_id = ?",
+        [*updates.values(), thread_id, user_id],
+    )
+    return get_thread(thread_id, user_id)
+
+
+def delete_thread(thread_id: int, user_id: int) -> bool:
+    conn = _get_conn()
+    conn.execute("DELETE FROM chat_messages WHERE thread_id = ? AND thread_id IN "
+                 "(SELECT id FROM chat_threads WHERE user_id = ?)", (thread_id, user_id))
+    cursor = conn.execute("DELETE FROM chat_threads WHERE id = ? AND user_id = ?", (thread_id, user_id))
+    return cursor.rowcount > 0
+
+
+# ── Chat Messages ───────────────────────────────────────────────────────────
+
+
+def add_message(thread_id: int, role: str, content: str, metadata: dict | None = None) -> dict:
+    conn = _get_conn()
+    now = _now()
+    meta_json = json.dumps(metadata) if metadata else "{}"
+    conn.execute(
+        "INSERT INTO chat_messages (thread_id, role, content, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)",
+        (thread_id, role, content, meta_json, now),
+    )
+    msg_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
+    conn.execute("UPDATE chat_threads SET updated_at = ? WHERE id = ?", (now, thread_id))
+    return {"id": msg_id, "thread_id": thread_id, "role": role, "content": content,
+            "metadata": metadata or {}, "created_at": now}
+
+
+def get_messages(thread_id: int, limit: int = 100, offset: int = 0) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, thread_id, role, content, metadata_json, created_at "
+        "FROM chat_messages WHERE thread_id = ? ORDER BY created_at ASC LIMIT ? OFFSET ?",
+        (thread_id, limit, offset),
+    ).fetchall()
+    return [_message_row_to_dict(r) for r in rows]
+
+
+def _thread_row_to_dict(row: tuple) -> dict:
+    return {
+        "id": row[0], "user_id": row[1], "title": row[2], "domain": row[3],
+        "is_archived": bool(row[4]), "created_at": row[5], "updated_at": row[6],
+    }
+
+
+def _message_row_to_dict(row: tuple) -> dict:
+    try:
+        metadata = json.loads(row[4]) if row[4] else {}
+    except (json.JSONDecodeError, TypeError):
+        metadata = {}
+    return {
+        "id": row[0], "thread_id": row[1], "role": row[2], "content": row[3],
+        "metadata": metadata, "created_at": row[5],
     }
 
 

@@ -8,6 +8,7 @@ from typing import Any, Optional
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
+from nexaql import bootstrap as bs
 from nexaql.adapters import get_adapter
 from nexaql.api.deps import get_config, get_ontology
 from nexaql.api.middleware import get_user_context
@@ -24,6 +25,7 @@ class ChatMessage(BaseModel):
 class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = []
+    thread_id: int | None = None
 
 
 class ChatResponseBody(BaseModel):
@@ -40,6 +42,8 @@ class ChatResponseBody(BaseModel):
     # Pipeline trace fields for debugging
     intent: dict[str, Any] | None = None
     generationMode: str | None = None
+    # Thread context
+    threadId: int | None = None
 
 
 @router.post("/chat")
@@ -60,8 +64,6 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
 
     # Cloud providers (openrouter, openai, anthropic) require an API key; Ollama (local) does not
     if cfg.llm.provider.lower() != "ollama" and not cfg.llm.api_key:
-        # Try loading from bootstrap DB
-        from nexaql import bootstrap as bs
         saved_key = bs.get_api_key(cfg.llm.provider)
         if saved_key:
             cfg.llm.api_key = saved_key
@@ -76,6 +78,18 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
     ontology = get_ontology()
     user = await get_user_context(request)
 
+    # Auto-create thread if not provided
+    thread_id = body.thread_id
+    if thread_id is None:
+        user_id = int(user.user_id) if user.user_id != "anonymous" else None
+        if user_id:
+            thread = bs.create_thread(user_id, domain=getattr(ontology, "domain", None))
+            thread_id = thread["id"]
+
+    # Persist user message
+    if thread_id:
+        bs.add_message(thread_id, "user", body.question)
+
     # Resolve the default adapter
     try:
         if cfg.datasources:
@@ -85,7 +99,12 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
     except Exception:
         adapter = None
 
-    history = [{"role": m.role, "content": m.content} for m in body.history]
+    # Build history from thread if available, otherwise use provided history
+    if thread_id and not body.history:
+        stored = bs.get_messages(thread_id, limit=100)
+        history = [{"role": m["role"], "content": m["content"]} for m in stored[:-1]]
+    else:
+        history = [{"role": m.role, "content": m.content} for m in body.history]
 
     try:
         result: ChatResponse = await ask(
@@ -97,7 +116,26 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
             user=user,
         )
     except Exception as e:
-        return ChatResponseBody(error=str(e))
+        return ChatResponseBody(error=str(e), threadId=thread_id)
+
+    # Persist assistant response
+    if thread_id:
+        metadata = {
+            "nexaql_query": result.nexaql_query,
+            "query_preview": result.query_preview,
+            "adapter_type": result.adapter_type,
+            "row_count": result.row_count,
+            "generation_mode": result.generation_mode,
+        }
+        if result.error:
+            metadata["error"] = result.error
+        bs.add_message(thread_id, "assistant", result.summary or result.error or "", metadata)
+
+        # Auto-title: set thread title from first question
+        thread = bs.get_thread(thread_id, int(user.user_id))
+        if thread and not thread.get("title"):
+            title = body.question[:80]
+            bs.update_thread(thread_id, int(user.user_id), title=title)
 
     return ChatResponseBody(
         explanation=result.explanation,
@@ -112,4 +150,5 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
         error=result.error,
         intent=result.intent,
         generationMode=result.generation_mode,
+        threadId=thread_id,
     )

@@ -3,6 +3,7 @@ import type { ChatTurn } from '../../types';
 import { useDomain } from '../contexts/DomainContext';
 import ChatMessage from '../components/ChatMessage';
 import TracePanel from '../components/TracePanel';
+import ThreadSidebar from '../components/ThreadSidebar';
 
 const SUGGESTIONS = [
   'Show me all available data',
@@ -18,6 +19,8 @@ export default function ChatPage() {
   const [loading, setLoading] = useState(false);
   const [apiKeyMissing, setApiKeyMissing] = useState(false);
   const [traceTurnId, setTraceTurnId] = useState<string | null>(null);
+  const [activeThreadId, setActiveThreadId] = useState<number | null>(null);
+  const [threadRefreshKey, setThreadRefreshKey] = useState(0);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -38,13 +41,54 @@ export default function ChatPage() {
       .catch(() => {});
   }, []);
 
-  const handleTraceClick = useCallback((turnId: string) => {
-    if (traceTurnId === turnId) {
+  const loadThread = useCallback(async (threadId: number) => {
+    try {
+      const res = await fetch(`/api/chat/threads/${threadId}`, { credentials: 'include' });
+      if (!res.ok) return;
+      const data = await res.json();
+      const messages = data.messages ?? [];
+
+      const loadedTurns: ChatTurn[] = [];
+      for (let i = 0; i < messages.length; i++) {
+        const msg = messages[i];
+        if (msg.role !== 'user') continue;
+        const assistantMsg = messages[i + 1];
+        const meta = assistantMsg?.metadata ?? {};
+        loadedTurns.push({
+          id: `stored-${msg.id}`,
+          question: msg.content,
+          loading: false,
+          nexaqlQuery: meta.nexaql_query ?? null,
+          queryPreview: meta.query_preview ?? null,
+          adapterType: meta.adapter_type ?? null,
+          rows: [],
+          columns: [],
+          rowCount: meta.row_count ?? 0,
+          shape: null,
+          summary: assistantMsg?.content ?? '',
+          error: meta.error ?? null,
+          intent: null,
+          generationMode: meta.generation_mode ?? null,
+        });
+      }
+      setTurns(loadedTurns);
+      setActiveThreadId(threadId);
       setTraceTurnId(null);
-    } else {
-      setTraceTurnId(turnId);
+    } catch {
+      // ignore
     }
-  }, [traceTurnId]);
+  }, []);
+
+  const handleNewChat = useCallback(() => {
+    setTurns([]);
+    setActiveThreadId(null);
+    setTraceTurnId(null);
+    inputRef.current?.focus();
+  }, []);
+
+  const handleTraceClick = useCallback((turnId: string) => {
+    setTraceTurnId((prev) => prev === turnId ? null : turnId);
+  }, []);
 
   const sendMessage = useCallback(
     async (question: string) => {
@@ -54,20 +98,11 @@ export default function ChatPage() {
 
       if (apiKeyMissing) {
         const errTurn: ChatTurn = {
-          id: turnId,
-          question,
-          loading: false,
-          nexaqlQuery: null,
-          queryPreview: null,
-          adapterType: null,
-          rows: [],
-          columns: [],
-          rowCount: 0,
-          shape: null,
-          summary: '',
-          error: 'LLM API key not configured. Add one in Settings > API Keys to enable Agent Chat.',
-          intent: null,
-          generationMode: null,
+          id: turnId, question, loading: false,
+          nexaqlQuery: null, queryPreview: null, adapterType: null,
+          rows: [], columns: [], rowCount: 0, shape: null,
+          summary: '', error: 'LLM API key not configured. Add one in Settings > API Keys to enable Agent Chat.',
+          intent: null, generationMode: null,
         };
         setTurns((prev) => [...prev, errTurn]);
         setInput('');
@@ -77,32 +112,14 @@ export default function ChatPage() {
       setTurns((prev) => [
         ...prev,
         {
-          id: turnId,
-          question,
-          nexaqlQuery: null,
-          queryPreview: null,
-          adapterType: null,
-          rows: [],
-          columns: [],
-          rowCount: 0,
-          shape: null,
-          summary: '',
-          error: null,
-          loading: true,
-          intent: null,
-          generationMode: null,
+          id: turnId, question, nexaqlQuery: null, queryPreview: null,
+          adapterType: null, rows: [], columns: [], rowCount: 0,
+          shape: null, summary: '', error: null, loading: true,
+          intent: null, generationMode: null,
         },
       ]);
       setInput('');
       setLoading(true);
-
-      const history = turns.flatMap((t) => [
-        { role: 'user' as const, content: t.question },
-        {
-          role: 'assistant' as const,
-          content: t.nexaqlQuery ? `${t.summary}\n\n\`\`\`nexaql\n${t.nexaqlQuery}\n\`\`\`` : t.summary,
-        },
-      ]);
 
       try {
         const startTime = performance.now();
@@ -111,7 +128,10 @@ export default function ChatPage() {
         const res = await fetch('/api/chat', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ question, history }),
+          body: JSON.stringify({
+            question,
+            thread_id: activeThreadId,
+          }),
           signal: controller.signal,
           credentials: 'include',
         });
@@ -119,10 +139,12 @@ export default function ChatPage() {
         const data = await res.json();
         const durationMs = Math.round(performance.now() - startTime);
 
+        if (data.threadId && !activeThreadId) {
+          setActiveThreadId(data.threadId);
+        }
+
         const completedTurn: ChatTurn = {
-          id: turnId,
-          question,
-          loading: false,
+          id: turnId, question, loading: false,
           nexaqlQuery: data.nexaqlQuery ?? null,
           queryPreview: data.queryPreview ?? null,
           adapterType: data.adapterType ?? null,
@@ -138,32 +160,23 @@ export default function ChatPage() {
         };
 
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : completedTurn)));
+        setThreadRefreshKey((k) => k + 1);
       } catch (e) {
         const msg = e instanceof DOMException && e.name === 'AbortError'
           ? 'Request timed out. The LLM provider may be unreachable.'
           : String(e);
         const errTurn: ChatTurn = {
-          id: turnId,
-          question,
-          loading: false,
-          nexaqlQuery: null,
-          queryPreview: null,
-          adapterType: null,
-          rows: [],
-          columns: [],
-          rowCount: 0,
-          shape: null,
-          summary: '',
-          error: msg,
-          intent: null,
-          generationMode: null,
+          id: turnId, question, loading: false,
+          nexaqlQuery: null, queryPreview: null, adapterType: null,
+          rows: [], columns: [], rowCount: 0, shape: null,
+          summary: '', error: msg, intent: null, generationMode: null,
         };
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : errTurn)));
       } finally {
         setLoading(false);
       }
     },
-    [turns, loading, apiKeyMissing],
+    [loading, apiKeyMissing, activeThreadId],
   );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -190,7 +203,14 @@ export default function ChatPage() {
         overflow: 'hidden',
       }}
     >
-      {/* Chat column — full width, content centered when trace closed */}
+      <ThreadSidebar
+        activeThreadId={activeThreadId}
+        onSelectThread={loadThread}
+        onNewChat={handleNewChat}
+        refreshKey={threadRefreshKey}
+      />
+
+      {/* Chat column */}
       <div
         style={{
           flex: 1,
@@ -317,19 +337,6 @@ export default function ChatPage() {
               transition: 'max-width 0.2s ease',
             }}
           >
-            {turns.length > 0 && (
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                <button
-                  type="button"
-                  onClick={() => { setTurns([]); setTraceTurnId(null); }}
-                  className="v2-btn-ghost v2-btn-sm"
-                  style={{ fontSize: 11, color: 'var(--v2-text-tertiary)' }}
-                >
-                  Clear chat
-                </button>
-              </div>
-            )}
-
             <div
               style={{
                 display: 'flex',
