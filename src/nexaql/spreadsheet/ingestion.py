@@ -181,6 +181,8 @@ _DATE_FORMATS = [
     "%d-%b-%Y",
 ]
 
+_NO_YEAR_FORMATS = {"%m/%d"}
+
 
 def _try_date_upgrade(
     conn: duckdb.DuckDBPyConnection,
@@ -188,6 +190,10 @@ def _try_date_upgrade(
     col_name: str,
     non_null_count: int,
 ) -> bool:
+    from datetime import date
+
+    current_year = date.today().year
+
     for fmt in _DATE_FORMATS:
         cast_expr = f'TRY_STRPTIME("{col_name}", \'{fmt}\')'
         cast_count = conn.execute(
@@ -199,13 +205,23 @@ def _try_date_upgrade(
         if not cast_count or cast_count[0] / non_null_count < _CAST_THRESHOLD:
             continue
 
+        needs_year_fix = fmt in _NO_YEAR_FORMATS
+        if needs_year_fix:
+            update_expr = (
+                f"MAKE_DATE({current_year}, "
+                f"MONTH(CAST({cast_expr} AS DATE)), "
+                f"DAY(CAST({cast_expr} AS DATE)))"
+            )
+        else:
+            update_expr = f"CAST({cast_expr} AS DATE)"
+
         try:
             tmp_col = f"__{col_name}_cast"
             conn.execute(
                 f'ALTER TABLE {table_name} ADD COLUMN "{tmp_col}" DATE'
             )
             conn.execute(
-                f'UPDATE {table_name} SET "{tmp_col}" = CAST({cast_expr} AS DATE)'
+                f'UPDATE {table_name} SET "{tmp_col}" = {update_expr}'
             )
             conn.execute(f'ALTER TABLE {table_name} DROP COLUMN "{col_name}"')
             conn.execute(
