@@ -1,4 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
+import { useAuth } from '../contexts/AuthContext';
 import { useDomain } from '../contexts/DomainContext';
 
 interface NavItem {
@@ -11,6 +12,7 @@ interface NavItem {
 export default function Sidebar() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAdmin } = useAuth();
   const { domains } = useDomain();
 
   const showWizardBadge = domains.length === 0;
@@ -46,6 +48,16 @@ export default function Sidebar() {
       </nav>
 
       <div className="v2-sidebar-spacer" />
+
+      {isAdmin && (
+        <button
+          className={`v2-sidebar-item ${isActive('/users') ? 'active' : ''}`}
+          onClick={() => navigate('/users')}
+          title="Users & Auth"
+        >
+          <SidebarIcon name="users" />
+        </button>
+      )}
 
       <button
         className={`v2-sidebar-item ${isActive('/settings') ? 'active' : ''}`}
@@ -88,6 +100,14 @@ function SidebarIcon({ name }: { name: string }) {
         <path d="m15 4-1 1 5 5 1-1a2.83 2.83 0 1 0-4-4l-1 1Z" />
         <path d="m13 6-8.5 8.5a2.12 2.12 0 1 0 3 3L16 9" />
         <path d="m2 2 20 20" />
+      </svg>
+    ),
+    users: (
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
+        <circle cx="9" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
       </svg>
     ),
     settings: (

@@ -112,7 +112,7 @@ def create_app() -> FastAPI:
         # Must be registered before the static mount so paths are caught
         from starlette.responses import FileResponse
 
-        spa_paths = ["chat", "domains", "connectors", "playground", "setup", "settings", "admin", "login", "v2"]
+        spa_paths = ["chat", "domains", "connectors", "playground", "setup", "settings", "admin", "login", "users", "v2"]
 
         for _p in spa_paths:
             @app.get(f"/{_p}", name=f"spa_{_p}_root")

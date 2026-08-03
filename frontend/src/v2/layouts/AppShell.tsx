@@ -1,6 +1,7 @@
-import { Outlet, useLocation } from 'react-router-dom';
+import { Outlet, Navigate, useLocation } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import TopBar from './TopBar';
+import { useAuth } from '../contexts/AuthContext';
 import '../styles/design-system.css';
 import '../styles/layout.css';
 
@@ -11,10 +12,16 @@ const VIEW_TITLES: Record<string, string> = {
   '/playground': 'Query playground',
   '/setup': 'Setup wizard',
   '/settings': 'Settings',
+  '/users': 'Users & Auth',
 };
 
 export default function AppShell() {
   const location = useLocation();
+  const { user, loading, authMode } = useAuth();
+
+  if (authMode === 'oauth' && !loading && !user) {
+    return <Navigate to="/login" replace />;
+  }
 
   let title = 'NexaQL';
   for (const [path, label] of Object.entries(VIEW_TITLES)) {

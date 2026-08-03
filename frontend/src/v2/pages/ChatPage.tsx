@@ -29,7 +29,7 @@ export default function ChatPage() {
   }, [turns]);
 
   useEffect(() => {
-    fetch('/api/api-keys')
+    fetch('/api/api-keys', { credentials: 'include' })
       .then((r) => r.json())
       .then((data) => {
         const keys = data.api_keys ?? [];
@@ -113,6 +113,7 @@ export default function ChatPage() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ question, history }),
           signal: controller.signal,
+          credentials: 'include',
         });
         clearTimeout(timeout);
         const data = await res.json();
