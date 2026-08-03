@@ -73,7 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(datasource.router, prefix="/api")
     app.include_router(connectors.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
-    app.include_router(business_ontology.router, prefix="/api")
+    app.include_router(business_ontology.router, prefix="/api", dependencies=[Depends(require_admin)])
 
     # ── Health check ────────────────────────────────────────────────────────
     @app.get("/api/health")
