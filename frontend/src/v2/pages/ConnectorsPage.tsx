@@ -40,7 +40,8 @@ export default function ConnectorsPage() {
       const res = await fetch('/api/connectors');
       if (res.ok) {
         const data = await res.json();
-        setConnectors(data.connectors ?? []);
+        const all: ConnectorInfo[] = data.connectors ?? [];
+        setConnectors(all.filter((c) => c.name !== 'spreadsheets'));
       }
     } catch {
       // ignore
