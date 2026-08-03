@@ -15,7 +15,7 @@ from fastapi import Depends
 
 from nexaql.api.deps import get_config
 from nexaql.api.middleware import require_admin
-from nexaql.api.routes import admin, auth, chat, connectors, datasource, execute, ontology, store, suggest, threads, users, validate
+from nexaql.api.routes import admin, auth, business_ontology, chat, connectors, datasource, execute, ontology, store, suggest, threads, users, validate
 
 
 def _load_api_keys_into_env() -> None:
@@ -73,6 +73,7 @@ def create_app() -> FastAPI:
     app.include_router(datasource.router, prefix="/api")
     app.include_router(connectors.router, prefix="/api")
     app.include_router(store.router, prefix="/api")
+    app.include_router(business_ontology.router, prefix="/api")
 
     # ── Health check ────────────────────────────────────────────────────────
     @app.get("/api/health")

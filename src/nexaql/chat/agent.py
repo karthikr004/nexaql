@@ -76,6 +76,7 @@ async def generate_query_via_intent(
     history: list[dict[str, str]],
     ontology: Ontology,
     llm_config: LLMConfig,
+    business_context: list[dict] | None = None,
 ) -> tuple[str | None, str, dict[str, Any] | None]:
     """Generate a NexaQL query via structured intent extraction.
 
@@ -84,7 +85,7 @@ async def generate_query_via_intent(
 
     Returns ``(query_text, llm_response, intent_dict)``.
     """
-    system_prompt = build_intent_system_prompt(ontology)
+    system_prompt = build_intent_system_prompt(ontology, business_context)
 
     messages: list[dict[str, str]] = []
     for m in history:
@@ -122,13 +123,14 @@ async def generate_query_raw(
     history: list[dict[str, str]],
     ontology: Ontology,
     llm_config: LLMConfig,
+    business_context: list[dict] | None = None,
 ) -> tuple[str | None, str]:
     """Generate a NexaQL query directly from the LLM (legacy mode).
 
     Returns ``(query_text, explanation)`` where *query_text* may be ``None``
     if the LLM could not produce a valid query block.
     """
-    system_prompt = build_system_prompt(ontology)
+    system_prompt = build_system_prompt(ontology, business_context)
 
     messages: list[dict[str, str]] = []
     for m in history:
@@ -377,6 +379,7 @@ async def ask(
     adapter: QueryAdapter | None,
     llm_config: LLMConfig,
     user: UserContext | None = None,
+    business_context: list[dict] | None = None,
 ) -> ChatResponse:
     """Run the full chat pipeline: generate -> execute -> summarize.
 
@@ -394,6 +397,8 @@ async def ask(
         LLM configuration (model, API key, token limits).
     user:
         Resolved user context for access control enforcement.
+    business_context:
+        Relevant business ontology entries for the current query.
 
     Returns
     -------
@@ -403,9 +408,9 @@ async def ask(
     mode = _get_generation_mode(llm_config)
 
     if mode == "intent":
-        return await _ask_intent(question, history, ontology, adapter, llm_config, user)
+        return await _ask_intent(question, history, ontology, adapter, llm_config, user, business_context)
     else:
-        return await _ask_raw(question, history, ontology, adapter, llm_config, user)
+        return await _ask_raw(question, history, ontology, adapter, llm_config, user, business_context)
 
 
 async def _ask_intent(
@@ -415,18 +420,19 @@ async def _ask_intent(
     adapter: QueryAdapter | None,
     llm_config: LLMConfig,
     user: UserContext | None = None,
+    business_context: list[dict] | None = None,
 ) -> ChatResponse:
     """Intent-based pipeline (Option B): extract → build → execute → summarize."""
 
     # Step 1: Extract intent and build query
     query_text, llm_response, intent_data = await generate_query_via_intent(
-        question, history, ontology, llm_config
+        question, history, ontology, llm_config, business_context
     )
 
     if query_text is None:
         # Fallback to raw mode if intent extraction fails
         logger.warning("Intent extraction failed, falling back to raw mode")
-        response = await _ask_raw(question, history, ontology, adapter, llm_config, user)
+        response = await _ask_raw(question, history, ontology, adapter, llm_config, user, business_context)
         response.generation_mode = "raw_fallback"
         return response
 
@@ -514,12 +520,13 @@ async def _ask_raw(
     adapter: QueryAdapter | None,
     llm_config: LLMConfig,
     user: UserContext | None = None,
+    business_context: list[dict] | None = None,
 ) -> ChatResponse:
     """Raw NexaQL pipeline (Option A, legacy): generate → execute → summarize."""
 
     # Step 1: Generate query
     query_text, explanation = await generate_query_raw(
-        question, history, ontology, llm_config
+        question, history, ontology, llm_config, business_context
     )
 
     if query_text is None:

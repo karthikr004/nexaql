@@ -15,7 +15,7 @@ from nexaql.ontology import Ontology, ontology_to_agent_prompt
 # ── System prompt ───────────────────────────────────────────────────────────
 
 
-def build_system_prompt(ontology: Ontology) -> str:
+def build_system_prompt(ontology: Ontology, business_context: list[dict] | None = None) -> str:
     """Build the full system prompt for the query-generation agent.
 
     Includes the grammar reference, filter rules, aggregation rules, the
@@ -23,8 +23,9 @@ def build_system_prompt(ontology: Ontology) -> str:
     """
     ontology_text = ontology_to_agent_prompt(ontology)
     system_functions_text = system_functions_to_prompt_text()
+    biz_context = _format_business_context(business_context or [])
 
-    return f"""You are NexaQL, an expert query-generation agent for a procurement data platform.
+    return f"""You are NexaQL, an expert query-generation agent for a procurement data platform.{biz_context}
 Your ONLY job is to translate natural-language questions into valid NexaQL queries.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -329,7 +330,20 @@ def _build_dynamic_examples(ontology: Ontology) -> str:
     return "\n\n".join(examples)
 
 
-def build_intent_system_prompt(ontology: Ontology) -> str:
+def _format_business_context(entries: list[dict]) -> str:
+    """Format business ontology entries for injection into the system prompt."""
+    if not entries:
+        return ""
+    lines = []
+    for e in entries:
+        line = f'- "{e["term"]}": {e["definition"]}'
+        if e.get("sql_hint"):
+            line += f'  [SQL hint: {e["sql_hint"]}]'
+        lines.append(line)
+    return "\n\nBUSINESS CONTEXT (domain-specific terminology and rules — use these to interpret the user's question):\n" + "\n".join(lines)
+
+
+def build_intent_system_prompt(ontology: Ontology, business_context: list[dict] | None = None) -> str:
     """Build a compact system prompt for structured intent extraction.
 
     Instead of asking the LLM to generate NexaQL syntax, we ask it to output
@@ -340,11 +354,12 @@ def build_intent_system_prompt(ontology: Ontology) -> str:
     from nexaql.ontology.prompt import ontology_to_prompt_text
 
     ontology_text = ontology_to_prompt_text(ontology)
+    biz_context = _format_business_context(business_context or [])
 
     return f"""You are a query intent extractor. Given a natural language question about data, output a JSON object describing what data to fetch.
 
 ONTOLOGY (available nodes, fields, edges):
-{ontology_text}
+{ontology_text}{biz_context}
 
 OUTPUT FORMAT — respond with ONLY a JSON object in a ```json code block:
 

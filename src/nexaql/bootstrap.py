@@ -267,6 +267,19 @@ CREATE TABLE IF NOT EXISTS chat_messages (
     created_at  TEXT,
     FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
 );
+
+CREATE TABLE IF NOT EXISTS business_ontology (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    domain_id       INTEGER NOT NULL REFERENCES domains(id),
+    term            TEXT NOT NULL,
+    definition      TEXT NOT NULL,
+    sql_hint        TEXT,
+    tags            TEXT DEFAULT '[]',
+    created_by      INTEGER,
+    created_at      TEXT,
+    updated_at      TEXT,
+    UNIQUE(domain_id, term)
+);
 """
 
 
@@ -1048,6 +1061,136 @@ def _message_row_to_dict(row: tuple) -> dict:
         "id": row[0], "thread_id": row[1], "role": row[2], "content": row[3],
         "metadata": metadata, "created_at": row[5],
     }
+
+
+# ── Business Ontology CRUD ───────────────────────────────────────────────────
+
+
+def _bo_row_to_dict(row: tuple) -> dict:
+    return {
+        "id": row[0],
+        "domain_id": row[1],
+        "term": row[2],
+        "definition": row[3],
+        "sql_hint": row[4],
+        "tags": json.loads(row[5]) if row[5] else [],
+        "created_by": row[6],
+        "created_at": row[7],
+        "updated_at": row[8],
+    }
+
+
+_BO_COLS = "id, domain_id, term, definition, sql_hint, tags, created_by, created_at, updated_at"
+
+
+def list_business_ontology(domain_id: int) -> list[dict]:
+    conn = _get_conn()
+    rows = conn.execute(
+        f"SELECT {_BO_COLS} FROM business_ontology WHERE domain_id = ? ORDER BY term",
+        [domain_id],
+    ).fetchall()
+    return [_bo_row_to_dict(r) for r in rows]
+
+
+def get_business_ontology_entry(entry_id: int) -> dict | None:
+    conn = _get_conn()
+    row = conn.execute(
+        f"SELECT {_BO_COLS} FROM business_ontology WHERE id = ?", [entry_id]
+    ).fetchone()
+    return _bo_row_to_dict(row) if row else None
+
+
+def create_business_ontology_entry(
+    domain_id: int,
+    term: str,
+    definition: str,
+    sql_hint: str | None = None,
+    tags: list[str] | None = None,
+    created_by: int | None = None,
+) -> dict:
+    conn = _get_conn()
+    now = _now()
+    conn.execute(
+        "INSERT INTO business_ontology (domain_id, term, definition, sql_hint, tags, created_by, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        [domain_id, term, definition, sql_hint, json.dumps(tags or []), created_by, now, now],
+    )
+    row = conn.execute(
+        f"SELECT {_BO_COLS} FROM business_ontology WHERE domain_id = ? AND term = ?",
+        [domain_id, term],
+    ).fetchone()
+    return _bo_row_to_dict(row)
+
+
+def update_business_ontology_entry(
+    entry_id: int,
+    term: str | None = None,
+    definition: str | None = None,
+    sql_hint: str | None = ...,
+    tags: list[str] | None = ...,
+) -> dict | None:
+    conn = _get_conn()
+    existing = get_business_ontology_entry(entry_id)
+    if not existing:
+        return None
+    updates: list[str] = []
+    params: list = []
+    if term is not None:
+        updates.append("term = ?")
+        params.append(term)
+    if definition is not None:
+        updates.append("definition = ?")
+        params.append(definition)
+    if sql_hint is not ...:
+        updates.append("sql_hint = ?")
+        params.append(sql_hint)
+    if tags is not ...:
+        updates.append("tags = ?")
+        params.append(json.dumps(tags if tags is not None else []))
+    if not updates:
+        return existing
+    updates.append("updated_at = ?")
+    params.append(_now())
+    params.append(entry_id)
+    conn.execute(
+        f"UPDATE business_ontology SET {', '.join(updates)} WHERE id = ?",
+        params,
+    )
+    return get_business_ontology_entry(entry_id)
+
+
+def delete_business_ontology_entry(entry_id: int) -> bool:
+    conn = _get_conn()
+    existing = get_business_ontology_entry(entry_id)
+    if not existing:
+        return False
+    conn.execute("DELETE FROM business_ontology WHERE id = ?", [entry_id])
+    return True
+
+
+def lookup_business_ontology(domain_id: int, query: str) -> list[dict]:
+    """Keyword-based lookup: match query terms against term names and tags."""
+    all_entries = list_business_ontology(domain_id)
+    if not all_entries:
+        return []
+    words = set(query.lower().split())
+    scored: list[tuple[int, dict]] = []
+    for entry in all_entries:
+        score = 0
+        term_lower = entry["term"].lower()
+        definition_lower = entry["definition"].lower()
+        tags_lower = [t.lower() for t in entry["tags"]]
+        for w in words:
+            if w in term_lower:
+                score += 3
+            if any(w in tag for tag in tags_lower):
+                score += 2
+            if w in definition_lower:
+                score += 1
+        if score > 0:
+            scored.append((score, entry))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    return [entry for _, entry in scored[:10]]
 
 
 # ── OAuth Provider Config ────────────────────────────────────────────────────
