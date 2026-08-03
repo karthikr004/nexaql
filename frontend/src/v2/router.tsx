@@ -8,6 +8,7 @@ import LoginPage from './pages/LoginPage';
 import PlaygroundPage from './pages/PlaygroundPage';
 import SetupPage from './pages/SetupPage';
 import SettingsPage from './pages/SettingsPage';
+import UsersPage from './pages/UsersPage';
 
 export const routes: RouteObject[] = [
   { path: '/login', element: <LoginPage /> },
@@ -22,6 +23,7 @@ export const routes: RouteObject[] = [
       { path: 'playground', element: <PlaygroundPage /> },
       { path: 'setup', element: <SetupPage /> },
       { path: 'settings', element: <SettingsPage /> },
+      { path: 'users', element: <UsersPage /> },
     ],
   },
   { path: '/v2', element: <Navigate to="/" replace /> },

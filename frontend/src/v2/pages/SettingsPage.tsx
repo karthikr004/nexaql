@@ -1,6 +1,4 @@
 import { useState, useCallback, useEffect } from 'react';
-import { useAuth } from '../contexts/AuthContext';
-import AuthSettings from '../components/AuthSettings';
 
 interface ApiKeyInfo {
   provider: string;
@@ -37,7 +35,6 @@ const PROVIDER_OPTIONS = [
 ];
 
 export default function SettingsPage() {
-  const { isAdmin } = useAuth();
   const [keys, setKeys] = useState<ApiKeyInfo[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
@@ -396,9 +393,6 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
-
-      {/* ── Authentication Section ────────────────────────────── */}
-      {isAdmin && <AuthSettings showToast={showToast} />}
 
       {/* Info box */}
       <div

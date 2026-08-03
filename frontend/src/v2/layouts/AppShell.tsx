@@ -12,6 +12,7 @@ const VIEW_TITLES: Record<string, string> = {
   '/playground': 'Query playground',
   '/setup': 'Setup wizard',
   '/settings': 'Settings',
+  '/users': 'Users & Auth',
 };
 
 export default function AppShell() {
