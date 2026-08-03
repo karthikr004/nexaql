@@ -139,6 +139,9 @@ RULE B — Aggregation arguments MUST be BARE field names on the CURRENT node on
 RULE C — To aggregate a field on a LINKED node, start from the node that OWNS the field.
 RULE D — Scalar fields mixed with aggregations auto-become GROUP BY.
 RULE E — NEVER use node.field dot notation anywhere. Fields are always bare names.
+RULE F — When using calc() for grouping (e.g. DATE_TRUNC), do NOT also include the raw field.
+  WRONG: {{ transaction_date  total: sum(amount)  month: calc(DATE_TRUNC('month', transaction_date)) }}
+  RIGHT: {{ total: sum(amount)  month: calc(DATE_TRUNC('month', transaction_date)) }}
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SECTION 3 — ONTOLOGY
@@ -407,6 +410,12 @@ RULES:
    - WRONG: {{"node": "product", "aggregations": [{{"alias": "total_qty", "func": "sum", "field": "quantity"}}]}} (quantity is on order_items, not product)
    - RIGHT: {{"node": "product", "edges": [{{"name": "order_items", "aggregations": [{{"alias": "total_qty", "func": "sum", "field": "quantity"}}]}}]}}
 4. "calcs" — For computed expressions like date math or arithmetic. "expr" uses bare field names.
+   CRITICAL: When using aggregations with calcs, do NOT include raw fields in "fields" if they are only used inside a calc expression.
+   The raw field becomes a GROUP BY column and defeats the aggregation.
+   - WRONG: {{"fields": ["transaction_date"], "aggregations": [{{"alias": "total", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}]}}
+     (transaction_date in fields causes GROUP BY on each date, not each month)
+   - RIGHT: {{"aggregations": [{{"alias": "total", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}]}}
+     (only the calc expression is grouped, giving one row per month)
 5. "filters" — Only use fields marked as filterable (marked with ⚡ in the ontology).
    - ops: "eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null"
    - For enum fields (shown as field:enum⚡[VAL1,VAL2,...]), you MUST use one of the listed values EXACTLY.
@@ -435,6 +444,11 @@ Q: "count of active contracts by status"
 Q: "invoices expiring within 30 days with supplier name"
 ```json
 {{"node": "invoices", "fields": ["invoice_number", "due_date", "amount"], "calc_filters": [{{"expr": "due_date - CURRENT_DATE", "op": "gte", "value": 0}}, {{"expr": "due_date - CURRENT_DATE", "op": "lte", "value": 30}}], "edges": [{{"name": "suppliers", "fields": ["name"]}}], "order_by": [{{"field": "due_date", "direction": "ASC"}}]}}
+```
+
+Q: "monthly spend breakdown"
+```json
+{{"node": "expenses", "aggregations": [{{"alias": "total_spend", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}], "order_by": [{{"field": "month", "direction": "ASC"}}]}}
 ```
 
 {_build_dynamic_examples(ontology)}
