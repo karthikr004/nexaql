@@ -266,7 +266,7 @@ async def introspect_connector(name: str, req: IntrospectRequest | None = None) 
 
     # DuckDB uses 'main' as its default schema, not 'public'
     db_type = connector.get("type", "")
-    if db_type == "duckdb" and schema == "public":
+    if db_type in ("duckdb", "csv") and schema == "public":
         schema = "main"
 
     try:

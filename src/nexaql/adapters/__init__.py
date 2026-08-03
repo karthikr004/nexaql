@@ -13,6 +13,7 @@ from nexaql.adapters.base import AdapterResult, QueryAdapter
 _ADAPTER_REGISTRY: Dict[str, str] = {
     "postgresql": "nexaql.adapters.postgresql.PostgreSQLAdapter",
     "duckdb": "nexaql.adapters.duckdb_adapter.DuckDBAdapter",
+    "csv": "nexaql.adapters.duckdb_adapter.DuckDBAdapter",
 }
 
 
@@ -70,7 +71,7 @@ def get_adapter(datasource_config: Any) -> QueryAdapter:
             raise ValueError("PostgreSQL datasource requires a 'url' field")
         return adapter_cls(connection_url=url)
 
-    if ds_type == "duckdb":
+    if ds_type in ("duckdb", "csv"):
         path = getattr(datasource_config, "path", None) or (
             datasource_config.get("path") if isinstance(datasource_config, dict) else None
         )

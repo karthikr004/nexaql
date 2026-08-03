@@ -245,6 +245,8 @@ class OntologyGenerator:
             return "mysql"
         elif url.endswith(".duckdb") or url.endswith(".db") or url == ":memory:":
             return "duckdb"
+        elif url.endswith(".csv") or url.endswith(".tsv"):
+            return "duckdb"
         else:
             raise ValueError(f"Unsupported database URL: {url}")
 

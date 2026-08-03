@@ -334,7 +334,7 @@ export default function ConnectorsPage() {
           lineHeight: 1.5,
         }}
       >
-        Connection credentials are stored locally in <code style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11, color: 'var(--v2-accent-text)' }}>~/.nexaql/connectors.json</code> and never leave your machine.
+        Connection credentials are stored locally in <code style={{ fontFamily: 'var(--v2-font-mono)', fontSize: 11, color: 'var(--v2-accent-text)' }}>~/.nexaql/</code> and never leave your machine.
       </div>
     </div>
   );
