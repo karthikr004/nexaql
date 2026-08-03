@@ -66,6 +66,19 @@ async def update_roles(user_id: int, req: UpdateRolesRequest) -> UserResponse:
     user = bs.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    removing_admin = "admin" in user.get("roles", []) and "admin" not in req.roles
+    if removing_admin:
+        admin_count = sum(
+            1 for u in bs.list_users()
+            if "admin" in u.get("roles", []) and u.get("is_active", True)
+        )
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot remove the last admin. Promote another user first.",
+            )
+
     bs.update_user_roles(user_id, req.roles)
     user["roles"] = req.roles
     return UserResponse(**_strip_oauth_sub(user))
@@ -76,6 +89,18 @@ async def update_active(user_id: int, req: UpdateActiveRequest) -> UserResponse:
     user = bs.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+
+    if not req.is_active and "admin" in user.get("roles", []):
+        admin_count = sum(
+            1 for u in bs.list_users()
+            if "admin" in u.get("roles", []) and u.get("is_active", True)
+        )
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot deactivate the last admin.",
+            )
+
     bs.deactivate_user(user_id, active=req.is_active)
     user["is_active"] = req.is_active
     return UserResponse(**_strip_oauth_sub(user))
