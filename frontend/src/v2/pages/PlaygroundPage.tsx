@@ -81,7 +81,7 @@ export default function PlaygroundPage() {
   useEffect(() => { setHistory(loadHistory()); }, []);
 
   const fetchOntology = useCallback(() => {
-    fetch('/api/ontology')
+    fetch('/api/ontology', { credentials: 'include' })
       .then((r) => r.json())
       .then((data) => {
         if (data && Array.isArray(data.nodes)) setOntology(data);
@@ -130,6 +130,7 @@ export default function PlaygroundPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...userContextHeaders() },
         body: JSON.stringify({ query }),
+        credentials: 'include',
       })
         .then((r) => r.json())
         .then((v) => {
@@ -161,6 +162,7 @@ export default function PlaygroundPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...userContextHeaders() },
         body: JSON.stringify({ query }),
+        credentials: 'include',
       });
       const data: ExecuteResult = await res.json();
       setResult(data);
