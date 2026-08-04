@@ -366,8 +366,8 @@ export default function ConnectorsPage() {
           <p className="v2-body-sm">Add a database or cloud drive connector to get started</p>
         </div>
       ) : (
-        <div className="v2-card">
-          <table className="v2-table">
+        <div className="v2-card" style={{ overflowX: 'auto' }}>
+          <table className="v2-table" style={{ minWidth: 640 }}>
             <thead>
               <tr>
                 <th>Name</th>
