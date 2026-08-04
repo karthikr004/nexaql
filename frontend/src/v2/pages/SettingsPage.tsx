@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from 'react';
+import CloudStorageSettings from '../components/CloudStorageSettings';
 
 interface ApiKeyInfo {
   provider: string;
@@ -188,7 +189,7 @@ export default function SettingsPage() {
       {/* Page header */}
       <div style={{ marginBottom: 32 }}>
         <h1 className="v2-heading-lg">Settings</h1>
-        <p className="v2-body-sm" style={{ marginTop: 4 }}>API keys and LLM provider configuration</p>
+        <p className="v2-body-sm" style={{ marginTop: 4 }}>API keys, LLM provider, and cloud storage configuration</p>
       </div>
 
       {/* ── API Keys Section ─────────────────────────────────────── */}
@@ -393,6 +394,13 @@ export default function SettingsPage() {
           </div>
         </div>
       )}
+
+      {/* ── Cloud Storage Section ──────────────────────────────── */}
+      <div style={{ marginBottom: 32 }}>
+        <CloudStorageSettings
+          onToast={(message, type) => showToast({ message, type })}
+        />
+      </div>
 
       {/* Info box */}
       <div
