@@ -3,10 +3,14 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 import csv
 import os
 import re
+import tempfile
 from dataclasses import dataclass, field
+from datetime import date, datetime, time
 from pathlib import Path
 
 import duckdb
@@ -36,6 +40,7 @@ _SPREADSHEETS_DIR = os.path.join(_NEXAQL_DIR, "spreadsheets")
 _SHARED_DUCKDB = os.path.join(_SPREADSHEETS_DIR, "uploads.duckdb")
 
 SPREADSHEETS_CONNECTOR_NAME = "spreadsheets"
+XLSX_EXTENSIONS = {".xlsx"}
 
 _MAX_SCAN_ROWS = 30
 _PREVIEW_ROWS = 5
@@ -431,6 +436,62 @@ def ingest_csv(
         )
     finally:
         conn.close()
+
+
+def _xlsx_cell_value(cell: Any) -> str:
+    """Convert an openpyxl cell value to a CSV-safe string."""
+    if cell is None:
+        return ""
+    if isinstance(cell, datetime):
+        return cell.isoformat()
+    if isinstance(cell, date):
+        return cell.isoformat()
+    if isinstance(cell, time):
+        return cell.isoformat()
+    if isinstance(cell, bool):
+        return str(cell)
+    return str(cell)
+
+
+def ingest_xlsx(
+    file_path: str,
+    table_name: str | None = None,
+    sheet_name: str | None = None,
+) -> IngestionResult:
+    """Load an XLSX file into the shared spreadsheets DuckDB.
+
+    Converts the specified sheet (or active sheet) to a temp CSV,
+    then delegates to ingest_csv() for the actual DuckDB loading.
+    """
+    from openpyxl import load_workbook
+
+    wb = load_workbook(file_path, read_only=True, data_only=True)
+    try:
+        if sheet_name and sheet_name in wb.sheetnames:
+            ws = wb[sheet_name]
+        else:
+            ws = wb.active
+        if ws is None:
+            raise ValueError("Workbook has no sheets")
+
+        if table_name is None:
+            table_name = _clean_table_name(os.path.basename(file_path))
+
+        tmp_dir = get_uploads_dir()
+        tmp_csv = os.path.join(tmp_dir, f"_xlsx_{table_name}.csv")
+
+        with open(tmp_csv, "w", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            for row in ws.iter_rows(values_only=True):
+                writer.writerow([_xlsx_cell_value(cell) for cell in row])
+    finally:
+        wb.close()
+
+    try:
+        return ingest_csv(file_path=tmp_csv, table_name=table_name)
+    finally:
+        if os.path.exists(tmp_csv):
+            os.remove(tmp_csv)
 
 
 def list_tables() -> list[dict[str, str | int]]:

@@ -32,6 +32,7 @@ dependencies = [
     "click>=8.0",
     "mcp>=1.0",
     "pyjwt>=2.0",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]

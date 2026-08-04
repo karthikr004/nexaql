@@ -12,18 +12,20 @@ from nexaql import bootstrap as bs
 from nexaql.api.deps import _adapter_cache, reload_config
 from nexaql.spreadsheet.ingestion import (
     SPREADSHEETS_CONNECTOR_NAME,
+    XLSX_EXTENSIONS,
     _clean_table_name,
     drop_table,
     get_shared_duckdb_path,
     get_uploads_dir,
     ingest_csv,
+    ingest_xlsx,
     list_tables,
     table_exists,
 )
 
 router = APIRouter(tags=["spreadsheet"])
 
-_ALLOWED_EXTENSIONS = {".csv", ".tsv", ".txt"}
+_ALLOWED_EXTENSIONS = {".csv", ".tsv", ".txt"} | XLSX_EXTENSIONS
 _MAX_FILE_SIZE = 100 * 1024 * 1024  # 100 MB
 
 
@@ -68,14 +70,16 @@ async def upload_spreadsheet(file: UploadFile) -> JSONResponse:
     table_name = _clean_table_name(file.filename)
     replaced = table_exists(table_name)
 
-    delimiter = "\t" if ext == ".tsv" else None
-
     try:
-        result = ingest_csv(
-            file_path=file_path,
-            table_name=table_name,
-            delimiter=delimiter,
-        )
+        if ext in XLSX_EXTENSIONS:
+            result = ingest_xlsx(file_path=file_path, table_name=table_name)
+        else:
+            delimiter = "\t" if ext == ".tsv" else None
+            result = ingest_csv(
+                file_path=file_path,
+                table_name=table_name,
+                delimiter=delimiter,
+            )
     except Exception as e:
         if os.path.exists(file_path):
             os.remove(file_path)
