@@ -101,11 +101,17 @@ def get_api_key(provider: str) -> str | None:
 
 class SaveConnectorRequest(BaseModel):
     name: str
-    """Unique name for this connector (e.g. 'production-pg', 'analytics-db')."""
-    connection_url: str
-    """Database connection URL (postgresql://, mysql://, or DuckDB file path)."""
+    """Unique name for this connector."""
+    type: str = "database"
+    """Connector type: postgresql, mysql, duckdb, google_drive, onedrive, dropbox."""
+    connection_url: str | None = None
+    """Database connection URL (required for database connectors)."""
+    client_id: str | None = None
+    """OAuth client ID (required for cloud drive connectors)."""
+    client_secret: str | None = None
+    """OAuth client secret (required for cloud drive connectors)."""
     schema_name: str = "public"
-    """Schema to introspect (default: public)."""
+    """Schema to introspect (default: public, database connectors only)."""
     description: str = ""
     """Human-readable description."""
 
@@ -146,18 +152,25 @@ class GenerateOntologyRequest(BaseModel):
 
 @router.get("/connectors")
 async def list_connectors() -> JSONResponse:
-    """List all saved connectors (URLs are masked)."""
+    """List all saved connectors (URLs/secrets are masked)."""
     connectors = bs.list_connectors()
     result = []
     for c in connectors:
-        result.append({
+        connector_type = c.get("type", "unknown")
+        entry: dict[str, Any] = {
             "id": c["id"],
             "name": c["name"],
-            "connection_url_masked": _mask_url(c.get("url", "")),
-            "db_type": c.get("type", "unknown"),
+            "type": connector_type,
             "description": "",
             "created_at": c.get("created_at", ""),
-        })
+        }
+        if connector_type in bs.CLOUD_DRIVE_TYPES:
+            creds = json.loads(c["credentials"]) if c.get("credentials") else {}
+            entry["client_id_masked"] = _mask_key(creds.get("client_id", ""))
+        else:
+            entry["connection_url_masked"] = _mask_url(c.get("url", ""))
+            entry["db_type"] = connector_type
+        result.append(entry)
     return JSONResponse({"connectors": result, "count": len(result)})
 
 
@@ -166,14 +179,41 @@ async def list_connectors() -> JSONResponse:
 
 @router.post("/connectors")
 async def save_connector(req: SaveConnectorRequest) -> JSONResponse:
-    """Save a new named connector. Tests the connection first."""
+    """Save a new named connector. Tests database connections first."""
     name = req.name.strip()
     if not name:
         return JSONResponse({"error": "Connector name is required"}, status_code=400)
     if "/" in name or "\\" in name:
         return JSONResponse({"error": "Invalid connector name"}, status_code=400)
 
-    # Test connection
+    connector_type = req.type.strip().lower()
+
+    if connector_type in bs.CLOUD_DRIVE_TYPES:
+        if not req.client_id or not req.client_secret:
+            return JSONResponse(
+                {"error": "client_id and client_secret are required for cloud drive connectors"},
+                status_code=400,
+            )
+        credentials = json.dumps({
+            "client_id": req.client_id.strip(),
+            "client_secret": req.client_secret.strip(),
+        })
+        connector_id = bs.save_connector(
+            name=name,
+            type=connector_type,
+            url=None,
+            credentials=credentials,
+        )
+        return JSONResponse({
+            "status": "saved",
+            "id": connector_id,
+            "name": name,
+            "type": connector_type,
+        })
+
+    if not req.connection_url:
+        return JSONResponse({"error": "connection_url is required for database connectors"}, status_code=400)
+
     try:
         gen = OntologyGenerator(connection_url=req.connection_url)
     except ValueError as e:
@@ -192,7 +232,6 @@ async def save_connector(req: SaveConnectorRequest) -> JSONResponse:
             "details": traceback.format_exc().split("\n")[-3:],
         }, status_code=400)
 
-    # Save to bootstrap DB
     connector_id = bs.save_connector(
         name=name,
         type=gen._db_type,
@@ -203,7 +242,7 @@ async def save_connector(req: SaveConnectorRequest) -> JSONResponse:
         "status": "saved",
         "id": connector_id,
         "name": name,
-        "db_type": gen._db_type,
+        "type": gen._db_type,
         "table_count": len(tables),
         "connection_url_masked": _mask_url(req.connection_url),
     })
@@ -218,6 +257,14 @@ async def test_connector(req: TestConnectorRequest) -> JSONResponse:
     connector = bs.get_connector(req.name)
     if connector is None:
         return JSONResponse({"error": f"Connector '{req.name}' not found"}, status_code=404)
+
+    connector_type = connector.get("type", "")
+
+    if connector_type in bs.CLOUD_DRIVE_TYPES:
+        creds = bs.get_cloud_drive_credentials(connector["id"])
+        if not creds:
+            return JSONResponse({"status": "failed", "error": "Missing credentials"}, status_code=400)
+        return JSONResponse({"status": "ok", "type": connector_type})
 
     try:
         gen = OntologyGenerator(connection_url=connector["url"])
@@ -269,9 +316,13 @@ async def introspect_connector(name: str, req: IntrospectRequest | None = None) 
     if db_type in ("duckdb", "csv") and schema == "public":
         schema = "main"
 
+    _SYSTEM_TABLES = {"nexaql_ontologies"}
+
     try:
         gen = OntologyGenerator(connection_url=connector["url"])
-        tables, foreign_keys = await gen.introspect(schema=schema)
+        tables, foreign_keys = await gen.introspect(
+            schema=schema, exclude_tables=list(_SYSTEM_TABLES),
+        )
     except Exception as e:
         return JSONResponse({
             "error": f"Introspection failed: {e}",

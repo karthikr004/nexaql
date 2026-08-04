@@ -15,7 +15,7 @@ from fastapi import Depends
 
 from nexaql.api.deps import get_config
 from nexaql.api.middleware import require_admin
-from nexaql.api.routes import admin, auth, business_ontology, chat, connectors, datasource, execute, ontology, spreadsheet, store, suggest, threads, users, validate
+from nexaql.api.routes import admin, auth, business_ontology, chat, cloud_drive, connectors, datasource, execute, ontology, spreadsheet, store, suggest, threads, users, validate
 
 
 def _load_api_keys_into_env() -> None:
@@ -75,6 +75,7 @@ def create_app() -> FastAPI:
     app.include_router(store.router, prefix="/api")
     app.include_router(business_ontology.router, prefix="/api", dependencies=[Depends(require_admin)])
     app.include_router(spreadsheet.router, prefix="/api", dependencies=[Depends(require_admin)])
+    app.include_router(cloud_drive.router, prefix="/api")
 
     # ── Health check ────────────────────────────────────────────────────────
     @app.get("/api/health")
