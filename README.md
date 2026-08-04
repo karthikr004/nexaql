@@ -36,16 +36,25 @@ nexaql serve
 
 Open http://localhost:3717 — a playground with sample e-commerce data loads instantly. No external database needed.
 
-### Connect Your Own Database
+### Connect Your Data
 
-**Via CLI:**
+NexaQL supports three ways to bring data in:
+
+**1. Database connector** — connect to PostgreSQL, MySQL, or DuckDB:
 
 ```bash
-# Add a connector via the Admin panel or API
 curl -X POST localhost:3717/api/connectors \
   -H 'Content-Type: application/json' \
-  -d '{"name":"mydb","type":"postgresql","config":{"url":"postgresql://user:pass@localhost:5432/mydb"}}'
+  -d '{"name":"mydb","type":"postgresql","connection_url":"postgresql://user:pass@localhost:5432/mydb"}'
+```
 
+**2. Spreadsheet upload** — drag-and-drop CSV, TSV, or XLSX files directly in the UI. NexaQL auto-detects headers, infers column types, and ingests into a shared DuckDB instance for querying.
+
+**3. Cloud drive** — connect Google Drive (OneDrive and Dropbox coming soon), browse folders, and import spreadsheets directly. Files are downloaded, ingested into DuckDB, and immediately queryable via chat.
+
+### Generate Schemas
+
+```bash
 # Generate schemas (all tables)
 nexaql generate mydb --domain my_domain
 
@@ -54,16 +63,6 @@ nexaql generate mydb --domain my_domain -t orders -t customers -t products
 
 # Regenerate a single schema after DB changes
 nexaql regenerate orders --domain my_domain
-```
-
-**Via MCP (AI agents):**
-
-```python
-# Generate schemas from a connector
-await generate_schema(connector_name="mydb", domain="my_domain", tables=["orders", "customers"])
-
-# Regenerate a single schema
-await regenerate_schema(node_name="orders", domain="my_domain")
 ```
 
 NexaQL introspects your database schema, detects relationships, enums, and PII fields, then generates per-table schemas with automatic edge discovery across all nodes in the domain - including cross-datasource relationships.
@@ -151,31 +150,41 @@ The analyst's query returns `name` but not `email` or `lifetime_value`. The mana
 - **PII masking** - mask emails, phones, names in query results (5 strategies)
 - **Policy-in-ontology** - access rules live alongside schema definitions
 
-### Agent Integration
+### Agent Chat
+- **Natural language queries** - ask questions in plain English, get structured results with summaries
+- **Two-pass architecture** - LLM extracts structured intent (JSON), deterministic builder constructs the query — small models work well
+- **Date-aware** - current date context injected into prompts so "last month" and "this quarter" resolve correctly
+- **Chat threads** - persistent conversation history with sidebar navigation, collapsible thread panel
+- **Business ontology** - define domain-specific terms, acronyms, and SQL hints so the LLM understands your business vocabulary
+- **Auto-retry** - if a generated query fails validation, the agent corrects it
+- **Result summarization** - natural language summary of query results
+
+### Data Sources
+- **Database connectors** - PostgreSQL, MySQL, DuckDB with full schema introspection
+- **CSV / TSV / XLSX upload** - drag-and-drop spreadsheet files with smart header detection, type inference, and data preview
+- **Google Drive integration** - OAuth-based connection, folder browsing, and direct import of Google Sheets, XLSX, and CSV files from your drive
+- **Cross-source joins** - data from different databases joined in memory via DuckDB
+- **8 SQL dialects** - PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, Presto, Spark, MSSQL
+
+### Agent Integration (MCP)
 - **MCP server** - Model Context Protocol connector for Claude Desktop, Cursor, and any MCP-compatible AI agent
 - **11 tools + 3 resources** - ask, query, validate, describe ontology, SQL preview, auth configuration, and more
 - **Deterministic translation** - natural language → NexaQL → SQL, no hallucinated queries
-- **Auto-retry** - if the generated query fails validation, the agent corrects it
-- **Result summarization** - agent generates a natural language summary of query results
 - **Ontology-aware prompts** - the agent knows your schema, field types, and available filters
 - **JWT authentication** - tamper-proof user identity for production deployments
 
-### Multi-Database
-- **8 SQL dialects** - PostgreSQL, MySQL, DuckDB, Snowflake, BigQuery, Presto, Spark, MSSQL
-- **Cross-source joins** - data from different databases joined in memory via DuckDB
-- **Pluggable adapters** - add new databases by implementing a simple interface
-
 ### Admin Panel
 - **Domain management** - create, switch, and delete domains from the UI
-- **Schema management** - add schemas from connected databases, regenerate, or delete
-- **Ontology generation** - introspect any connected database and auto-generate ontology with nodes, edges, enums, and PII detection
-- **Duplicate prevention** - unique schema names per domain; add rejects duplicates, regenerate upserts
-- **Default roles & policies** - every generated ontology bootstraps with admin/analyst/manager roles and common access functions (owns_record, same_department, same_region)
-- **API Keys** - manage LLM provider keys (Anthropic, OpenAI, OpenRouter, Google); auto-detects active provider from saved keys
-- **Connector registry** - add/remove PostgreSQL, MySQL, DuckDB connections
+- **Schema generation** - add schemas from database connectors, CSV uploads, or cloud drive imports
+- **Connector registry** - manage database connections and cloud drive OAuth credentials in one place
+- **Business ontology editor** - define domain-specific terms and rules that improve query accuracy
+- **Role editor** - define and manage access control roles from the UI
+- **User management** - create and manage users with role assignments
+- **API key management** - configure LLM provider keys (Anthropic, OpenAI, OpenRouter, Google, Meta)
+- **Ontology generation** - introspect databases and auto-generate ontologies with nodes, edges, enums, and PII detection
 
 ### BYOLLM (Bring Your Own LLM)
-- **No bundled LLM** - purely BYOLLM; bring Anthropic, OpenAI, OpenRouter, or Google keys
+- **No bundled LLM** - purely BYOLLM; bring Anthropic, OpenAI, OpenRouter, Google, or Meta keys
 - **Auto-configure** - saving an API key automatically switches the active provider and model
 - **Provider priority** - Anthropic → OpenAI → OpenRouter → Google
 
@@ -293,16 +302,6 @@ nodes:
         mask_with: email
 ```
 
-### Admin UI
-
-Click the ⚙ gear icon in the playground header to manage:
-- **Domains & Schemas** - organize ontologies by domain, add/delete schemas, switch active domain
-- **Connectors** - connect databases and generate ontologies from them
-- **API Keys** - configure LLM provider credentials
-- **Roles** - define valid role names
-- **Policy Functions** - create reusable access policies
-- **Per-node access** - visible_to, row policies, field-level PII/masking
-
 ### User Context
 
 The calling application sends user identity via the `X-User-Context` header:
@@ -396,7 +395,7 @@ Access control (RBAC, field stripping, RLS, PII masking) is enforced on every qu
 
 ## Configuration
 
-All configuration lives in the bootstrap database (`~/.nexaql/nexaql.db`) and is managed through the Admin UI or API. No config files required.
+All configuration lives in the bootstrap database (`~/.nexaql/nexaql.sqlite`) and is managed through the Admin UI or API. No config files required.
 
 ```bash
 # Add your LLM API key (enables agent chat)
@@ -407,24 +406,7 @@ curl -X POST localhost:3717/api/api-keys \
 # Connect a database
 curl -X POST localhost:3717/api/connectors \
   -H 'Content-Type: application/json' \
-  -d '{"name":"prod","type":"postgresql","config":{"url":"postgresql://..."}}'
-```
-
-For advanced/legacy setups, a `nexaql.yaml` config file is also supported:
-
-```yaml
-ontology:
-  path: ./ontologies/my_schema.yaml
-
-datasources:
-  default:
-    type: duckdb
-    path: ":memory:"
-    seed_file: ./ontologies/sample_seed.sql
-
-server:
-  host: 0.0.0.0
-  port: 3717
+  -d '{"name":"prod","type":"postgresql","connection_url":"postgresql://..."}'
 ```
 
 ## Ontology
@@ -501,12 +483,14 @@ nexaql/
 │   ├── ontology/         # YAML schema + access policy loader
 │   ├── adapters/         # PostgreSQL, DuckDB (+ pluggable base)
 │   ├── api/              # FastAPI server + admin panel routes
-│   ├── chat/             # NL → NexaQL agent pipeline
+│   ├── chat/             # NL → NexaQL agent pipeline (intent extraction + query builder)
+│   ├── cloud_drive/      # Cloud drive providers (Google Drive, OneDrive, Dropbox)
+│   ├── spreadsheet/      # CSV/TSV/XLSX ingestion into shared DuckDB
 │   ├── mcp_server.py     # MCP server (13 tools, 3 resources)
 │   ├── auth.py           # JWT authentication & user context resolution
-│   ├── bootstrap.py      # DuckDB-backed state (domains, schemas, connectors, keys)
+│   ├── bootstrap.py      # SQLite-backed state (domains, schemas, connectors, keys, cloud accounts)
 │   └── cli.py            # CLI: install, serve, query, generate, regenerate, mcp
-├── frontend/             # React + Tailwind admin panel & playground
+├── frontend/             # React + TypeScript + Tailwind admin panel & agent chat
 └── ontologies/           # Sample schema + seed data
 ```
 
