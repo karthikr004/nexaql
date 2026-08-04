@@ -1,7 +1,8 @@
 import { useState, useCallback, useRef } from 'react';
 import type { ToastData } from './Toast';
+import CloudDrivePicker from './CloudDrivePicker';
 
-type SourceType = 'connector' | 'csv';
+type SourceType = 'connector' | 'csv' | 'cloud';
 
 interface ConnectorInfo {
   id?: number;
@@ -223,7 +224,7 @@ export default function GenerateModal({
           description,
           include_tables: includeTables,
           output_schema_name: name,
-          replace: sourceType === 'csv',
+          replace: sourceType === 'csv' || sourceType === 'cloud',
         }),
       });
       const body = await res.json();
@@ -348,9 +349,14 @@ export default function GenerateModal({
                 onClick={() => switchSource('connector')}
               />
               <SourceTab
-                label="Upload CSV / TSV"
+                label="Upload File"
                 active={sourceType === 'csv'}
                 onClick={() => switchSource('csv')}
+              />
+              <SourceTab
+                label="Cloud Drive"
+                active={sourceType === 'cloud'}
+                onClick={() => switchSource('cloud')}
               />
             </div>
           </div>
@@ -559,6 +565,118 @@ export default function GenerateModal({
                             color: 'var(--v2-text-tertiary)',
                             textTransform: 'uppercase',
                           }}>{col.type}</span>
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {uploadMeta.preview.map((row, i) => (
+                      <tr key={i}>
+                        {uploadMeta.columns.map((col) => (
+                          <td key={col.name} style={{
+                            padding: '4px 8px',
+                            color: row[col.name] != null ? 'var(--v2-text-secondary)' : 'var(--v2-text-tertiary)',
+                            borderBottom: '1px solid var(--v2-border-light)',
+                            whiteSpace: 'nowrap',
+                            maxWidth: 180,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            fontStyle: row[col.name] == null ? 'italic' : 'normal',
+                          }}>
+                            {row[col.name] ?? 'null'}
+                          </td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Cloud drive source */}
+          {sourceType === 'cloud' && (
+            <CloudDrivePicker
+              onImported={async (result) => {
+                setUploadedConnector(result.connector_name);
+                setConnector(result.connector_name);
+                setUploadMeta({
+                  columns: result.columns.map((c) => ({ name: c.name, type: c.type })),
+                  preview: result.preview,
+                  row_count: result.row_count,
+                  header_row: result.header_row,
+                });
+
+                const introRes = await fetch(
+                  `/api/connectors/${encodeURIComponent(result.connector_name)}/introspect`,
+                  {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ schema_name: 'main' }),
+                  },
+                );
+                const introBody = await introRes.json();
+                if (introRes.ok) {
+                  const t = (introBody.tables ?? []) as TableInfoItem[];
+                  setTables(t);
+                  const sel = new Set<string>();
+                  for (const item of t) {
+                    if (item.name === result.table_name) sel.add(item.name);
+                  }
+                  setSelected(sel);
+                }
+              }}
+              onToast={(message, type) => onToast({ message, type })}
+            />
+          )}
+
+          {/* Cloud drive upload success indicator */}
+          {sourceType === 'cloud' && uploadedConnector && (
+            <div style={{
+              padding: '8px 12px',
+              borderRadius: 'var(--v2-radius-sm)',
+              background: 'var(--v2-teal-50)',
+              border: '1px solid var(--v2-teal-500)',
+              fontSize: 12,
+              color: 'var(--v2-teal-700)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+            }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polyline points="20 6 9 17 4 12" />
+              </svg>
+              <span>File imported into <strong>spreadsheets</strong> connector</span>
+            </div>
+          )}
+
+          {/* Cloud drive data preview */}
+          {sourceType === 'cloud' && uploadMeta && uploadMeta.preview.length > 0 && (
+            <div>
+              <label className="v2-label" style={{ display: 'block', marginBottom: 6 }}>
+                Data preview ({uploadMeta.row_count} rows, {uploadMeta.columns.length} columns)
+              </label>
+              <div style={{
+                borderRadius: 'var(--v2-radius-md)',
+                border: '1px solid var(--v2-border)',
+                overflowX: 'auto',
+              }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 11 }}>
+                  <thead>
+                    <tr>
+                      {uploadMeta.columns.map((col) => (
+                        <th key={col.name} style={{
+                          padding: '5px 8px',
+                          textAlign: 'left',
+                          fontWeight: 600,
+                          color: 'var(--v2-text-primary)',
+                          background: 'var(--v2-bg-hover)',
+                          borderBottom: '1px solid var(--v2-border)',
+                          whiteSpace: 'nowrap',
+                          fontFamily: 'var(--v2-font-mono)',
+                        }}>
+                          {col.name}
+                          <span style={{ marginLeft: 4, fontSize: 9, fontWeight: 400, color: 'var(--v2-text-tertiary)', textTransform: 'uppercase' }}>{col.type}</span>
                         </th>
                       ))}
                     </tr>
