@@ -254,8 +254,19 @@ def _build_node_block(
     directives: list[str] = []
     if distinct:
         directives.append("@distinct")
+
+    # Build a map from aggregation field arguments to their aliases so that
+    # ORDER BY on a raw field used only inside an aggregate (e.g. sum(amount))
+    # gets rewritten to the aggregation alias (e.g. total_amount).
+    agg_field_to_alias: dict[str, str] = {}
+    if aggregations:
+        for agg in aggregations:
+            if agg.field and agg.field not in fields:
+                agg_field_to_alias.setdefault(agg.field, agg.alias)
+
     for ob in order_by:
-        directives.append(f"@orderby({ob.field}, {ob.direction})")
+        resolved_field = agg_field_to_alias.get(ob.field, ob.field)
+        directives.append(f"@orderby({resolved_field}, {ob.direction})")
     if limit is not None:
         directives.append(f"@limit({limit})")
     if offset is not None:

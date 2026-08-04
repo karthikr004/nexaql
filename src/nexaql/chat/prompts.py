@@ -15,6 +15,13 @@ from nexaql.ontology import Ontology, ontology_to_agent_prompt
 # ── System prompt ───────────────────────────────────────────────────────────
 
 
+def _current_date_context() -> tuple[str, int]:
+    from datetime import date
+    today = date.today()
+    text = f"Today's date is {today.isoformat()} ({today.strftime('%A, %B %d, %Y')}). The current year is {today.year}."
+    return text, today.year
+
+
 def build_system_prompt(ontology: Ontology, business_context: list[dict] | None = None) -> str:
     """Build the full system prompt for the query-generation agent.
 
@@ -24,8 +31,11 @@ def build_system_prompt(ontology: Ontology, business_context: list[dict] | None 
     ontology_text = ontology_to_agent_prompt(ontology)
     system_functions_text = system_functions_to_prompt_text()
     biz_context = _format_business_context(business_context or [])
+    date_ctx, current_year = _current_date_context()
 
     return f"""You are NexaQL, an expert query-generation agent for a procurement data platform.{biz_context}
+{date_ctx}
+When the user mentions a month or time period without specifying a year, always assume the current year ({current_year}).
 Your ONLY job is to translate natural-language questions into valid NexaQL queries.
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -359,7 +369,11 @@ def build_intent_system_prompt(ontology: Ontology, business_context: list[dict] 
     ontology_text = ontology_to_prompt_text(ontology)
     biz_context = _format_business_context(business_context or [])
 
+    date_ctx, current_year = _current_date_context()
+
     return f"""You are a query intent extractor. Given a natural language question about data, output a JSON object describing what data to fetch.
+{date_ctx}
+When the user mentions a month or time period without specifying a year, always assume the current year ({current_year}).
 
 ONTOLOGY (available nodes, fields, edges):
 {ontology_text}{biz_context}

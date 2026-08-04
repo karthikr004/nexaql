@@ -586,6 +586,24 @@ def translate(ast: QueryAST, ontology: Any) -> TranslateResult:
             if expr not in ctx.group_bys:
                 ctx.group_bys.append(expr)
 
+        # Fix ORDER BY referencing raw columns not in GROUP BY — replace with
+        # the matching aggregation alias when one exists.
+        agg_col_to_alias: Dict[str, str] = {}
+        for sel in ctx.selects:
+            import re as _re
+            m = _re.match(r"(\w+)\(([^)]+)\)\s+AS\s+(\w+)", sel)
+            if m:
+                agg_col_to_alias[m.group(2).strip()] = m.group(3)
+        fixed_order: List[str] = []
+        for ob in ctx.order_bys:
+            parts = ob.rsplit(None, 1)
+            col_expr = parts[0] if len(parts) == 2 else ob
+            direction = parts[1] if len(parts) == 2 else ""
+            if col_expr not in ctx.scalar_exprs and col_expr in agg_col_to_alias:
+                col_expr = agg_col_to_alias[col_expr]
+            fixed_order.append(f"{col_expr} {direction}".strip())
+        ctx.order_bys = fixed_order
+
     is_distinct = any(getattr(d, "type", None) == "distinct" for d in root_node.directives)
     select_keyword = "SELECT DISTINCT" if is_distinct else "SELECT"
 
