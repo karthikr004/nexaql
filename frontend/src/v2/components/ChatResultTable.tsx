@@ -15,6 +15,11 @@ export default function ChatResultTable({ rows, columns, rowCount }: Props) {
   if (!rows.length) return null;
 
   const cleanName = (n: string) => n.replace(/__/g, '.');
+  const formatValue = (v: unknown) => {
+    const s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}/.test(s)) return s.slice(0, 10);
+    return s;
+  };
 
   return (
     <div className="v2-card" style={{ overflow: 'hidden' }}>
@@ -67,7 +72,7 @@ export default function ChatResultTable({ rows, columns, rowCount }: Props) {
                       {v === null || v === undefined ? (
                         <span style={{ color: 'var(--v2-text-tertiary)', fontStyle: 'italic' }}>null</span>
                       ) : (
-                        String(v)
+                        formatValue(v)
                       )}
                     </td>
                   );

@@ -94,6 +94,14 @@ export default function ChatResultChart({ rows, columns, visualization: vizProp 
     return point;
   });
 
+  const stripTime = (value: unknown) => {
+    const s = String(value);
+    return /^\d{4}-\d{2}-\d{2}[T ]/.test(s) ? s.slice(0, 10) : s;
+  };
+
+  const formatTooltip = (value: unknown, name: unknown) => [stripTime(value), stripTime(name)];
+  const formatTooltipLabel = (label: unknown) => stripTime(label);
+
   const textColor = 'var(--v2-text-tertiary)';
   const gridColor = 'var(--v2-border)';
 
@@ -118,7 +126,7 @@ export default function ChatResultChart({ rows, columns, visualization: vizProp 
               cx="50%"
               cy="50%"
               outerRadius={90}
-              label={(props) => `${props.name ?? ''} ${((props.percent ?? 0) * 100).toFixed(0)}%`}
+              label={(props) => `${stripTime(props.name ?? '')} ${((props.percent ?? 0) * 100).toFixed(0)}%`}
               labelLine={false}
               fontSize={11}
             >
@@ -126,7 +134,7 @@ export default function ChatResultChart({ rows, columns, visualization: vizProp 
                 <Cell key={i} fill={COLORS[i % COLORS.length]} />
               ))}
             </Pie>
-            <Tooltip />
+            <Tooltip formatter={formatTooltip} labelFormatter={formatTooltipLabel} />
             <Legend wrapperStyle={{ fontSize: 11 }} />
           </PieChart>
         </ResponsiveContainer>
@@ -141,9 +149,9 @@ export default function ChatResultChart({ rows, columns, visualization: vizProp 
         <ResponsiveContainer width="100%" height={280}>
           <LineChart data={data} margin={{ top: 16, right: 24, bottom: 4, left: 8 }}>
             <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-            <XAxis dataKey={xField} tick={{ fontSize: 11, fill: textColor }} />
+            <XAxis dataKey={xField} tickFormatter={stripTime} tick={{ fontSize: 11, fill: textColor }} />
             <YAxis tick={{ fontSize: 11, fill: textColor }} />
-            <Tooltip />
+            <Tooltip formatter={formatTooltip} labelFormatter={formatTooltipLabel} />
             {yFields.map((yf, i) => (
               <Line
                 key={yf}
@@ -168,9 +176,9 @@ export default function ChatResultChart({ rows, columns, visualization: vizProp 
       <ResponsiveContainer width="100%" height={280}>
         <BarChart data={data} margin={{ top: 16, right: 24, bottom: 4, left: 8 }}>
           <CartesianGrid strokeDasharray="3 3" stroke={gridColor} />
-          <XAxis dataKey={xField} tick={{ fontSize: 11, fill: textColor }} />
+          <XAxis dataKey={xField} tickFormatter={stripTime} tick={{ fontSize: 11, fill: textColor }} />
           <YAxis tick={{ fontSize: 11, fill: textColor }} />
-          <Tooltip />
+          <Tooltip formatter={formatTooltip} labelFormatter={formatTooltipLabel} />
           {yFields.map((yf, i) => (
             <Bar key={yf} dataKey={yf} fill={COLORS[i % COLORS.length]} radius={[4, 4, 0, 0]} />
           ))}
