@@ -59,6 +59,15 @@ class IntentOrderBy:
 
 
 @dataclass
+class IntentVisualization:
+    """LLM-suggested visualization for query results."""
+    chart_type: Literal["bar", "line", "pie", "stat", "table"]
+    x_field: str | None = None
+    y_fields: list[str] = field(default_factory=list)
+    title: str | None = None
+
+
+@dataclass
 class IntentEdge:
     """A nested edge traversal."""
     name: str
@@ -88,6 +97,7 @@ class QueryIntent:
     offset: Optional[int] = None
     distinct: bool = False
     query_name: Optional[str] = None  # auto-generated if not provided
+    visualization: Optional[IntentVisualization] = None
 
 
 # ── Intent parsing (JSON → QueryIntent) ─────────────────────────────────────
@@ -138,6 +148,16 @@ def parse_intent(data: dict[str, Any]) -> QueryIntent:
             edges=[_parse_edge(ne) for ne in e.get("edges", [])],
         )
 
+    viz_data = data.get("visualization")
+    viz = None
+    if isinstance(viz_data, dict) and "chart_type" in viz_data:
+        viz = IntentVisualization(
+            chart_type=viz_data["chart_type"],
+            x_field=viz_data.get("x_field"),
+            y_fields=viz_data.get("y_fields", []),
+            title=viz_data.get("title"),
+        )
+
     return QueryIntent(
         node=data["node"],
         fields=data.get("fields", []),
@@ -152,6 +172,7 @@ def parse_intent(data: dict[str, Any]) -> QueryIntent:
         offset=data.get("offset"),
         distinct=data.get("distinct", False),
         query_name=data.get("query_name"),
+        visualization=viz,
     )
 
 

@@ -42,6 +42,7 @@ class ChatResponseBody(BaseModel):
     # Pipeline trace fields for debugging
     intent: dict[str, Any] | None = None
     generationMode: str | None = None
+    visualization: dict[str, Any] | None = None
     # Thread context
     threadId: int | None = None
 
@@ -159,5 +160,6 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
         error=result.error,
         intent=result.intent,
         generationMode=result.generation_mode,
+        visualization=result.visualization,
         threadId=thread_id,
     )
