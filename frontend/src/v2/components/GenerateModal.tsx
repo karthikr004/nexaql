@@ -108,8 +108,8 @@ export default function GenerateModal({
 
   const handleFileSelect = useCallback((f: File) => {
     const ext = f.name.split('.').pop()?.toLowerCase();
-    if (!ext || !['csv', 'tsv', 'txt'].includes(ext)) {
-      onToast({ message: 'Only CSV, TSV, and TXT files are supported', type: 'error' });
+    if (!ext || !['csv', 'tsv', 'txt', 'xlsx'].includes(ext)) {
+      onToast({ message: 'Only CSV, TSV, TXT, and XLSX files are supported', type: 'error' });
       return;
     }
     setFile(f);
@@ -402,7 +402,7 @@ export default function GenerateModal({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept=".csv,.tsv,.txt"
+                  accept=".csv,.tsv,.txt,.xlsx"
                   style={{ display: 'none' }}
                   onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFileSelect(f); }}
                 />
@@ -420,7 +420,7 @@ export default function GenerateModal({
                   Drop a file here or click to browse
                 </p>
                 <p style={{ fontSize: 11, color: 'var(--v2-text-tertiary)', marginTop: 2 }}>
-                  CSV, TSV, TXT — max 100 MB
+                  CSV, TSV, TXT, XLSX — max 100 MB
                 </p>
               </div>
 
