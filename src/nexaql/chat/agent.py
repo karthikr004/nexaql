@@ -66,6 +66,7 @@ class ChatResponse:
     # New: expose the intent for debugging / UI display
     intent: dict[str, Any] | None = None
     generation_mode: str | None = None
+    visualization: dict[str, Any] | None = None
 
 
 # ── Step 1a: Generate via intent extraction (Option B) ──────────────────────
@@ -445,6 +446,7 @@ async def _ask_intent(
             intent=intent_data,
             generation_mode="intent",
             error="No datasource configured -- cannot execute query",
+            visualization=intent_data.get("visualization") if isinstance(intent_data, dict) else None,
         )
 
     exec_result, exec_error, final_query, final_intent = await execute_with_retry_intent(
@@ -497,6 +499,8 @@ async def _ask_intent(
         except Exception:
             pass
 
+    viz = final_intent.get("visualization") if isinstance(final_intent, dict) else None
+
     return ChatResponse(
         explanation=llm_response,
         nexaql_query=final_query,
@@ -510,6 +514,7 @@ async def _ask_intent(
         error=exec_error,
         intent=final_intent,
         generation_mode="intent",
+        visualization=viz,
     )
 
 

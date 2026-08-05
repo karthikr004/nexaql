@@ -94,6 +94,12 @@ export interface ChatTurn {
   // Pipeline trace
   intent: Record<string, unknown> | null;
   generationMode: string | null;
+  visualization: {
+    chart_type: 'bar' | 'line' | 'pie' | 'stat' | 'table';
+    x_field?: string;
+    y_fields?: string[];
+    title?: string;
+  } | null;
   durationMs?: number;
 }
 

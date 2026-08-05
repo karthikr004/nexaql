@@ -70,6 +70,7 @@ export default function ChatPage() {
           error: meta.error ?? null,
           intent: null,
           generationMode: meta.generation_mode ?? null,
+          visualization: meta.visualization ?? null,
         });
       }
       setTurns(loadedTurns);
@@ -103,7 +104,7 @@ export default function ChatPage() {
           nexaqlQuery: null, queryPreview: null, adapterType: null,
           rows: [], columns: [], rowCount: 0, shape: null,
           summary: '', error: 'LLM API key not configured. Add one in Settings > API Keys to enable Agent Chat.',
-          intent: null, generationMode: null,
+          intent: null, generationMode: null, visualization: null,
         };
         setTurns((prev) => [...prev, errTurn]);
         setInput('');
@@ -116,7 +117,7 @@ export default function ChatPage() {
           id: turnId, question, nexaqlQuery: null, queryPreview: null,
           adapterType: null, rows: [], columns: [], rowCount: 0,
           shape: null, summary: '', error: null, loading: true,
-          intent: null, generationMode: null,
+          intent: null, generationMode: null, visualization: null,
         },
       ]);
       setInput('');
@@ -157,6 +158,7 @@ export default function ChatPage() {
           error: data.error ?? null,
           intent: data.intent ?? null,
           generationMode: data.generationMode ?? null,
+          visualization: data.visualization ?? null,
           durationMs,
         };
 
@@ -170,7 +172,7 @@ export default function ChatPage() {
           id: turnId, question, loading: false,
           nexaqlQuery: null, queryPreview: null, adapterType: null,
           rows: [], columns: [], rowCount: 0, shape: null,
-          summary: '', error: msg, intent: null, generationMode: null,
+          summary: '', error: msg, intent: null, generationMode: null, visualization: null,
         };
         setTurns((prev) => prev.map((t) => (t.id !== turnId ? t : errTurn)));
       } finally {

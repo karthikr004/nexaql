@@ -410,8 +410,13 @@ OUTPUT FORMAT — respond with ONLY a JSON object in a ```json code block:
   ],
   "order_by": [{{"field": "amount", "direction": "DESC"}}],
   "limit": 10,
-  "distinct": false
-}}
+  "distinct": false,
+  "visualization": {{
+    "chart_type": "bar",
+    "x_field": "category",
+    "y_fields": ["total_amount"],
+    "title": "Amount by Category"
+  }}
 ```
 
 RULES:
@@ -442,17 +447,23 @@ RULES:
 9. "order_by" — Sort results. "direction" is "ASC" or "DESC". Can reference aggregation aliases (including those from edges).
 10. "limit" / "distinct" — Optional. Omit if not needed.
 11. Only include keys that are needed. Omit empty arrays and null values.
+12. "visualization" — Suggest how to display the results:
+    - chart_type: "bar" (comparisons, rankings, top-N), "line" (trends over time), "pie" (proportions with ≤6 categories), "stat" (single aggregate value like totals/averages), "table" (raw listings)
+    - x_field: the category or time field to use as the axis (use aggregation alias or calc alias, not raw field)
+    - y_fields: the numeric metric fields to plot (use aggregation aliases)
+    - title: short descriptive chart title
+    - Omit visualization entirely for simple record listings with no clear chart.
 
 EXAMPLES:
 
 Q: "top 5 suppliers by total invoice amount"
 ```json
-{{"node": "suppliers", "fields": ["name"], "aggregations": [{{"alias": "total_amount", "func": "sum", "field": "total_invoice_amount"}}], "order_by": [{{"field": "total_amount", "direction": "DESC"}}], "limit": 5}}
+{{"node": "suppliers", "fields": ["name"], "aggregations": [{{"alias": "total_amount", "func": "sum", "field": "total_invoice_amount"}}], "order_by": [{{"field": "total_amount", "direction": "DESC"}}], "limit": 5, "visualization": {{"chart_type": "bar", "x_field": "name", "y_fields": ["total_amount"], "title": "Top 5 Suppliers by Invoice Amount"}}}}
 ```
 
 Q: "count of active contracts by status"
 ```json
-{{"node": "contracts", "fields": ["status"], "aggregations": [{{"alias": "count", "func": "count"}}], "filters": [{{"field": "status", "op": "eq", "value": "ACTIVE"}}]}}
+{{"node": "contracts", "fields": ["status"], "aggregations": [{{"alias": "count", "func": "count"}}], "filters": [{{"field": "status", "op": "eq", "value": "ACTIVE"}}], "visualization": {{"chart_type": "pie", "x_field": "status", "y_fields": ["count"], "title": "Contracts by Status"}}}}
 ```
 
 Q: "invoices expiring within 30 days with supplier name"
@@ -462,7 +473,7 @@ Q: "invoices expiring within 30 days with supplier name"
 
 Q: "monthly spend breakdown"
 ```json
-{{"node": "expenses", "aggregations": [{{"alias": "total_spend", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}], "order_by": [{{"field": "month", "direction": "ASC"}}]}}
+{{"node": "expenses", "aggregations": [{{"alias": "total_spend", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}], "order_by": [{{"field": "month", "direction": "ASC"}}], "visualization": {{"chart_type": "line", "x_field": "month", "y_fields": ["total_spend"], "title": "Monthly Spend Trend"}}}}
 ```
 
 {_build_dynamic_examples(ontology)}

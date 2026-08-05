@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import Markdown from 'react-markdown';
 import type { ChatTurn } from '../../types';
+import ChatResultChart from './ChatResultChart';
 import ChatResultTable from './ChatResultTable';
 
 function FormattedMarkdown({ text }: { text: string }) {
@@ -170,6 +172,52 @@ function ThinkingPill({ turn, isActive, onClick }: { turn: ChatTurn; isActive: b
   );
 }
 
+function ViewToggle({ view, onToggle }: { view: 'table' | 'chart'; onToggle: (v: 'table' | 'chart') => void }) {
+  const btn = (label: string, value: 'table' | 'chart') => (
+    <button
+      type="button"
+      onClick={() => onToggle(value)}
+      style={{
+        padding: '4px 10px',
+        fontSize: 11,
+        fontFamily: 'var(--v2-font-sans)',
+        fontWeight: 500,
+        borderRadius: 'var(--v2-radius-sm)',
+        border: 'none',
+        cursor: 'pointer',
+        background: view === value ? 'var(--v2-accent)' : 'transparent',
+        color: view === value ? 'var(--v2-text-inverse)' : 'var(--v2-text-tertiary)',
+        transition: 'all var(--v2-transition-fast)',
+      }}
+    >
+      {label}
+    </button>
+  );
+
+  return (
+    <div style={{ display: 'inline-flex', gap: 2, padding: 2, borderRadius: 'var(--v2-radius-md)', background: 'var(--v2-bg-surface)', border: '1px solid var(--v2-border)' }}>
+      {btn('Table', 'table')}
+      {btn('Chart', 'chart')}
+    </div>
+  );
+}
+
+function ChatResultView({ turn }: { turn: ChatTurn }) {
+  const hasChart = turn.visualization && turn.visualization.chart_type !== 'table';
+  const [view, setView] = useState<'table' | 'chart'>(hasChart ? 'chart' : 'table');
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {hasChart && <ViewToggle view={view} onToggle={setView} />}
+      {view === 'chart' && turn.visualization ? (
+        <ChatResultChart rows={turn.rows} columns={turn.columns} visualization={turn.visualization} />
+      ) : (
+        <ChatResultTable rows={turn.rows} columns={turn.columns} rowCount={turn.rowCount} />
+      )}
+    </div>
+  );
+}
+
 function AssistantMessage({ turn, isTraceActive, onTraceClick }: {
   turn: ChatTurn;
   isTraceActive: boolean;
@@ -217,9 +265,9 @@ function AssistantMessage({ turn, isTraceActive, onTraceClick }: {
           </div>
         )}
 
-        {/* Results table */}
+        {/* Results — Table/Chart toggle */}
         {!turn.error && turn.rows.length > 0 && (
-          <ChatResultTable rows={turn.rows} columns={turn.columns} rowCount={turn.rowCount} />
+          <ChatResultView turn={turn} />
         )}
 
         {/* Duration */}
