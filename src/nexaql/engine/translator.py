@@ -413,14 +413,20 @@ def _process_node(
     ctx: TranslatorContext,
     is_root: bool,
     edge_name: Optional[str],
+    ancestors: Optional[frozenset] = None,
 ) -> NodeShape:
     """Recursively processes a node, emitting SELECTs/JOINs/WHEREs and returning a NodeShape."""
+    if ancestors is None:
+        ancestors = frozenset()
+
     node_def = ctx.ontology.nodes.get(node.name) if isinstance(ctx.ontology.nodes, dict) else None
     if node_def is None:
         raise TranslateError(f"Unknown node '{node.name}'")
 
     fields_map: Dict[str, Any] = getattr(node_def, "fields", {}) or {}
     edges_map: Dict[str, Any] = getattr(node_def, "edges", {}) or {}
+
+    current_ancestors = ancestors | {node.name}
 
     # Root alias is pre-created; edge aliases are created on demand by join steps
     table_alias = ctx.aliases.get(node.name) or _get_or_create_alias(node.name, ctx)
@@ -474,13 +480,15 @@ def _process_node(
                 raise TranslateError(
                     f"Edge '{ef.node.name}' not defined on '{node.name}'"
                 )
-            join_steps = getattr(edge_def, "join_steps", []) or []
-            join_type = getattr(edge_def, "join_type", "JOIN") or "JOIN"
-            _process_join_steps(join_steps, join_type, ctx)
             # Resolve edge name → target node name (e.g. "items" → "order_item")
             target_node_name = getattr(edge_def, "node", None) or (
                 edge_def.get("node") if isinstance(edge_def, dict) else ef.node.name
             )
+            if target_node_name in current_ancestors:
+                continue
+            join_steps = getattr(edge_def, "join_steps", []) or []
+            join_type = getattr(edge_def, "join_type", "JOIN") or "JOIN"
+            _process_join_steps(join_steps, join_type, ctx)
             resolved_child = NodeSelection(
                 kind=ef.node.kind,
                 name=target_node_name,
@@ -488,7 +496,7 @@ def _process_node(
                 directives=ef.node.directives,
                 fields=ef.node.fields,
             )
-            child_shape = _process_node(resolved_child, ctx, False, ef.node.name)
+            child_shape = _process_node(resolved_child, ctx, False, ef.node.name, current_ancestors)
             children.append(child_shape)
 
     # Collect scalar expressions so the top-level GROUP BY pass can use them
