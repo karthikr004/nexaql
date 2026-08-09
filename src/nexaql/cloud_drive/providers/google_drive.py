@@ -98,6 +98,7 @@ class GoogleDriveProvider:
         access_token: str,
         folder_id: str | None = None,
         page_token: str | None = None,
+        mime_types: set[str] | None = None,
     ) -> dict[str, Any]:
         q_parts = ["trashed = false"]
 
@@ -106,11 +107,12 @@ class GoogleDriveProvider:
         else:
             q_parts.append("'root' in parents")
 
-        mime_filter = " or ".join(
-            f"mimeType = '{mt}'"
-            for mt in sorted(_SPREADSHEET_MIME_TYPES | {_FOLDER_MIME_TYPE})
-        )
-        q_parts.append(f"({mime_filter})")
+        if mime_types is not None:
+            allowed = mime_types | {_FOLDER_MIME_TYPE}
+            mime_filter = " or ".join(
+                f"mimeType = '{mt}'" for mt in sorted(allowed)
+            )
+            q_parts.append(f"({mime_filter})")
 
         params: dict[str, str] = {
             "q": " and ".join(q_parts),
