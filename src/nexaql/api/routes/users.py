@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 from nexaql import bootstrap as bs
@@ -50,6 +50,19 @@ class OAuthProviderRequest(BaseModel):
 
 class UpdateAuthModeRequest(BaseModel):
     auth_mode: Literal["dev", "oauth"]
+
+
+class InviteRequest(BaseModel):
+    email: str
+    roles: list[str] = []
+
+
+class InviteResponse(BaseModel):
+    id: int
+    email: str
+    invited_by: int | None
+    roles: list[str]
+    created_at: str | None
 
 
 # ── User CRUD ──────────────────────────────────────────────────────────────
@@ -154,6 +167,42 @@ async def remove_oauth_provider(provider: str) -> AuthConfigResponse:
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Provider '{provider}' not found")
     return await get_auth_config()
+
+
+# ── Invites ───────────────────────────────────────────────────────────────
+
+
+@router.get("/invites")
+async def list_invites() -> list[InviteResponse]:
+    return [InviteResponse(**inv) for inv in bs.list_invites()]
+
+
+@router.post("/invites")
+async def create_invite(req: InviteRequest, request: Request) -> InviteResponse:
+    from nexaql.api.deps import get_user_context
+
+    email = req.email.lower().strip()
+    if not email or "@" not in email:
+        raise HTTPException(status_code=400, detail="Invalid email address")
+
+    existing_user = next((u for u in bs.list_users() if u["email"].lower() == email), None)
+    if existing_user:
+        raise HTTPException(status_code=409, detail=f"{email} is already a registered user")
+
+    if bs.is_email_invited(email):
+        raise HTTPException(status_code=409, detail=f"{email} is already invited")
+
+    ctx = get_user_context(request)
+    invited_by = int(ctx.user_id) if ctx.user_id else None
+    invite = bs.invite_email(email, invited_by=invited_by, roles=req.roles)
+    return InviteResponse(**invite)
+
+
+@router.delete("/invites/{email:path}")
+async def revoke_invite(email: str) -> dict:
+    if not bs.revoke_invite(email):
+        raise HTTPException(status_code=404, detail="Invite not found")
+    return {"revoked": True, "email": email}
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────
