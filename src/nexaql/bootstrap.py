@@ -1,11 +1,13 @@
 # Copyright (c) 2026-present NexaQL Contributors
-"""Bootstrap database — SQLite file that stores all NexaQL configuration.
+"""Bootstrap database — stores all NexaQL configuration.
 
-Replaces nexaql.yaml, api_keys.json, and connectors.json with a proper
-database at ``~/.nexaql/nexaql.sqlite``.
+Supports two backends:
+  - **SQLite** (default): file at ``~/.nexaql/nexaql.sqlite``, WAL mode.
+  - **PostgreSQL**: when ``NEXAQL_BOOTSTRAP_DB_URL`` is set to a PG connection
+    string (e.g. ``postgresql://user:pass@host:5432/dbname``).
 
-Uses SQLite with WAL mode for concurrent access (CLI + server can run
-simultaneously without locking errors).
+All public functions are backend-agnostic; the ``_DbAdapter`` translates
+SQL dialect differences transparently.
 
 Tables:
   connectors   — database connections (Postgres, DuckDB, MySQL, etc.)
@@ -21,6 +23,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+import re
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
@@ -34,33 +37,156 @@ _DEFAULT_DB_DIR = os.path.join(Path.home(), ".nexaql")
 _DEFAULT_DB_PATH = os.path.join(_DEFAULT_DB_DIR, "nexaql.sqlite")
 
 
+def _get_db_url() -> str | None:
+    """Return PG connection URL if set, else None (fall back to SQLite)."""
+    return os.environ.get("NEXAQL_BOOTSTRAP_DB_URL")
+
+
 def _get_db_path() -> str:
     """Get the bootstrap DB path. Override with NEXAQL_BOOTSTRAP_DB env var."""
     return os.environ.get("NEXAQL_BOOTSTRAP_DB", _DEFAULT_DB_PATH)
 
 
+def _is_pg() -> bool:
+    """True when using PostgreSQL as the bootstrap backend."""
+    url = _get_db_url()
+    return url is not None and url.startswith("postgres")
+
+
+# ── Database adapter ─────────────────────────────────────────────────────────
+
+_INSERT_OR_IGNORE_RE = re.compile(r"\bINSERT\s+OR\s+IGNORE\b", re.IGNORECASE)
+_PLACEHOLDER_RE = re.compile(r"\?")
+
+
+class _CursorResult:
+    """Unified cursor result for both SQLite and PostgreSQL."""
+
+    __slots__ = ("_rows", "rowcount", "lastrowid")
+
+    def __init__(self, rows: list[tuple] | None, rowcount: int, lastrowid: int | None = None):
+        self._rows = rows
+        self.rowcount = rowcount
+        self.lastrowid = lastrowid
+
+    def fetchone(self) -> tuple | None:
+        if self._rows:
+            return self._rows[0]
+        return None
+
+    def fetchall(self) -> list[tuple]:
+        return self._rows or []
+
+
+class _DbAdapter:
+    """Thin wrapper providing a uniform interface over sqlite3 or psycopg2."""
+
+    def __init__(self, backend: str, raw_conn: Any):
+        self._backend = backend
+        self._raw = raw_conn
+
+    @property
+    def is_pg(self) -> bool:
+        return self._backend == "pg"
+
+    def execute(self, sql: str, params: list | tuple | None = None) -> _CursorResult:
+        if self.is_pg:
+            return self._pg_execute(sql, params)
+        return self._sqlite_execute(sql, params)
+
+    def insert_returning_id(self, sql: str, params: list | tuple | None = None) -> int:
+        """INSERT and return the auto-generated id."""
+        if self.is_pg:
+            sql = self._translate_sql(sql).rstrip().rstrip(";")
+            sql += " RETURNING id"
+            cur = self._raw.cursor()
+            try:
+                cur.execute(sql, params or None)
+                return cur.fetchone()[0]
+            finally:
+                cur.close()
+        else:
+            self._raw.execute(sql, params or [])
+            return self._raw.execute("SELECT last_insert_rowid()").fetchone()[0]
+
+    def close(self) -> None:
+        self._raw.close()
+
+    # ── SQLite path ──────────────────────────────────────────────────────────
+
+    def _sqlite_execute(self, sql: str, params: list | tuple | None = None) -> _CursorResult:
+        cur = self._raw.execute(sql, params or [])
+        desc = cur.description
+        if desc is not None:
+            rows = cur.fetchall()
+        else:
+            rows = None
+        return _CursorResult(rows, cur.rowcount, cur.lastrowid)
+
+    # ── PostgreSQL path ──────────────────────────────────────────────────────
+
+    def _pg_execute(self, sql: str, params: list | tuple | None = None) -> _CursorResult:
+        sql = self._translate_sql(sql)
+        cur = self._raw.cursor()
+        try:
+            cur.execute(sql, params or None)
+            if cur.description is not None:
+                rows = cur.fetchall()
+            else:
+                rows = None
+            return _CursorResult(rows, cur.rowcount)
+        finally:
+            cur.close()
+
+    @staticmethod
+    def _translate_sql(sql: str) -> str:
+        sql = _PLACEHOLDER_RE.sub("%s", sql)
+        if _INSERT_OR_IGNORE_RE.search(sql):
+            sql = _INSERT_OR_IGNORE_RE.sub("INSERT", sql)
+            sql = sql.rstrip().rstrip(";")
+            sql += " ON CONFLICT DO NOTHING"
+        return sql
+
+
 # ── Connection management ─────────────────────────────────────────────────────
 
-_conn: sqlite3.Connection | None = None
+_conn: _DbAdapter | None = None
 _initialized: bool = False
 
 
-def _get_conn() -> sqlite3.Connection:
-    """Get or create the singleton SQLite connection with WAL mode."""
+def _get_conn() -> _DbAdapter:
+    """Get or create the singleton DB connection (SQLite or PostgreSQL)."""
     global _conn, _initialized
     if _conn is None:
-        db_path = _get_db_path()
-        os.makedirs(os.path.dirname(db_path), exist_ok=True)
-        _migrate_from_duckdb(db_path)
-        _conn = sqlite3.connect(db_path, isolation_level=None)
-        _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("PRAGMA busy_timeout=5000")
-        _conn.execute("PRAGMA foreign_keys=ON")
-        log.info(f"Bootstrap DB opened at {db_path}")
+        pg_url = _get_db_url()
+        if pg_url and pg_url.startswith("postgres"):
+            _conn = _open_pg(pg_url)
+        else:
+            _conn = _open_sqlite()
     if not _initialized:
         _ensure_tables(_conn)
         _initialized = True
     return _conn
+
+
+def _open_sqlite() -> _DbAdapter:
+    db_path = _get_db_path()
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    _migrate_from_duckdb(db_path)
+    raw = sqlite3.connect(db_path, isolation_level=None)
+    raw.execute("PRAGMA journal_mode=WAL")
+    raw.execute("PRAGMA busy_timeout=5000")
+    raw.execute("PRAGMA foreign_keys=ON")
+    log.info("Bootstrap DB opened (SQLite) at %s", db_path)
+    return _DbAdapter("sqlite", raw)
+
+
+def _open_pg(url: str) -> _DbAdapter:
+    import psycopg2
+    raw = psycopg2.connect(url)
+    raw.autocommit = True
+    log.info("Bootstrap DB opened (PostgreSQL) at %s", url.split("@")[-1] if "@" in url else url)
+    return _DbAdapter("pg", raw)
 
 
 def close() -> None:
@@ -173,7 +299,7 @@ def _now() -> str:
 
 # ── DDL ───────────────────────────────────────────────────────────────────────
 
-_DDL = """
+_DDL_SQLITE = """
 CREATE TABLE IF NOT EXISTS connectors (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT UNIQUE NOT NULL,
@@ -302,18 +428,149 @@ CREATE TABLE IF NOT EXISTS cloud_drive_accounts (
 );
 """
 
+_DDL = _DDL_SQLITE
 
-def _ensure_tables(conn: sqlite3.Connection) -> None:
+_DDL_PG = """
+CREATE TABLE IF NOT EXISTS connectors (
+    id          SERIAL PRIMARY KEY,
+    name        TEXT UNIQUE NOT NULL,
+    type        TEXT NOT NULL,
+    url         TEXT,
+    credentials TEXT,
+    created_at  TEXT
+);
+
+CREATE TABLE IF NOT EXISTS domains (
+    id                   SERIAL PRIMARY KEY,
+    name                 TEXT UNIQUE NOT NULL,
+    description          TEXT,
+    roles_json           TEXT,
+    access_functions_json TEXT,
+    created_at           TEXT
+);
+
+CREATE TABLE IF NOT EXISTS schemas (
+    id             SERIAL PRIMARY KEY,
+    domain_id      INTEGER NOT NULL REFERENCES domains(id),
+    connector_id   INTEGER NOT NULL REFERENCES connectors(id),
+    name           TEXT NOT NULL,
+    ontology_json  TEXT NOT NULL,
+    created_at     TEXT,
+    updated_at     TEXT,
+    UNIQUE(domain_id, name)
+);
+
+CREATE TABLE IF NOT EXISTS llm_config (
+    id              SERIAL PRIMARY KEY,
+    provider        TEXT NOT NULL DEFAULT '',
+    model           TEXT NOT NULL DEFAULT '',
+    max_tokens      INTEGER DEFAULT 4096,
+    summary_max_tokens INTEGER DEFAULT 2048,
+    generation_mode TEXT DEFAULT 'intent',
+    is_active       BOOLEAN DEFAULT TRUE
+);
+
+CREATE TABLE IF NOT EXISTS api_keys (
+    id         SERIAL PRIMARY KEY,
+    provider   TEXT UNIQUE NOT NULL,
+    name       TEXT,
+    key        TEXT NOT NULL,
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS server_config (
+    id                   INTEGER PRIMARY KEY DEFAULT 1 CHECK(id = 1),
+    host                 TEXT DEFAULT '0.0.0.0',
+    port                 INTEGER DEFAULT 3717,
+    cors_origins         TEXT DEFAULT '["*"]',
+    auth_mode            TEXT DEFAULT 'dev',
+    active_domain        TEXT,
+    auth_secret          TEXT,
+    auth_algorithm       TEXT DEFAULT 'HS256',
+    oauth_providers_json TEXT DEFAULT '[]'
+);
+
+CREATE TABLE IF NOT EXISTS users (
+    id             SERIAL PRIMARY KEY,
+    email          TEXT UNIQUE NOT NULL,
+    name           TEXT,
+    avatar_url     TEXT,
+    oauth_provider TEXT NOT NULL,
+    oauth_sub      TEXT NOT NULL,
+    roles_json     TEXT DEFAULT '[]',
+    is_active      BOOLEAN DEFAULT TRUE,
+    created_at     TEXT,
+    last_login_at  TEXT,
+    UNIQUE(oauth_provider, oauth_sub)
+);
+
+CREATE TABLE IF NOT EXISTS invited_emails (
+    id         SERIAL PRIMARY KEY,
+    email      TEXT UNIQUE NOT NULL,
+    invited_by INTEGER,
+    roles_json TEXT DEFAULT '[]',
+    created_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS chat_threads (
+    id          SERIAL PRIMARY KEY,
+    user_id     INTEGER NOT NULL,
+    title       TEXT,
+    domain      TEXT,
+    is_archived BOOLEAN DEFAULT FALSE,
+    created_at  TEXT,
+    updated_at  TEXT,
+    FOREIGN KEY (user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id          SERIAL PRIMARY KEY,
+    thread_id   INTEGER NOT NULL,
+    role        TEXT NOT NULL,
+    content     TEXT NOT NULL,
+    metadata_json TEXT DEFAULT '{}',
+    created_at  TEXT,
+    FOREIGN KEY (thread_id) REFERENCES chat_threads(id) ON DELETE CASCADE
+);
+
+CREATE TABLE IF NOT EXISTS business_ontology (
+    id              SERIAL PRIMARY KEY,
+    domain_id       INTEGER NOT NULL REFERENCES domains(id),
+    term            TEXT NOT NULL,
+    definition      TEXT NOT NULL,
+    sql_hint        TEXT,
+    tags            TEXT DEFAULT '[]',
+    created_by      INTEGER,
+    created_at      TEXT,
+    updated_at      TEXT,
+    UNIQUE(domain_id, term)
+);
+
+CREATE TABLE IF NOT EXISTS cloud_drive_accounts (
+    id              SERIAL PRIMARY KEY,
+    connector_id    INTEGER NOT NULL REFERENCES connectors(id),
+    email           TEXT NOT NULL,
+    display_name    TEXT,
+    access_token    TEXT NOT NULL,
+    refresh_token   TEXT NOT NULL,
+    token_expires_at TEXT,
+    created_at      TEXT,
+    UNIQUE(connector_id, email)
+);
+"""
+
+
+def _ensure_tables(conn: _DbAdapter) -> None:
     """Create tables if they don't exist."""
-    for stmt in _DDL.strip().split(";"):
+    ddl = _DDL_PG if conn.is_pg else _DDL_SQLITE
+    for stmt in ddl.strip().split(";"):
         stmt = stmt.strip()
         if stmt:
             try:
                 conn.execute(stmt)
             except Exception as e:
-                log.debug(f"DDL statement skipped: {e}")
+                log.debug("DDL statement skipped: %s", e)
 
-    # Ensure server_config singleton row exists
     row = conn.execute("SELECT COUNT(*) FROM server_config").fetchone()
     if row and row[0] == 0:
         conn.execute("INSERT INTO server_config (id) VALUES (1)")
@@ -929,7 +1186,7 @@ def upsert_user(
     conn.execute(
         "INSERT INTO users (email, name, avatar_url, oauth_provider, oauth_sub,"
         " roles_json, is_active, created_at, last_login_at)"
-        " VALUES (?, ?, ?, ?, ?, '[]', 1, ?, ?)",
+        " VALUES (?, ?, ?, ?, ?, '[]', TRUE, ?, ?)",
         (email, name, avatar_url, oauth_provider, oauth_sub, now, now),
     )
     return get_user_by_oauth(oauth_provider, oauth_sub)  # type: ignore[return-value]
@@ -950,7 +1207,7 @@ def deactivate_user(user_id: int, active: bool = False) -> bool:
     conn = _get_conn()
     cur = conn.execute(
         "UPDATE users SET is_active = ? WHERE id = ?",
-        (1 if active else 0, user_id),
+        (active, user_id),
     )
     return cur.rowcount > 0
 
@@ -1049,11 +1306,10 @@ def _invite_row_to_dict(row: tuple) -> dict:
 def create_thread(user_id: int, title: str | None = None, domain: str | None = None) -> dict:
     conn = _get_conn()
     now = _now()
-    conn.execute(
+    thread_id = conn.insert_returning_id(
         "INSERT INTO chat_threads (user_id, title, domain, created_at, updated_at) VALUES (?, ?, ?, ?, ?)",
         (user_id, title, domain, now, now),
     )
-    thread_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     return {"id": thread_id, "user_id": user_id, "title": title, "domain": domain,
             "is_archived": False, "created_at": now, "updated_at": now}
 
@@ -1063,7 +1319,7 @@ def list_threads(user_id: int, include_archived: bool = False) -> list[dict]:
     sql = "SELECT id, user_id, title, domain, is_archived, created_at, updated_at FROM chat_threads WHERE user_id = ?"
     params: list = [user_id]
     if not include_archived:
-        sql += " AND is_archived = 0"
+        sql += " AND is_archived = FALSE"
     sql += " ORDER BY updated_at DESC"
     rows = conn.execute(sql, params).fetchall()
     return [_thread_row_to_dict(r) for r in rows]
@@ -1109,11 +1365,10 @@ def add_message(thread_id: int, role: str, content: str, metadata: dict | None =
     conn = _get_conn()
     now = _now()
     meta_json = json.dumps(metadata) if metadata else "{}"
-    conn.execute(
+    msg_id = conn.insert_returning_id(
         "INSERT INTO chat_messages (thread_id, role, content, metadata_json, created_at) VALUES (?, ?, ?, ?, ?)",
         (thread_id, role, content, meta_json, now),
     )
-    msg_id = conn.execute("SELECT last_insert_rowid()").fetchone()[0]
     conn.execute("UPDATE chat_threads SET updated_at = ? WHERE id = ?", (now, thread_id))
     return {"id": msg_id, "thread_id": thread_id, "role": role, "content": content,
             "metadata": metadata or {}, "created_at": now}
@@ -1388,14 +1643,13 @@ def save_cloud_drive_account(
             [display_name, access_token, refresh_token, token_expires_at, row[0]],
         )
         return row[0]
-    cur = conn.execute(
+    return conn.insert_returning_id(
         "INSERT INTO cloud_drive_accounts "
         "(connector_id, email, display_name, access_token, refresh_token, "
         "token_expires_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
         [connector_id, email, display_name, access_token, refresh_token,
          token_expires_at, _now()],
     )
-    return cur.lastrowid  # type: ignore[return-value]
 
 
 def get_cloud_drive_account(account_id: int) -> dict | None:
@@ -1494,7 +1748,7 @@ def delete_cloud_drive_account(account_id: int) -> bool:
 # ── Legacy migration ─────────────────────────────────────────────────────────
 
 
-def _migrate_from_legacy(conn: sqlite3.Connection) -> None:
+def _migrate_from_legacy(conn: _DbAdapter) -> None:
     """Migrate from nexaql.yaml + api_keys.json + connectors.json if they exist.
 
     Only runs if the bootstrap DB is empty (no connectors, no domains, no llm_config).
@@ -1608,7 +1862,7 @@ def _migrate_from_legacy(conn: sqlite3.Connection) -> None:
 # ── Seed bundled ontology files ──────────────────────────────────────────────
 
 
-def _seed_ontology_files(conn: sqlite3.Connection) -> None:
+def _seed_ontology_files(conn: _DbAdapter) -> None:
     """Seed bundled YAML ontology files into the bootstrap DB on first run.
 
     Only runs if the domains table is empty (no domains exist yet).
@@ -1768,7 +2022,7 @@ def _parse_ontology_yaml(path: str) -> tuple[str, str, str]:
     return domain, description, ontology_json
 
 
-def _ensure_sample_connector(conn: sqlite3.Connection) -> int:
+def _ensure_sample_connector(conn: _DbAdapter) -> int:
     """Create or return the 'sample' connector backed by a real DuckDB data file.
 
     The data file lives at ``~/.nexaql/sample_ecommerce.duckdb`` and is
@@ -1791,7 +2045,7 @@ def _ensure_sample_connector(conn: sqlite3.Connection) -> int:
     return row[0]
 
 
-def _ensure_support_connector(conn: sqlite3.Connection) -> int | None:
+def _ensure_support_connector(conn: _DbAdapter) -> int | None:
     """Create or return the 'support_postgres' connector for the support tickets DB.
 
     Seeds the PostgreSQL database with support_tickets data if available.
@@ -1825,7 +2079,7 @@ def _ensure_support_connector(conn: sqlite3.Connection) -> int | None:
     return connector_id
 
 
-def _seed_support_ontology(conn: sqlite3.Connection, connector_id: int) -> None:
+def _seed_support_ontology(conn: _DbAdapter, connector_id: int) -> None:
     """Create the support ontology schema and patch ecommerce nodes with reverse edges."""
     support_ontology = {
         "version": "1",
@@ -1922,7 +2176,7 @@ def _seed_support_ontology(conn: sqlite3.Connection, connector_id: int) -> None:
     _patch_ecommerce_edges(conn, domain["id"])
 
 
-def _patch_ecommerce_edges(conn: sqlite3.Connection, domain_id: int) -> None:
+def _patch_ecommerce_edges(conn: _DbAdapter, domain_id: int) -> None:
     """Add support_tickets edges to customer and order per-table schemas."""
     now = _now()
 
