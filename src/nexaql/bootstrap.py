@@ -247,6 +247,14 @@ CREATE TABLE IF NOT EXISTS users (
     UNIQUE(oauth_provider, oauth_sub)
 );
 
+CREATE TABLE IF NOT EXISTS invited_emails (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    email      TEXT UNIQUE NOT NULL,
+    invited_by INTEGER,
+    roles_json TEXT DEFAULT '[]',
+    created_at TEXT
+);
+
 CREATE TABLE IF NOT EXISTS chat_threads (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id     INTEGER NOT NULL,
@@ -971,6 +979,67 @@ def _user_row_to_dict(row: tuple) -> dict:
         "is_active": bool(row[7]),
         "created_at": row[8],
         "last_login_at": row[9],
+    }
+
+
+# ── Invites ────────────────────────────────────────────────────────────────
+
+
+def invite_email(email: str, invited_by: int | None = None, roles: list[str] | None = None) -> dict:
+    """Invite an email address. Returns the invite dict."""
+    conn = _get_conn()
+    now = _now()
+    roles_json = json.dumps(roles or [])
+    conn.execute(
+        "INSERT OR IGNORE INTO invited_emails (email, invited_by, roles_json, created_at)"
+        " VALUES (?, ?, ?, ?)",
+        (email.lower().strip(), invited_by, roles_json, now),
+    )
+    return get_invite_by_email(email) or {"email": email}
+
+
+def revoke_invite(email: str) -> bool:
+    """Remove an email from the invite list."""
+    conn = _get_conn()
+    cur = conn.execute("DELETE FROM invited_emails WHERE email = ?", (email.lower().strip(),))
+    return cur.rowcount > 0
+
+
+def list_invites() -> list[dict]:
+    """List all invited emails."""
+    conn = _get_conn()
+    rows = conn.execute(
+        "SELECT id, email, invited_by, roles_json, created_at FROM invited_emails ORDER BY created_at DESC"
+    ).fetchall()
+    return [_invite_row_to_dict(r) for r in rows]
+
+
+def get_invite_by_email(email: str) -> dict | None:
+    """Look up an invite by email."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT id, email, invited_by, roles_json, created_at FROM invited_emails WHERE email = ?",
+        (email.lower().strip(),),
+    ).fetchone()
+    return _invite_row_to_dict(row) if row else None
+
+
+def is_email_invited(email: str) -> bool:
+    """Check if an email is on the invite list."""
+    return get_invite_by_email(email) is not None
+
+
+def _invite_row_to_dict(row: tuple) -> dict:
+    try:
+        roles = json.loads(row[3]) if row[3] else []
+    except (json.JSONDecodeError, TypeError):
+        roles = []
+    return {
+        "id": row[0],
+        "email": row[1],
+        "invited_by": row[2],
+        "roles": roles,
+        "created_at": row[4],
     }
 
 

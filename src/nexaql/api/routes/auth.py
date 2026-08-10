@@ -151,6 +151,15 @@ async def callback(provider: str, request: Request, code: str = "", state: str =
     if not user_info.email:
         raise HTTPException(status_code=400, detail="Email not available from OAuth provider")
 
+    existing = bs.get_user_by_oauth(user_info.provider, user_info.sub)
+    is_first_user = bs.count_users() == 0
+
+    if not existing and not is_first_user and not bs.is_email_invited(user_info.email):
+        log.warning("Rejected login from uninvited email: %s", user_info.email)
+        return RedirectResponse(url="/login?error=not_invited", status_code=302)
+
+    invite = bs.get_invite_by_email(user_info.email) if not existing else None
+
     user = bs.upsert_user(
         email=user_info.email,
         name=user_info.name,
@@ -162,10 +171,13 @@ async def callback(provider: str, request: Request, code: str = "", state: str =
     if not user.get("is_active", True):
         raise HTTPException(status_code=403, detail="Account is deactivated")
 
-    # First user auto-promoted to admin
-    if bs.count_users() == 1 and not user.get("roles"):
+    if is_first_user and not user.get("roles"):
         bs.update_user_roles(user["id"], ["admin"])
         user["roles"] = ["admin"]
+    elif invite and invite.get("roles") and not existing:
+        bs.update_user_roles(user["id"], invite["roles"])
+        user["roles"] = invite["roles"]
+        bs.revoke_invite(user_info.email)
 
     session_token = _issue_session_token(user)
     response = RedirectResponse(url="/", status_code=302)
