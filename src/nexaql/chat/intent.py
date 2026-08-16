@@ -380,3 +380,50 @@ def build_nexaql(intent: QueryIntent) -> str:
     lines.append("}")
 
     return "\n".join(lines)
+
+
+# ── Fan-out decomposition ──────────────────────────────────────────────────
+
+
+def needs_decomposition(intent: QueryIntent) -> bool:
+    """Return True when a multi-edge intent would produce a cartesian product.
+
+    Multiple independent one-to-many edges from the same root node are joined
+    as flat LEFT JOINs, creating N×M×K rows instead of max(N,M,K). Decomposing
+    into separate per-edge queries prevents this.
+    """
+    return len(intent.edges) >= 2
+
+
+def decompose_intent(intent: QueryIntent) -> list[QueryIntent]:
+    """Split a multi-edge intent into one sub-intent per edge.
+
+    Each sub-intent keeps the root node, its scalar fields, filters, and
+    exactly one edge. This prevents the cartesian product that would result
+    from joining multiple independent one-to-many edges in a single query.
+
+    Returns the original intent unchanged if decomposition is not needed.
+    """
+    if not needs_decomposition(intent):
+        return [intent]
+
+    sub_intents: list[QueryIntent] = []
+    for edge in intent.edges:
+        sub = QueryIntent(
+            node=intent.node,
+            fields=list(intent.fields),
+            aggregations=list(intent.aggregations),
+            calcs=list(intent.calcs),
+            filters=list(intent.filters),
+            calc_filters=list(intent.calc_filters),
+            special_filters=dict(intent.special_filters),
+            edges=[edge],
+            order_by=list(intent.order_by),
+            limit=intent.limit,
+            offset=intent.offset,
+            distinct=intent.distinct,
+            query_name=f"{intent.query_name or 'Q'}_{edge.name}",
+        )
+        sub_intents.append(sub)
+
+    return sub_intents

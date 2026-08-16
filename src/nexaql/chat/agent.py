@@ -22,7 +22,9 @@ from nexaql.api.deps import get_adapter_for_connector
 from nexaql.chat.intent import (
     QueryIntent,
     build_nexaql,
+    decompose_intent,
     extract_intent_json,
+    needs_decomposition,
     parse_intent,
 )
 from nexaql.chat.llm import chat_completion
@@ -431,13 +433,11 @@ async def _ask_intent(
     )
 
     if query_text is None:
-        # Fallback to raw mode if intent extraction fails
         logger.warning("Intent extraction failed, falling back to raw mode")
         response = await _ask_raw(question, history, ontology, adapter, llm_config, user, business_context)
         response.generation_mode = "raw_fallback"
         return response
 
-    # Step 2: Execute (with retry)
     if adapter is None:
         return ChatResponse(
             explanation=llm_response,
@@ -449,6 +449,20 @@ async def _ask_intent(
             visualization=intent_data.get("visualization") if isinstance(intent_data, dict) else None,
         )
 
+    # Step 1.5: Decompose multi-edge intents to prevent cartesian products
+    if intent_data and needs_decomposition(parse_intent(intent_data)):
+        return await _ask_intent_decomposed(
+            question=question,
+            history=history,
+            ontology=ontology,
+            adapter=adapter,
+            llm_config=llm_config,
+            llm_response=llm_response,
+            intent_data=intent_data,
+            user=user,
+        )
+
+    # Step 2: Execute (with retry)
     exec_result, exec_error, final_query, final_intent = await execute_with_retry_intent(
         query_text=query_text,
         ontology=ontology,
@@ -515,6 +529,117 @@ async def _ask_intent(
         intent=final_intent,
         generation_mode="intent",
         visualization=viz,
+    )
+
+
+async def _ask_intent_decomposed(
+    question: str,
+    history: list[dict[str, str]],
+    ontology: Ontology,
+    adapter: QueryAdapter,
+    llm_config: LLMConfig,
+    llm_response: str,
+    intent_data: dict[str, Any],
+    user: UserContext | None = None,
+) -> ChatResponse:
+    """Execute a multi-edge intent as separate per-edge queries to prevent fan-out.
+
+    Splits the intent into one sub-query per edge, executes each independently,
+    then merges all result sets for a single summarization pass.
+    """
+    intent = parse_intent(intent_data)
+    sub_intents = decompose_intent(intent)
+    logger.info(
+        "Decomposing %d-edge intent into %d sub-queries to prevent cartesian product",
+        len(intent.edges), len(sub_intents),
+    )
+
+    all_rows: list[dict[str, Any]] = []
+    all_columns: list[ColumnMeta] = []
+    all_queries: list[str] = []
+    all_previews: list[str] = []
+    total_row_count = 0
+    seen_col_names: set[str] = set()
+    last_shape: NodeShape | None = None
+    last_adapter_type: str | None = None
+    first_error: str | None = None
+
+    for sub in sub_intents:
+        sub_query = build_nexaql(sub)
+        all_queries.append(sub_query)
+
+        result, error = await _try_execute(sub_query, ontology, adapter, user)
+
+        if error:
+            if error.startswith("Access denied:"):
+                reason = error.replace("Access denied: ", "", 1)
+                return ChatResponse(
+                    explanation=llm_response,
+                    nexaql_query="\n\n".join(all_queries),
+                    summary=f"Your current role does not have permission to access this data. {reason}",
+                    error=None,
+                    intent=intent_data,
+                    generation_mode="intent_decomposed",
+                )
+            if first_error is None:
+                first_error = error
+            logger.warning("Sub-query failed: %s — %s", sub_query[:80], error)
+            continue
+
+        if result:
+            all_rows.extend(result.rows)
+            total_row_count += result.row_count
+            last_shape = result.shape
+            last_adapter_type = result.adapter_type
+            if result.query_preview:
+                all_previews.append(result.query_preview)
+            for col in result.columns:
+                if col.name not in seen_col_names:
+                    all_columns.append(col)
+                    seen_col_names.add(col.name)
+
+    if not all_rows and first_error:
+        return ChatResponse(
+            explanation=llm_response,
+            nexaql_query="\n\n".join(all_queries),
+            summary="Something went wrong while executing the query. This is a system error, not a problem with your question.",
+            error=first_error,
+            intent=intent_data,
+            generation_mode="intent_decomposed",
+        )
+
+    combined_query = "\n\n".join(all_queries)
+    combined_preview = "\n---\n".join(all_previews)
+
+    summary = llm_response
+    if all_rows:
+        try:
+            summary = await summarize_results(
+                question=question,
+                query=combined_query,
+                rows=all_rows,
+                columns=all_columns,
+                row_count=total_row_count,
+                llm_config=llm_config,
+            )
+        except Exception:
+            pass
+
+    viz = intent_data.get("visualization") if isinstance(intent_data, dict) else None
+
+    return ChatResponse(
+        explanation=llm_response,
+        nexaql_query=combined_query,
+        query_preview=combined_preview or None,
+        adapter_type=last_adapter_type,
+        rows=all_rows,
+        columns=all_columns,
+        row_count=total_row_count,
+        shape=last_shape,
+        summary=summary,
+        error=None,
+        intent=intent_data,
+        generation_mode="intent_decomposed",
     )
 
 
