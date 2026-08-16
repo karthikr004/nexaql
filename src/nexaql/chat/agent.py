@@ -26,6 +26,7 @@ from nexaql.chat.intent import (
     extract_intent_json,
     needs_decomposition,
     parse_intent,
+    restructure_edges,
 )
 from nexaql.chat.llm import chat_completion
 from nexaql.chat.prompts import (
@@ -438,6 +439,19 @@ async def _ask_intent(
         response.generation_mode = "raw_fallback"
         return response
 
+    # Step 1.5: Restructure flat sibling edges into chain traversal using ontology
+    restructured_intent: QueryIntent | None = None
+    if intent_data:
+        try:
+            parsed = parse_intent(intent_data)
+            restructured_intent = restructure_edges(parsed, ontology)
+            if len(restructured_intent.edges) < len(parsed.edges):
+                query_text = build_nexaql(restructured_intent)
+                logger.info("Restructured %d flat edges into %d chained: %s",
+                            len(parsed.edges), len(restructured_intent.edges), query_text[:200])
+        except Exception:
+            logger.debug("Edge restructuring skipped", exc_info=True)
+
     if adapter is None:
         return ChatResponse(
             explanation=llm_response,
@@ -449,8 +463,9 @@ async def _ask_intent(
             visualization=intent_data.get("visualization") if isinstance(intent_data, dict) else None,
         )
 
-    # Step 1.5: Decompose multi-edge intents to prevent cartesian products
-    if intent_data and needs_decomposition(parse_intent(intent_data)):
+    # Step 1.6: Decompose remaining flat sibling edges to prevent cartesian products
+    check_intent = restructured_intent or (parse_intent(intent_data) if intent_data else None)
+    if check_intent and needs_decomposition(check_intent):
         return await _ask_intent_decomposed(
             question=question,
             history=history,

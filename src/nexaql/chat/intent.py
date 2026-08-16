@@ -382,6 +382,146 @@ def build_nexaql(intent: QueryIntent) -> str:
     return "\n".join(lines)
 
 
+# ── Ontology graph pathfinding ─────────────────────────────────────────────
+
+
+def _find_best_chain(
+    adj: dict[str, list[tuple[str, str, int]]],
+    start: str,
+    to_visit: set[str],
+) -> list[tuple[str, str, int]] | None:
+    """Find the longest chain from *start* visiting nodes in *to_visit*.
+
+    Returns a list of ``(target_node_type, edge_name, join_steps)`` hops.
+    Maximises nodes visited first, then prefers junction-table edges (more
+    join_steps) as a tiebreaker so mapping tables are chosen over nullable FKs.
+    """
+    if not to_visit:
+        return []
+
+    best: list[tuple[str, str, int]] | None = None
+    best_score = (-1, -1)
+
+    for target, edge_name, join_steps in adj.get(start, []):
+        if target not in to_visit:
+            continue
+        sub = _find_best_chain(adj, target, to_visit - {target})
+        candidate = [(target, edge_name, join_steps)]
+        if sub:
+            candidate = candidate + sub
+
+        score = (len(candidate), sum(js for _, _, js in candidate))
+        if score > best_score:
+            best = candidate
+            best_score = score
+
+    return best
+
+
+def restructure_edges(intent: QueryIntent, ontology: Any) -> QueryIntent:
+    """Restructure flat sibling edges into an optimal chain via ontology pathfinding.
+
+    When the LLM produces flat sibling edges (e.g. contracts, purchase_orders,
+    invoices all hanging off supplier), this builds the adjacency graph between
+    those node types from the ontology and finds the longest single chain that
+    covers the most requested nodes with the fewest branches.
+
+    Edge selection prefers junction-table joins (more join_steps) over direct
+    FK joins, so ``mapped_purchase_orders`` (via rf_contract_po_map) wins over
+    ``purchase_orders`` (direct contract_id FK that may be NULL).
+    """
+    if len(intent.edges) < 2:
+        return intent
+
+    root_def = ontology.nodes.get(intent.node)
+    if not root_def or not root_def.edges:
+        return intent
+
+    # Map each intent edge to its target node type via the ontology.
+    edge_data_by_target: dict[str, IntentEdge] = {}
+    unresolved_edges: list[IntentEdge] = []
+
+    for edge in intent.edges:
+        edge_def = root_def.edges.get(edge.name) if root_def.edges else None
+        if edge_def:
+            edge_data_by_target.setdefault(edge_def.node, edge)
+        else:
+            unresolved_edges.append(edge)
+
+    if len(edge_data_by_target) < 2:
+        return intent
+
+    required_nodes = {intent.node} | set(edge_data_by_target.keys())
+
+    # Build adjacency graph restricted to required node types.
+    adj: dict[str, list[tuple[str, str, int]]] = {n: [] for n in required_nodes}
+    for node_name in required_nodes:
+        node_def = ontology.nodes.get(node_name)
+        if not node_def or not node_def.edges:
+            continue
+        for ename, edef in node_def.edges.items():
+            if edef.node in required_nodes and edef.node != node_name:
+                adj[node_name].append((edef.node, ename, len(edef.join_steps)))
+
+    # Find the longest chain from the root through all target nodes.
+    to_visit = set(edge_data_by_target.keys())
+    chain = _find_best_chain(adj, intent.node, to_visit)
+
+    if not chain:
+        return intent
+
+    chained_types = {target for target, _, _ in chain}
+    unchained_types = to_visit - chained_types
+
+    # Build nested IntentEdge structure from the discovered chain.
+    def _make_edge(idx: int) -> IntentEdge:
+        target_type, edge_name, _ = chain[idx]
+        original = edge_data_by_target.get(target_type)
+
+        sub_edges: list[IntentEdge] = []
+        if idx + 1 < len(chain):
+            sub_edges.append(_make_edge(idx + 1))
+        if original and original.edges:
+            sub_edges.extend(original.edges)
+
+        if original:
+            return IntentEdge(
+                name=edge_name,
+                fields=original.fields,
+                aggregations=original.aggregations,
+                calcs=original.calcs,
+                filters=original.filters,
+                order_by=original.order_by,
+                limit=original.limit,
+                edges=sub_edges,
+            )
+        return IntentEdge(name=edge_name, edges=sub_edges)
+
+    restructured: list[IntentEdge] = [_make_edge(0)]
+
+    for node_type in unchained_types:
+        restructured.append(edge_data_by_target[node_type])
+
+    restructured.extend(unresolved_edges)
+
+    return QueryIntent(
+        node=intent.node,
+        fields=intent.fields,
+        aggregations=intent.aggregations,
+        calcs=intent.calcs,
+        filters=intent.filters,
+        calc_filters=intent.calc_filters,
+        special_filters=intent.special_filters,
+        edges=restructured,
+        order_by=intent.order_by,
+        limit=intent.limit,
+        offset=intent.offset,
+        distinct=intent.distinct,
+        query_name=intent.query_name,
+        visualization=intent.visualization,
+    )
+
+
 # ── Fan-out decomposition ──────────────────────────────────────────────────
 
 
