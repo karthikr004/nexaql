@@ -437,11 +437,18 @@ def restructure_edges(intent: QueryIntent, ontology: Any) -> QueryIntent:
     if not root_def or not root_def.edges:
         return intent
 
-    # Map each intent edge to its target node type via the ontology.
+    # Only include leaf edges (no sub-edges) as pathfinding candidates.
+    # Edges that already have sub-edges express intentional graph traversals
+    # from the LLM (e.g. purchase_order → contract) and must not be rearranged
+    # — changing their parent node changes which FK join is used.
     edge_data_by_target: dict[str, IntentEdge] = {}
     unresolved_edges: list[IntentEdge] = []
+    preserved_edges: list[IntentEdge] = []
 
     for edge in intent.edges:
+        if edge.edges:
+            preserved_edges.append(edge)
+            continue
         edge_def = root_def.edges.get(edge.name) if root_def.edges else None
         if edge_def:
             edge_data_by_target.setdefault(edge_def.node, edge)
@@ -502,6 +509,7 @@ def restructure_edges(intent: QueryIntent, ontology: Any) -> QueryIntent:
     for node_type in unchained_types:
         restructured.append(edge_data_by_target[node_type])
 
+    restructured.extend(preserved_edges)
     restructured.extend(unresolved_edges)
 
     return QueryIntent(
@@ -526,8 +534,16 @@ def restructure_edges(intent: QueryIntent, ontology: Any) -> QueryIntent:
 
 
 def _count_leaf_edges(edges: list[IntentEdge]) -> int:
-    """Count top-level edges that have no sub-edges (leaf fan-out sources)."""
-    return sum(1 for e in edges if not e.edges)
+    """Count top-level leaf edges that are fan-out sources.
+
+    Edges with sub-edges represent graph traversals and don't fan out.
+    Edges that only carry filters (no fields, no aggregations) act as
+    query-wide constraints and don't contribute to fan-out either.
+    """
+    return sum(
+        1 for e in edges
+        if not e.edges and (e.fields or e.aggregations or e.calcs)
+    )
 
 
 def needs_decomposition(intent: QueryIntent) -> bool:
@@ -546,13 +562,24 @@ def decompose_intent(intent: QueryIntent) -> list[QueryIntent]:
     kept intact — they represent intentional graph walks, not fan-out.
     Only flat leaf edges at the same level are split into separate queries.
 
+    Edges that carry filters (e.g. a supplier edge filtering by name) are
+    included in every sub-query so the filter is never lost.
+
     Returns the original intent unchanged if decomposition is not needed.
     """
     if not needs_decomposition(intent):
         return [intent]
 
+    # Edges with filters act as query-wide constraints and must appear in
+    # every sub-query so the filter is not lost during decomposition.
+    filter_edges = [e for e in intent.edges if e.filters]
+    data_edges = [e for e in intent.edges if not e.filters]
+
+    if not data_edges:
+        return [intent]
+
     sub_intents: list[QueryIntent] = []
-    for edge in intent.edges:
+    for edge in data_edges:
         sub = QueryIntent(
             node=intent.node,
             fields=list(intent.fields),
@@ -561,7 +588,7 @@ def decompose_intent(intent: QueryIntent) -> list[QueryIntent]:
             filters=list(intent.filters),
             calc_filters=list(intent.calc_filters),
             special_filters=dict(intent.special_filters),
-            edges=[edge],
+            edges=filter_edges + [edge],
             order_by=list(intent.order_by),
             limit=intent.limit,
             offset=intent.offset,
