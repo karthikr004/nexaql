@@ -385,22 +385,26 @@ def build_nexaql(intent: QueryIntent) -> str:
 # ── Fan-out decomposition ──────────────────────────────────────────────────
 
 
+def _count_leaf_edges(edges: list[IntentEdge]) -> int:
+    """Count top-level edges that have no sub-edges (leaf fan-out sources)."""
+    return sum(1 for e in edges if not e.edges)
+
+
 def needs_decomposition(intent: QueryIntent) -> bool:
     """Return True when a multi-edge intent would produce a cartesian product.
 
-    Multiple independent one-to-many edges from the same root node are joined
-    as flat LEFT JOINs, creating N×M×K rows instead of max(N,M,K). Decomposing
-    into separate per-edge queries prevents this.
+    Only flat sibling edges (no sub-edges) cause fan-out. Edges with nested
+    sub-edges represent proper graph traversal and are kept together.
     """
-    return len(intent.edges) >= 2
+    return _count_leaf_edges(intent.edges) >= 2
 
 
 def decompose_intent(intent: QueryIntent) -> list[QueryIntent]:
-    """Split a multi-edge intent into one sub-intent per edge.
+    """Split a multi-edge intent into one sub-intent per independent edge.
 
-    Each sub-intent keeps the root node, its scalar fields, filters, and
-    exactly one edge. This prevents the cartesian product that would result
-    from joining multiple independent one-to-many edges in a single query.
+    Edges that contain sub-edges (nested traversals like PO→invoice) are
+    kept intact — they represent intentional graph walks, not fan-out.
+    Only flat leaf edges at the same level are split into separate queries.
 
     Returns the original intent unchanged if decomposition is not needed.
     """

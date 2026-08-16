@@ -444,6 +444,13 @@ RULES:
 6. "calc_filters" — Filters on computed expressions, e.g. "days until expiry < 30".
 7. "special_filters" — Pre-defined filters from the ontology. Use exact names and appropriate values.
 8. "edges" — Nested related data. Each edge can have its own fields, filters, aggregations, limit, and sub-edges.
+   CRITICAL — NESTED vs FLAT EDGES:
+   When entity C is naturally reached through entity B (e.g., invoices belong to purchase_orders),
+   NEST C inside B as a sub-edge. Do NOT add C as a flat sibling edge from the root.
+   - WRONG: {{"node": "supplier", "edges": [{{"name": "purchase_orders", ...}}, {{"name": "invoices", ...}}]}}
+   - RIGHT: {{"node": "supplier", "edges": [{{"name": "purchase_orders", "fields": [...], "edges": [{{"name": "invoices", "fields": [...]}}]}}]}}
+   NEVER include the same entity as BOTH a nested sub-edge AND a flat sibling — pick the nested path only.
+   Only include edges the user actually asked about — do NOT add lines, payments, or other sub-entities unless requested.
 9. "order_by" — Sort results. "direction" is "ASC" or "DESC". Can reference aggregation aliases (including those from edges).
 10. "limit" / "distinct" — Optional. Omit if not needed.
 11. Only include keys that are needed. Omit empty arrays and null values.
