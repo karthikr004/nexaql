@@ -436,7 +436,9 @@ RULES:
    - RIGHT: {{"aggregations": [{{"alias": "total", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}]}}
      (only the calc expression is grouped, giving one row per month)
 5. "filters" — Only use fields marked as filterable (marked with ⚡ in the ontology).
-   - ops: "eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null"
+   - ops: "eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null", "not_null"
+   - Use "not_null" (with value true) to filter for rows where a FK field is populated,
+     e.g. {{"field": "contract_line_id", "op": "not_null", "value": true}} to get only rows linked to a contract.
    - For enum fields (shown as field:enum⚡[VAL1,VAL2,...]), you MUST use one of the listed values EXACTLY.
      Do NOT guess or abbreviate — e.g. if values are [US-EAST,US-WEST], use "US-EAST" not "US".
      If the user's input is ambiguous (e.g. "US" could match "US-EAST" and "US-WEST"), use "in" with all matching values.
@@ -475,6 +477,11 @@ Q: "invoices expiring within 30 days with supplier name"
 Q: "monthly spend breakdown"
 ```json
 {{"node": "expenses", "aggregations": [{{"alias": "total_spend", "func": "sum", "field": "amount"}}], "calcs": [{{"alias": "month", "expr": "DATE_TRUNC('month', transaction_date)"}}], "order_by": [{{"field": "month", "direction": "ASC"}}], "visualization": {{"chart_type": "line", "x_field": "month", "y_fields": ["total_spend"], "title": "Monthly Spend Trend"}}}}
+```
+
+Q: "list purchase order lines that have a contract_line linked, with their unit_price and the contract_line unit_price"
+```json
+{{"node": "purchase_order_line", "fields": ["line_number", "item_description", "unit_price", "quantity", "amount"], "filters": [{{"field": "contract_line_id", "op": "not_null", "value": true}}], "edges": [{{"name": "contract_line", "fields": ["line_number", "item_description", "unit_price", "quantity", "amount"]}}], "visualization": {{"chart_type": "table", "title": "PO Lines with Contract Line Prices"}}}}
 ```
 
 {_build_dynamic_examples(ontology)}

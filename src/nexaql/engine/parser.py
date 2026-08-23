@@ -38,8 +38,9 @@ OP_SUFFIXES: list[tuple[str, FilterOp]] = [
     ("_ne", FilterOp.NE),
     ("_eq", FilterOp.EQ),
     ("_like", FilterOp.LIKE),
-    ("_in", FilterOp.IN),
     ("_not_in", FilterOp.NOT_IN),
+    ("_not_null", FilterOp.NOT_NULL),
+    ("_in", FilterOp.IN),
     ("_null", FilterOp.IS_NULL),
 ]
 
@@ -65,6 +66,8 @@ OBJ_OP_ALIASES: dict[str, str] = {
     "nin": "_not_in",
     "null": "_null",
     "is_null": "_null",
+    "not_null": "_not_null",
+    "is_not_null": "_not_null",
 }
 
 AGG_FUNCS: set[str] = {"sum", "avg", "min", "max", "count"}

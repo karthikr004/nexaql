@@ -51,6 +51,56 @@ logger = logging.getLogger(__name__)
 GenerationMode = Literal["intent", "raw"]
 
 
+def _auto_inject_edge_filters(intent: QueryIntent, ontology: Ontology) -> None:
+    """Auto-add NOT NULL filters on FK fields for LEFT JOIN edges.
+
+    When the intent requests data from a LEFT JOIN edge, the result includes
+    ALL rows from the root table — including rows without the related entity.
+    This injects a ``not_null`` filter on the FK field so only linked rows
+    are returned, unless the LLM already added such a filter.
+    """
+    import re
+    from nexaql.chat.intent import IntentFilter
+
+    node_def = ontology.nodes.get(intent.node)
+    if not node_def or not intent.edges:
+        return
+
+    existing_filter_fields = {f.field for f in intent.filters}
+
+    for edge in intent.edges:
+        edge_def = node_def.edges.get(edge.name)
+        if not edge_def:
+            continue
+        join_type = getattr(edge_def, "join_type", None)
+        if join_type and join_type.upper() != "LEFT":
+            continue
+        if not join_type:
+            continue
+
+        for step in edge_def.join_steps:
+            cond = step.condition
+            root_alias = "{" + intent.node + "}"
+            match = re.search(
+                re.escape(root_alias) + r"\.(\w+)",
+                cond,
+            )
+            if match:
+                fk_field = match.group(1)
+                fields_dict = node_def.fields
+                if isinstance(fields_dict, dict) and fk_field in fields_dict:
+                    filt_attr = getattr(fields_dict[fk_field], "filterable", False)
+                    if filt_attr and fk_field not in existing_filter_fields:
+                        intent.filters.append(
+                            IntentFilter(field=fk_field, op="not_null", value=True)
+                        )
+                        logger.info(
+                            "Auto-injected not_null filter on %s for LEFT JOIN edge %s",
+                            fk_field, edge.name,
+                        )
+                break
+
+
 # ── Response types ──────────────────────────────────────────────────────────
 
 
@@ -111,6 +161,7 @@ async def generate_query_via_intent(
 
     try:
         intent = parse_intent(intent_data)
+        _auto_inject_edge_filters(intent, ontology)
         query_text = build_nexaql(intent)
         logger.info(f"Intent builder generated query: {query_text[:200]}")
         return query_text, response_text, intent_data
@@ -266,6 +317,7 @@ async def execute_with_retry_intent(
         retry_intent_data = extract_intent_json(retry_text)
         if retry_intent_data:
             retry_intent = parse_intent(retry_intent_data)
+            _auto_inject_edge_filters(retry_intent, ontology)
             retry_query = build_nexaql(retry_intent)
 
             result2, error2 = await _try_execute(retry_query, ontology, adapter, user)

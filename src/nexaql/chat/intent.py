@@ -24,7 +24,7 @@ from typing import Any, Literal, Optional
 class IntentFilter:
     """A single filter condition."""
     field: str
-    op: Literal["eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null"]
+    op: Literal["eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null", "not_null"]
     value: Any  # str, int, float, bool, list, or None
 
 
