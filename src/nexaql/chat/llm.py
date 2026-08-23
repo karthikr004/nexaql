@@ -128,6 +128,7 @@ def chat_completion(
     response = client.chat.completions.create(
         model=llm_config.model,
         max_tokens=tok,
+        temperature=llm_config.temperature,
         messages=full_messages,  # type: ignore[arg-type]
     )
 
@@ -159,6 +160,7 @@ def _chat_completion_anthropic(
     kwargs: dict[str, Any] = {
         "model": llm_config.model,
         "max_tokens": tok,
+        "temperature": llm_config.temperature,
         "messages": user_messages,
     }
     if system:
