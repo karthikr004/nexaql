@@ -125,12 +125,14 @@ def chat_completion(
         full_messages.append({"role": "system", "content": system})
     full_messages.extend(messages)
 
-    response = client.chat.completions.create(
-        model=llm_config.model,
-        max_tokens=tok,
-        temperature=llm_config.temperature,
-        messages=full_messages,  # type: ignore[arg-type]
-    )
+    create_kwargs: dict[str, Any] = {
+        "model": llm_config.model,
+        "max_tokens": tok,
+        "messages": full_messages,
+    }
+    if llm_config.temperature is not None:
+        create_kwargs["temperature"] = llm_config.temperature
+    response = client.chat.completions.create(**create_kwargs)  # type: ignore[arg-type]
 
     text = response.choices[0].message.content or ""
     # Strip thinking tags from models like Qwen3 that emit <think>...</think>
@@ -160,9 +162,10 @@ def _chat_completion_anthropic(
     kwargs: dict[str, Any] = {
         "model": llm_config.model,
         "max_tokens": tok,
-        "temperature": llm_config.temperature,
         "messages": user_messages,
     }
+    if llm_config.temperature is not None:
+        kwargs["temperature"] = llm_config.temperature
     if system:
         kwargs["system"] = system
 
