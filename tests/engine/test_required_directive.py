@@ -1,0 +1,112 @@
+# Copyright (c) 2026-present NexaQL Contributors
+"""Tests for @required directive — parser, translator join semantics, AST transform."""
+
+import pytest
+
+from nexaql.engine.parser import parse
+from nexaql.engine.transforms import auto_require_edges
+from nexaql.engine.types import RequiredDirective
+
+
+class TestParserRequired:
+    def test_required_parsed(self):
+        q = """query Test {
+          purchase_order {
+            po_number
+            contract_lines @required {
+              unit_price
+            }
+          }
+        }"""
+        ast = parse(q)
+        edge_field = ast.body.fields[1]
+        assert edge_field.kind == "edge"
+        directives = edge_field.node.directives
+        assert any(isinstance(d, RequiredDirective) for d in directives)
+
+    def test_required_with_other_directives(self):
+        q = """query Test {
+          purchase_order {
+            po_number
+            items @required @limit(10) {
+              description
+            }
+          }
+        }"""
+        ast = parse(q)
+        edge = ast.body.fields[1]
+        assert edge.kind == "edge"
+        types = [d.type for d in edge.node.directives]
+        assert "required" in types
+        assert "limit" in types
+
+    def test_no_required_by_default(self):
+        q = """query Test {
+          purchase_order {
+            po_number
+            items {
+              description
+            }
+          }
+        }"""
+        ast = parse(q)
+        edge = ast.body.fields[1]
+        assert edge.kind == "edge"
+        assert not any(
+            getattr(d, "type", None) == "required" for d in edge.node.directives
+        )
+
+
+class TestAutoRequireTransform:
+    def test_calc_referencing_edge_field_promotes(self):
+        q = """query Test {
+          purchase_order_line {
+            unit_price
+            price_diff: calc(unit_price - agreed_unit_price)
+            contract_lines {
+              agreed_unit_price
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        edge = ast.body.fields[2]
+        assert edge.kind == "edge"
+        assert any(
+            getattr(d, "type", None) == "required" for d in edge.node.directives
+        )
+
+    def test_no_calc_no_promotion(self):
+        q = """query Test {
+          purchase_order {
+            po_number
+            items {
+              description
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        edge = ast.body.fields[1]
+        assert edge.kind == "edge"
+        assert not any(
+            getattr(d, "type", None) == "required" for d in edge.node.directives
+        )
+
+    def test_already_required_not_duplicated(self):
+        q = """query Test {
+          purchase_order_line {
+            unit_price
+            price_diff: calc(unit_price - agreed_unit_price)
+            contract_lines @required {
+              agreed_unit_price
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        edge = ast.body.fields[2]
+        required_count = sum(
+            1 for d in edge.node.directives if getattr(d, "type", None) == "required"
+        )
+        assert required_count == 1

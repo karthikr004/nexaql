@@ -77,6 +77,7 @@ class IntentEdge:
     filters: list[IntentFilter] = field(default_factory=list)
     order_by: list[IntentOrderBy] = field(default_factory=list)
     limit: Optional[int] = None
+    required: bool = False
     # Nested edges
     edges: list["IntentEdge"] = field(default_factory=list)
 
@@ -145,6 +146,7 @@ def parse_intent(data: dict[str, Any]) -> QueryIntent:
             filters=[_parse_filter(f) for f in e.get("filters", [])],
             order_by=[_parse_order(o) for o in e.get("order_by", [])],
             limit=e.get("limit"),
+            required=e.get("required", False),
             edges=[_parse_edge(ne) for ne in e.get("edges", [])],
         )
 
@@ -252,6 +254,7 @@ def _build_node_block(
     offset: int | None,
     distinct: bool,
     indent: int = 2,
+    required: bool = False,
 ) -> list[str]:
     """Build the lines for a node selection block."""
     pad = " " * indent
@@ -273,6 +276,8 @@ def _build_node_block(
 
     # Directives
     directives: list[str] = []
+    if required:
+        directives.append("@required")
     if distinct:
         directives.append("@distinct")
 
@@ -330,6 +335,7 @@ def _build_node_block(
             offset=None,
             distinct=False,
             indent=indent + 2,
+            required=edge.required,
         )
         lines.extend(edge_lines)
 
@@ -350,6 +356,68 @@ def _generate_query_name(intent: QueryIntent) -> str:
     if intent.order_by and intent.limit:
         return f"Top{parts}"
     return f"Get{parts}"
+
+
+def _collect_calc_refs(intent: QueryIntent) -> set[str]:
+    """Collect field names referenced in calc expressions at the root level."""
+    refs: set[str] = set()
+    for c in intent.calcs:
+        refs |= set(re.findall(r"\b([a-z_][a-z0-9_]*)\b", c.expr, re.IGNORECASE))
+    for f in intent.calc_filters:
+        refs |= set(re.findall(r"\b([a-z_][a-z0-9_]*)\b", f.expr, re.IGNORECASE))
+    return refs
+
+
+def auto_require_intent(intent: QueryIntent) -> QueryIntent:
+    """Auto-mark edges as required when their fields appear in calc/filter contexts.
+
+    This is the intent-level equivalent of the AST transform. It ensures that
+    edges whose data is needed for computations use INNER JOIN semantics.
+    """
+    calc_refs = _collect_calc_refs(intent)
+    if not calc_refs:
+        return intent
+
+    new_edges: list[IntentEdge] = []
+    for edge in intent.edges:
+        edge_field_names = set(edge.fields)
+        for agg in edge.aggregations:
+            edge_field_names.add(agg.alias)
+            if agg.field:
+                edge_field_names.add(agg.field)
+        for c in edge.calcs:
+            edge_field_names.add(c.alias)
+
+        if not edge.required and (calc_refs & edge_field_names):
+            edge = IntentEdge(
+                name=edge.name,
+                fields=edge.fields,
+                aggregations=edge.aggregations,
+                calcs=edge.calcs,
+                filters=edge.filters,
+                order_by=edge.order_by,
+                limit=edge.limit,
+                required=True,
+                edges=edge.edges,
+            )
+        new_edges.append(edge)
+
+    return QueryIntent(
+        node=intent.node,
+        fields=intent.fields,
+        aggregations=intent.aggregations,
+        calcs=intent.calcs,
+        filters=intent.filters,
+        calc_filters=intent.calc_filters,
+        special_filters=intent.special_filters,
+        edges=new_edges,
+        order_by=intent.order_by,
+        limit=intent.limit,
+        offset=intent.offset,
+        distinct=intent.distinct,
+        query_name=intent.query_name,
+        visualization=intent.visualization,
+    )
 
 
 def build_nexaql(intent: QueryIntent) -> str:

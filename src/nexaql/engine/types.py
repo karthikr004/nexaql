@@ -101,7 +101,12 @@ class DistinctDirective:
     type: Literal["distinct"]
 
 
-Directive = Union[LimitDirective, OffsetDirective, OrderByDirective, DistinctDirective]
+@dataclass(frozen=True)
+class RequiredDirective:
+    type: Literal["required"]
+
+
+Directive = Union[LimitDirective, OffsetDirective, OrderByDirective, DistinctDirective, RequiredDirective]
 
 
 @dataclass

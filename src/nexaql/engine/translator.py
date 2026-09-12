@@ -487,7 +487,11 @@ def _process_node(
             if target_node_name in current_ancestors:
                 continue
             join_steps = getattr(edge_def, "join_steps", []) or []
-            join_type = getattr(edge_def, "join_type", "JOIN") or "JOIN"
+            has_required = any(
+                getattr(d, "type", None) == "required"
+                for d in (ef.node.directives or [])
+            )
+            join_type = "JOIN" if has_required else "LEFT"
             _process_join_steps(join_steps, join_type, ctx)
             resolved_child = NodeSelection(
                 kind=ef.node.kind,
