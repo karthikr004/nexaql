@@ -358,32 +358,19 @@ def _generate_query_name(intent: QueryIntent) -> str:
     return f"Get{parts}"
 
 
-_NULL_TOLERANT_RE = re.compile(
-    r"\b(?:COALESCE|NULLIF|IFNULL|ISNULL|NVL)\s*\(",
-    re.IGNORECASE,
-)
-
-_DOTTED_REF_RE = re.compile(
-    r"\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b",
-    re.IGNORECASE,
-)
-
-
 def _collect_required_edge_names(intent: QueryIntent) -> set[str]:
     """Collect edge names that must produce rows based on dotted calc references.
 
-    Only dotted references (edge_name.field_name) unambiguously name an edge.
-    Bare field names belong to the root node and never trigger promotion.
-    Expressions wrapped in COALESCE/NULLIF/etc. intentionally handle missing
-    relationships and are skipped.
+    Delegates to the shared per-reference null-tolerance analysis in
+    engine.calc_refs so intent and AST paths stay in sync.
     """
+    from nexaql.engine.calc_refs import extract_required_edges
+
     edges: set[str] = set()
     exprs: list[str] = [c.expr for c in intent.calcs]
     exprs.extend(f.expr for f in intent.calc_filters)
     for expr in exprs:
-        if _NULL_TOLERANT_RE.search(expr):
-            continue
-        edges |= {m.group(1) for m in _DOTTED_REF_RE.finditer(expr)}
+        edges |= extract_required_edges(expr)
     return edges
 
 

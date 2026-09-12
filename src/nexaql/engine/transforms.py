@@ -6,8 +6,7 @@ Deterministic rewrites applied after parsing and before translation.
 
 from __future__ import annotations
 
-import re
-
+from .calc_refs import extract_required_edges
 from .types import (
     CalcField,
     EdgeField,
@@ -17,25 +16,6 @@ from .types import (
     RequiredDirective,
 )
 
-_NULL_TOLERANT = re.compile(
-    r"\b(?:COALESCE|NULLIF|IFNULL|ISNULL|NVL)\s*\(",
-    re.IGNORECASE,
-)
-
-_DOTTED_REF = re.compile(r"\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b", re.IGNORECASE)
-
-
-def _extract_required_edges(expr: str) -> set[str]:
-    """Extract edge names from dotted references in a calc expression,
-    skipping expressions that are null-tolerant (COALESCE, etc.).
-
-    Only dotted references (edge_name.field_name) unambiguously name an edge.
-    Bare identifiers belong to the current node.
-    """
-    if _NULL_TOLERANT.search(expr):
-        return set()
-    return {m.group(1) for m in _DOTTED_REF.finditer(expr)}
-
 
 def _collect_required_edge_names(node: NodeSelection) -> set[str]:
     """Collect edge names that must produce rows based on calc/filter context."""
@@ -43,11 +23,11 @@ def _collect_required_edge_names(node: NodeSelection) -> set[str]:
 
     for f in node.fields:
         if isinstance(f, CalcField):
-            required |= _extract_required_edges(f.expr)
+            required |= extract_required_edges(f.expr)
 
     for filt in node.filters:
         if filt.calc_expr:
-            required |= _extract_required_edges(filt.calc_expr)
+            required |= extract_required_edges(filt.calc_expr)
 
     return required
 
@@ -60,15 +40,17 @@ def _promote_required(node: NodeSelection) -> NodeSelection:
     """Walk a NodeSelection and add @required to edges explicitly referenced
     via dotted notation (edge_name.field) in calc expressions.
 
-    Only dotted references trigger promotion — bare field names belong to the
-    current node. Expressions wrapped in COALESCE/NULLIF/etc. intentionally
-    handle missing relationships and are never promoted.
+    If a calc references an edge that has no EdgeField selection, a minimal
+    edge selection with @required is synthesized so the translator creates
+    an INNER JOIN for it.
     """
     required_edges = _collect_required_edge_names(node)
 
+    existing_edge_names: set[str] = set()
     new_fields: list[Field] = []
     for f in node.fields:
         if isinstance(f, EdgeField):
+            existing_edge_names.add(f.node.name)
             child = f.node
             child = _promote_required(child)
 
@@ -84,6 +66,18 @@ def _promote_required(node: NodeSelection) -> NodeSelection:
             new_fields.append(EdgeField(kind="edge", node=child))
         else:
             new_fields.append(f)
+
+    for edge_name in required_edges - existing_edge_names:
+        new_fields.append(EdgeField(
+            kind="edge",
+            node=NodeSelection(
+                kind="node",
+                name=edge_name,
+                filters=[],
+                directives=[RequiredDirective(type="required")],
+                fields=[],
+            ),
+        ))
 
     return NodeSelection(
         kind=node.kind,

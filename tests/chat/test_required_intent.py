@@ -175,3 +175,39 @@ class TestAutoRequireIntent:
         result = auto_require_intent(intent)
         assert result.edges[0].required is True
         assert result.edges[1].required is True
+
+    def test_partial_null_tolerant_promotes_unprotected_ref(self):
+        """P2-2 regression: NULLIF on a root field does not suppress
+        promotion of an edge ref elsewhere in the expression."""
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(
+                alias="pct_diff",
+                expr="(unit_price - contract_lines.agreed_unit_price) / NULLIF(unit_price, 0)",
+            )],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is True
+
+    def test_ref_inside_coalesce_still_protected(self):
+        """Edge ref inside COALESCE stays LEFT even when another ref
+        outside would promote a different edge."""
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(
+                alias="val",
+                expr="supplier.rate - COALESCE(contract_lines.agreed_unit_price, 0)",
+            )],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+                IntentEdge(name="supplier", fields=["rate"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is False
+        assert result.edges[1].required is True
