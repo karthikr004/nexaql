@@ -91,6 +91,7 @@ class TranslateError(Exception):
 class _JoinEntry:
     sql: str
     alias_key: str
+    join_type: str = "LEFT"
 
 
 @dataclass
@@ -273,6 +274,17 @@ def _process_join_steps(
     for step in steps:
         alias_key = getattr(step, "alias_key", None) or step.get("alias_key") if isinstance(step, dict) else step.alias_key
         if alias_key in ctx.joins:
+            existing = ctx.joins[alias_key]
+            if join_type.upper() == "JOIN" and existing.join_type.upper() != "JOIN":
+                table = getattr(step, "table", None) or (step.get("table") if isinstance(step, dict) else None)
+                condition = getattr(step, "condition", None) or (step.get("condition") if isinstance(step, dict) else None)
+                alias = ctx.aliases[alias_key]
+                on_clause = _resolve_condition(condition, ctx)
+                ctx.joins[alias_key] = _JoinEntry(
+                    sql=f"JOIN {table} {alias} ON {on_clause}",
+                    alias_key=alias_key,
+                    join_type="JOIN",
+                )
             continue
 
         table = getattr(step, "table", None) or (step.get("table") if isinstance(step, dict) else None)
@@ -283,6 +295,7 @@ def _process_join_steps(
         ctx.joins[alias_key] = _JoinEntry(
             sql=f"{_join_keyword(join_type)} {table} {alias} ON {on_clause}",
             alias_key=alias_key,
+            join_type=join_type.upper(),
         )
 
 
@@ -487,7 +500,11 @@ def _process_node(
             if target_node_name in current_ancestors:
                 continue
             join_steps = getattr(edge_def, "join_steps", []) or []
-            join_type = getattr(edge_def, "join_type", "JOIN") or "JOIN"
+            has_required = any(
+                getattr(d, "type", None) == "required"
+                for d in (ef.node.directives or [])
+            )
+            join_type = "JOIN" if has_required else "LEFT"
             _process_join_steps(join_steps, join_type, ctx)
             resolved_child = NodeSelection(
                 kind=ef.node.kind,

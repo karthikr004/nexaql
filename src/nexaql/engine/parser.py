@@ -20,6 +20,7 @@ from .types import (
     OffsetDirective,
     OrderByDirective,
     QueryAST,
+    RequiredDirective,
     ScalarField,
     Token,
     TokenType,
@@ -268,6 +269,9 @@ class Parser:
 
             elif name_token.value == "distinct":
                 dirs.append(DistinctDirective(type="distinct"))
+
+            elif name_token.value == "required":
+                dirs.append(RequiredDirective(type="required"))
 
             else:
                 # Unknown directive -- skip args if present

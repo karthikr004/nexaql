@@ -21,6 +21,7 @@ from nexaql.adapters.base import AdapterResult, QueryAdapter
 from nexaql.api.deps import get_adapter_for_connector
 from nexaql.chat.intent import (
     QueryIntent,
+    auto_require_intent,
     build_nexaql,
     decompose_intent,
     extract_intent_json,
@@ -37,6 +38,7 @@ from nexaql.chat.prompts import (
 )
 from nexaql.config import LLMConfig
 from nexaql.engine.parser import ParseError, parse
+from nexaql.engine.transforms import auto_require_edges
 from nexaql.engine.types import ColumnMeta, NodeShape
 from nexaql.engine.validator import validate
 from nexaql.federation import detect_cross_datasource, execute_federated
@@ -161,6 +163,7 @@ async def generate_query_via_intent(
 
     try:
         intent = parse_intent(intent_data)
+        intent = auto_require_intent(intent)
         _auto_inject_edge_filters(intent, ontology)
         query_text = build_nexaql(intent)
         logger.info(f"Intent builder generated query: {query_text[:200]}")
@@ -220,6 +223,8 @@ async def _try_execute(
         ast = parse(query_text)
     except ParseError as e:
         return None, f"Parse error: {e}"
+
+    ast = auto_require_edges(ast)
 
     if user is not None:
         enforcement = enforce_access(ast, ontology, user)
