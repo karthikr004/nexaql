@@ -278,3 +278,19 @@ class TestExtractRequiredEdges:
     def test_mixed_protected_and_unprotected(self):
         result = extract_required_edges("a.x + COALESCE(b.y, 0)")
         assert result == {"a"}
+
+    def test_url_in_string_literal_ignored(self):
+        assert extract_required_edges("CONCAT('https://example.com/', line_id)") == set()
+
+    def test_dotted_string_ignored(self):
+        assert extract_required_edges("CONCAT('prefix.suffix', edge.field)") == {"edge"}
+
+    def test_escaped_quote_in_string(self):
+        assert extract_required_edges("CONCAT('it''s a.test', val)") == set()
+
+    def test_parens_inside_string_ignored(self):
+        assert extract_required_edges("COALESCE(edge.x, '(none)')") == set()
+
+    def test_real_ref_outside_string_with_dotted_string(self):
+        result = extract_required_edges("edge.field + CONCAT('a.b', 'c.d')")
+        assert result == {"edge"}

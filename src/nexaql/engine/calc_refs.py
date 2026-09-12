@@ -19,24 +19,39 @@ _DOTTED_REF = re.compile(
     re.IGNORECASE,
 )
 
+_STRING_LITERAL = re.compile(r"'(?:[^'\\]|\\.|\'{2})*'")
 
-def _find_null_tolerant_spans(expr: str) -> list[tuple[int, int]]:
-    """Find character ranges covered by null-tolerant function calls.
 
-    Returns (start, end) pairs where start is the beginning of the function
-    name and end is one past the closing paren.
+def _find_masked_spans(expr: str) -> list[tuple[int, int]]:
+    """Find character ranges that should be ignored: string literals and
+    null-tolerant function calls.
+
+    String literals are masked first so that dotted text and parentheses
+    inside quotes do not confuse the null-tolerant span tracker.
     """
     spans: list[tuple[int, int]] = []
+
+    for m in _STRING_LITERAL.finditer(expr):
+        spans.append((m.start(), m.end()))
+
     for m in _NULL_TOLERANT.finditer(expr):
+        if any(start <= m.start() < end for start, end in spans):
+            continue
         depth = 1
         pos = m.end()
         while pos < len(expr) and depth > 0:
+            if expr[pos] == "'" :
+                sm = _STRING_LITERAL.match(expr, pos)
+                if sm:
+                    pos = sm.end()
+                    continue
             if expr[pos] == "(":
                 depth += 1
             elif expr[pos] == ")":
                 depth -= 1
             pos += 1
         spans.append((m.start(), pos))
+
     return spans
 
 
@@ -44,16 +59,15 @@ def extract_required_edges(expr: str) -> set[str]:
     """Extract edge names from dotted references that require INNER JOIN.
 
     A dotted reference (edge_name.field_name) triggers promotion unless it
-    appears inside a null-tolerant function call (COALESCE, NULLIF, etc.).
-    Null-tolerance is evaluated per-reference, not per-expression — a NULLIF
-    protecting against division by zero does not suppress promotion of an
-    unrelated edge reference in the same expression.
+    appears inside a string literal or a null-tolerant function call
+    (COALESCE, NULLIF, etc.). Null-tolerance is evaluated per-reference,
+    not per-expression.
     """
-    protected = _find_null_tolerant_spans(expr)
+    masked = _find_masked_spans(expr)
     edges: set[str] = set()
     for m in _DOTTED_REF.finditer(expr):
         ref_start = m.start()
-        if any(start <= ref_start < end for start, end in protected):
+        if any(start <= ref_start < end for start, end in masked):
             continue
         edges.add(m.group(1))
     return edges
