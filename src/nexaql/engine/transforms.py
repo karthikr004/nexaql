@@ -7,7 +7,6 @@ Deterministic rewrites applied after parsing and before translation.
 from __future__ import annotations
 
 import re
-from typing import Set
 
 from .types import (
     CalcField,
@@ -18,42 +17,39 @@ from .types import (
     RequiredDirective,
 )
 
+_NULL_TOLERANT = re.compile(
+    r"\b(?:COALESCE|NULLIF|IFNULL|ISNULL|NVL)\s*\(",
+    re.IGNORECASE,
+)
 
-def _collect_edge_names(fields: list[Field]) -> set[str]:
-    """Return the set of edge names present in a field list."""
-    return {f.node.name for f in fields if isinstance(f, EdgeField)}
-
-
-def _field_names_in_expr(expr: str) -> set[str]:
-    """Extract bare identifiers from a calc expression."""
-    return set(re.findall(r"\b([a-z_][a-z0-9_]*)\b", expr, re.IGNORECASE))
+_DOTTED_REF = re.compile(r"\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b", re.IGNORECASE)
 
 
-def _collect_referenced_fields(node: NodeSelection) -> set[str]:
-    """Collect field names used in calc expressions and filters at this node level."""
-    refs: set[str] = set()
+def _extract_required_edges(expr: str) -> set[str]:
+    """Extract edge names from dotted references in a calc expression,
+    skipping expressions that are null-tolerant (COALESCE, etc.).
+
+    Only dotted references (edge_name.field_name) unambiguously name an edge.
+    Bare identifiers belong to the current node.
+    """
+    if _NULL_TOLERANT.search(expr):
+        return set()
+    return {m.group(1) for m in _DOTTED_REF.finditer(expr)}
+
+
+def _collect_required_edge_names(node: NodeSelection) -> set[str]:
+    """Collect edge names that must produce rows based on calc/filter context."""
+    required: set[str] = set()
 
     for f in node.fields:
         if isinstance(f, CalcField):
-            refs |= _field_names_in_expr(f.expr)
+            required |= _extract_required_edges(f.expr)
 
     for filt in node.filters:
         if filt.calc_expr:
-            refs |= _field_names_in_expr(filt.calc_expr)
+            required |= _extract_required_edges(filt.calc_expr)
 
-    return refs
-
-
-def _edge_provides_field(edge_node: NodeSelection, field_name: str) -> bool:
-    """Check if an edge's selection includes a scalar field with this name."""
-    for f in edge_node.fields:
-        if getattr(f, "kind", None) == "scalar" and getattr(f, "name", None) == field_name:
-            return True
-        if getattr(f, "kind", None) == "calc" and getattr(f, "alias", None) == field_name:
-            return True
-        if getattr(f, "kind", None) == "aggregation" and getattr(f, "alias", None) == field_name:
-            return True
-    return False
+    return required
 
 
 def _has_required(node: NodeSelection) -> bool:
@@ -61,14 +57,14 @@ def _has_required(node: NodeSelection) -> bool:
 
 
 def _promote_required(node: NodeSelection) -> NodeSelection:
-    """Walk a NodeSelection and add @required to edges whose fields are used in
-    calc/filter contexts at the parent level.
+    """Walk a NodeSelection and add @required to edges explicitly referenced
+    via dotted notation (edge_name.field) in calc expressions.
 
-    The heuristic: if a calc expression at level N references a field name that
-    only exists on a child edge at level N, that edge MUST produce a row for
-    the calc to be meaningful — so it's promoted to @required (INNER JOIN).
+    Only dotted references trigger promotion — bare field names belong to the
+    current node. Expressions wrapped in COALESCE/NULLIF/etc. intentionally
+    handle missing relationships and are never promoted.
     """
-    referenced = _collect_referenced_fields(node)
+    required_edges = _collect_required_edge_names(node)
 
     new_fields: list[Field] = []
     for f in node.fields:
@@ -76,20 +72,14 @@ def _promote_required(node: NodeSelection) -> NodeSelection:
             child = f.node
             child = _promote_required(child)
 
-            if not _has_required(child) and referenced:
-                edge_field_names = {
-                    getattr(sf, "name", None) or getattr(sf, "alias", None)
-                    for sf in child.fields
-                    if getattr(sf, "kind", None) in ("scalar", "calc", "aggregation")
-                }
-                if referenced & edge_field_names:
-                    child = NodeSelection(
-                        kind=child.kind,
-                        name=child.name,
-                        filters=child.filters,
-                        directives=list(child.directives) + [RequiredDirective(type="required")],
-                        fields=child.fields,
-                    )
+            if not _has_required(child) and child.name in required_edges:
+                child = NodeSelection(
+                    kind=child.kind,
+                    name=child.name,
+                    filters=child.filters,
+                    directives=list(child.directives) + [RequiredDirective(type="required")],
+                    fields=child.fields,
+                )
 
             new_fields.append(EdgeField(kind="edge", node=child))
         else:

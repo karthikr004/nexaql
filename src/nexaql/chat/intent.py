@@ -358,37 +358,50 @@ def _generate_query_name(intent: QueryIntent) -> str:
     return f"Get{parts}"
 
 
-def _collect_calc_refs(intent: QueryIntent) -> set[str]:
-    """Collect field names referenced in calc expressions at the root level."""
-    refs: set[str] = set()
-    for c in intent.calcs:
-        refs |= set(re.findall(r"\b([a-z_][a-z0-9_]*)\b", c.expr, re.IGNORECASE))
-    for f in intent.calc_filters:
-        refs |= set(re.findall(r"\b([a-z_][a-z0-9_]*)\b", f.expr, re.IGNORECASE))
-    return refs
+_NULL_TOLERANT_RE = re.compile(
+    r"\b(?:COALESCE|NULLIF|IFNULL|ISNULL|NVL)\s*\(",
+    re.IGNORECASE,
+)
+
+_DOTTED_REF_RE = re.compile(
+    r"\b([a-z_][a-z0-9_]*)\.([a-z_][a-z0-9_]*)\b",
+    re.IGNORECASE,
+)
+
+
+def _collect_required_edge_names(intent: QueryIntent) -> set[str]:
+    """Collect edge names that must produce rows based on dotted calc references.
+
+    Only dotted references (edge_name.field_name) unambiguously name an edge.
+    Bare field names belong to the root node and never trigger promotion.
+    Expressions wrapped in COALESCE/NULLIF/etc. intentionally handle missing
+    relationships and are skipped.
+    """
+    edges: set[str] = set()
+    exprs: list[str] = [c.expr for c in intent.calcs]
+    exprs.extend(f.expr for f in intent.calc_filters)
+    for expr in exprs:
+        if _NULL_TOLERANT_RE.search(expr):
+            continue
+        edges |= {m.group(1) for m in _DOTTED_REF_RE.finditer(expr)}
+    return edges
 
 
 def auto_require_intent(intent: QueryIntent) -> QueryIntent:
-    """Auto-mark edges as required when their fields appear in calc/filter contexts.
+    """Auto-mark edges as required when they are explicitly referenced via
+    dotted notation (edge_name.field) in calc expressions.
 
-    This is the intent-level equivalent of the AST transform. It ensures that
-    edges whose data is needed for computations use INNER JOIN semantics.
+    This is the intent-level equivalent of the AST transform. Only dotted
+    references trigger promotion — bare field names belong to the root node.
+    Null-tolerant expressions (COALESCE, etc.) are never promoted.
     """
-    calc_refs = _collect_calc_refs(intent)
-    if not calc_refs:
+    required_edge_names = _collect_required_edge_names(intent)
+    if not required_edge_names:
         return intent
 
     new_edges: list[IntentEdge] = []
     for edge in intent.edges:
-        edge_field_names = set(edge.fields)
-        for agg in edge.aggregations:
-            edge_field_names.add(agg.alias)
-            if agg.field:
-                edge_field_names.add(agg.field)
-        for c in edge.calcs:
-            edge_field_names.add(c.alias)
-
-        if not edge.required and (calc_refs & edge_field_names):
+        if not edge.required and edge.name in required_edge_names:
             edge = IntentEdge(
                 name=edge.name,
                 fields=edge.fields,

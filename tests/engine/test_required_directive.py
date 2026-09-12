@@ -58,7 +58,27 @@ class TestParserRequired:
 
 
 class TestAutoRequireTransform:
-    def test_calc_referencing_edge_field_promotes(self):
+    def test_dotted_ref_promotes_edge(self):
+        q = """query Test {
+          purchase_order_line {
+            unit_price
+            price_diff: calc(unit_price - contract_lines.agreed_unit_price)
+            contract_lines {
+              agreed_unit_price
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        edge = ast.body.fields[2]
+        assert edge.kind == "edge"
+        assert any(
+            getattr(d, "type", None) == "required" for d in edge.node.directives
+        )
+
+    def test_bare_field_name_does_not_promote(self):
+        """P1-2 regression: bare identifiers belong to the current node,
+        not to edges that happen to expose the same field name."""
         q = """query Test {
           purchase_order_line {
             unit_price
@@ -72,7 +92,44 @@ class TestAutoRequireTransform:
         ast = auto_require_edges(ast)
         edge = ast.body.fields[2]
         assert edge.kind == "edge"
-        assert any(
+        assert not any(
+            getattr(d, "type", None) == "required" for d in edge.node.directives
+        )
+
+    def test_coalesce_skips_promotion(self):
+        """P1-3 regression: COALESCE-wrapped references intentionally handle
+        missing relationships and must not trigger promotion."""
+        q = """query Test {
+          purchase_order_line {
+            unit_price
+            safe_price: calc(COALESCE(contract_lines.agreed_unit_price, 0))
+            contract_lines {
+              agreed_unit_price
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        edge = ast.body.fields[2]
+        assert edge.kind == "edge"
+        assert not any(
+            getattr(d, "type", None) == "required" for d in edge.node.directives
+        )
+
+    def test_nullif_skips_promotion(self):
+        q = """query Test {
+          purchase_order_line {
+            unit_price
+            adjusted: calc(NULLIF(contract_lines.agreed_unit_price, 0))
+            contract_lines {
+              agreed_unit_price
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        edge = ast.body.fields[2]
+        assert not any(
             getattr(d, "type", None) == "required" for d in edge.node.directives
         )
 
@@ -97,7 +154,7 @@ class TestAutoRequireTransform:
         q = """query Test {
           purchase_order_line {
             unit_price
-            price_diff: calc(unit_price - agreed_unit_price)
+            price_diff: calc(unit_price - contract_lines.agreed_unit_price)
             contract_lines @required {
               agreed_unit_price
             }
@@ -110,3 +167,27 @@ class TestAutoRequireTransform:
             1 for d in edge.node.directives if getattr(d, "type", None) == "required"
         )
         assert required_count == 1
+
+    def test_multiple_dotted_refs_promote_multiple_edges(self):
+        q = """query Test {
+          purchase_order_line {
+            unit_price
+            total_diff: calc(contract_lines.agreed_unit_price - supplier.discount_rate)
+            contract_lines {
+              agreed_unit_price
+            }
+            supplier {
+              discount_rate
+            }
+          }
+        }"""
+        ast = parse(q)
+        ast = auto_require_edges(ast)
+        cl_edge = ast.body.fields[2]
+        sup_edge = ast.body.fields[3]
+        assert any(
+            getattr(d, "type", None) == "required" for d in cl_edge.node.directives
+        )
+        assert any(
+            getattr(d, "type", None) == "required" for d in sup_edge.node.directives
+        )

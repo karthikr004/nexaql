@@ -3,6 +3,7 @@
 
 from nexaql.chat.intent import (
     IntentCalc,
+    IntentCalcFilter,
     IntentEdge,
     QueryIntent,
     auto_require_intent,
@@ -61,11 +62,63 @@ class TestIntentRequired:
 
 
 class TestAutoRequireIntent:
-    def test_calc_referencing_edge_field_promotes(self):
+    def test_dotted_ref_promotes_edge(self):
+        """Dotted reference (edge_name.field) in calc triggers promotion."""
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(alias="price_diff", expr="unit_price - contract_lines.agreed_unit_price")],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is True
+
+    def test_bare_field_name_does_not_promote(self):
+        """P1-2 regression: bare identifiers belong to root node, not edges."""
         intent = QueryIntent(
             node="purchase_order_line",
             fields=["unit_price"],
             calcs=[IntentCalc(alias="price_diff", expr="unit_price - agreed_unit_price")],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is False
+
+    def test_coalesce_skips_promotion(self):
+        """P1-3 regression: COALESCE-wrapped refs preserve LEFT JOIN."""
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(alias="safe_price", expr="COALESCE(contract_lines.agreed_unit_price, 0)")],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is False
+
+    def test_nullif_skips_promotion(self):
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(alias="adj", expr="NULLIF(contract_lines.agreed_unit_price, 0)")],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is False
+
+    def test_calc_filter_with_dotted_ref_promotes(self):
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(alias="price_diff", expr="unit_price - contract_lines.agreed_unit_price")],
+            calc_filters=[IntentCalcFilter(expr="unit_price - contract_lines.agreed_unit_price", op="gt", value=0)],
             edges=[
                 IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
             ],
@@ -88,7 +141,7 @@ class TestAutoRequireIntent:
         intent = QueryIntent(
             node="purchase_order_line",
             fields=["unit_price"],
-            calcs=[IntentCalc(alias="price_diff", expr="unit_price - agreed_unit_price")],
+            calcs=[IntentCalc(alias="price_diff", expr="unit_price - contract_lines.agreed_unit_price")],
             edges=[
                 IntentEdge(name="contract_lines", fields=["agreed_unit_price"], required=True),
             ],
@@ -97,6 +150,7 @@ class TestAutoRequireIntent:
         assert result.edges[0].required is True
 
     def test_unrelated_calc_no_promotion(self):
+        """Calc using only root fields should not promote any edge."""
         intent = QueryIntent(
             node="purchase_order_line",
             fields=["unit_price", "quantity"],
@@ -107,3 +161,17 @@ class TestAutoRequireIntent:
         )
         result = auto_require_intent(intent)
         assert result.edges[0].required is False
+
+    def test_multiple_dotted_refs_promote_multiple_edges(self):
+        intent = QueryIntent(
+            node="purchase_order_line",
+            fields=["unit_price"],
+            calcs=[IntentCalc(alias="total", expr="contract_lines.agreed_unit_price - supplier.discount")],
+            edges=[
+                IntentEdge(name="contract_lines", fields=["agreed_unit_price"]),
+                IntentEdge(name="supplier", fields=["discount"]),
+            ],
+        )
+        result = auto_require_intent(intent)
+        assert result.edges[0].required is True
+        assert result.edges[1].required is True
