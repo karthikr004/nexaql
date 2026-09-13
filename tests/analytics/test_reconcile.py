@@ -97,3 +97,14 @@ def test_aggregate_is_independent_of_default_decimal_precision():
             plan(), batch([row(1, "10000000000000000000000000000.01", expected="10000000000000000000000000000.00")])
         )
     assert result.findings[0].difference == Decimal("0.01")
+
+
+def test_selected_business_evidence_is_preserved_and_bounded():
+    rows = [{**row(i, '1', expected='0'), 'invoice.number': f'INV-{i}', 'supplier.name': 'Example'} for i in range(51)]
+    result = reconcile(plan(), batch(rows))
+    finding = result.findings[0]
+    assert finding.actual == Decimal('51')
+    assert finding.transactions[0]['invoice.number'] == 'INV-0'
+    assert finding.transactions[0]['supplier.name'] == 'Example'
+    assert len(finding.transactions) == 50
+    assert finding.evidence_truncated
