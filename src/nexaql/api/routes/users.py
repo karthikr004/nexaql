@@ -179,7 +179,7 @@ async def list_invites() -> list[InviteResponse]:
 
 @router.post("/invites")
 async def create_invite(req: InviteRequest, request: Request) -> InviteResponse:
-    from nexaql.api.deps import get_user_context
+    from nexaql.api.middleware import get_user_context
 
     email = req.email.lower().strip()
     if not email or "@" not in email:
@@ -192,7 +192,7 @@ async def create_invite(req: InviteRequest, request: Request) -> InviteResponse:
     if bs.is_email_invited(email):
         raise HTTPException(status_code=409, detail=f"{email} is already invited")
 
-    ctx = get_user_context(request)
+    ctx = await get_user_context(request)
     invited_by = int(ctx.user_id) if ctx.user_id else None
     invite = bs.invite_email(email, invited_by=invited_by, roles=req.roles)
     return InviteResponse(**invite)
