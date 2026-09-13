@@ -57,6 +57,7 @@ class Finding(Contract):
     contributing_count: int
     contributing_ids: list[str]
     evidence_truncated: bool
+    transactions: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class ReconciliationResult(Contract):

@@ -106,7 +106,8 @@ def _reconcile(plan: ReconciliationPlan, batch: EvidenceBatch) -> Reconciliation
                             unit=unit,
                             contributing_count=len(ids),
                             contributing_ids=sorted(ids)[:50],
-                            evidence_truncated=len(ids) > 50,
+                            evidence_truncated=len(ids) > 50 or len(rows) > 50,
+                            transactions=rows[:50],
                         )
                     )
             except ValueError as error:
