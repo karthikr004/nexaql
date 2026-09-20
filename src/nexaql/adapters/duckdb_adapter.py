@@ -113,6 +113,22 @@ class DuckDBAdapter(QueryAdapter):
             adapter_type=self.adapter_type,
         )
 
+    async def stream_rows(self, ast, ontology, *, batch_size=1000):
+        """Fetch bounded batches using a separate cursor for this execution."""
+        if not 1 <= batch_size <= 1000:
+            raise ValueError("Invalid stream batch size")
+        cursor = self._get_conn().cursor()
+        try:
+            await asyncio.to_thread(cursor.execute, translate(ast, ontology).sql)
+            names = [column[0] for column in cursor.description]
+            while True:
+                rows = await asyncio.to_thread(cursor.fetchmany, batch_size)
+                if not rows:
+                    break
+                yield [dict(zip(names, row)) for row in rows]
+        finally:
+            await asyncio.to_thread(cursor.close)
+
     async def healthcheck(self) -> bool:
         try:
             loop = asyncio.get_running_loop()

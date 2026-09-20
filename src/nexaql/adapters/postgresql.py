@@ -96,6 +96,24 @@ class PostgreSQLAdapter(QueryAdapter):
             adapter_type=self.adapter_type,
         )
 
+    async def stream_rows(self, ast, ontology, *, batch_size=100):
+        """Read through a server cursor in a read-only transaction."""
+        if not 1 <= batch_size <= 1000:
+            raise ValueError("Invalid stream batch size")
+        sql = translate(ast, ontology).sql
+        pool = await self._get_pool()
+        async with pool.acquire() as conn:
+            async with conn.transaction(readonly=True):
+                await conn.execute("SET LOCAL statement_timeout = '120s'")
+                batch = []
+                async for record in conn.cursor(sql, prefetch=batch_size):
+                    batch.append(dict(record))
+                    if len(batch) == batch_size:
+                        yield batch
+                        batch = []
+                if batch:
+                    yield batch
+
     async def healthcheck(self) -> bool:
         try:
             pool = await self._get_pool()
