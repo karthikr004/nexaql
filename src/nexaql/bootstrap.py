@@ -752,12 +752,22 @@ def save_domain_policies(
 
 
 def delete_domain(name: str) -> bool:
-    """Delete a domain and CASCADE its schemas."""
+    """Delete domain metadata atomically, preserving connectors and source data."""
     conn = _get_conn()
     existing = get_domain(name)
     if existing is None:
         return False
-    conn.execute("DELETE FROM domains WHERE name = ?", [name])
+    if get_active_domain() == name:
+        raise ValueError("Switch to another domain before deleting the active domain")
+    conn.execute("BEGIN")
+    try:
+        conn.execute("DELETE FROM business_ontology WHERE domain_id = ?", [existing["id"]])
+        conn.execute("DELETE FROM schemas WHERE domain_id = ?", [existing["id"]])
+        conn.execute("DELETE FROM domains WHERE id = ?", [existing["id"]])
+        conn.execute("COMMIT")
+    except Exception:
+        conn.execute("ROLLBACK")
+        raise
     return True
 
 
@@ -2342,3 +2352,41 @@ def _seed_sample_data() -> str:
         log.warning("Failed to seed sample data: %s", e)
 
     return sample_db
+
+
+def replace_onboarding_business_context(domain_id: int, entries: list[dict], reviewed_terms: list[str] | None = None) -> None:
+    """Atomically activate reviewed onboarding entries, preserving manually authored terms."""
+    _get_conn()  # Initialize the schema before opening an independent transaction.
+    conn = _open_pg(_get_db_url()) if _is_pg() else _open_sqlite()
+    marker = 'vertical-onboarding'
+    try:
+        conn.execute('BEGIN')
+        current = conn.execute('SELECT id, term, tags FROM business_ontology WHERE domain_id = ?', [domain_id]).fetchall()
+        managed = {}
+        manual = set()
+        for identity, term, tags in current:
+            tags = json.loads(tags) if isinstance(tags, str) else (tags or [])
+            if marker in tags:
+                managed[term] = identity
+            else:
+                manual.add(term)
+        if manual.intersection(e['term'] for e in entries):
+            raise ValueError('An existing manually authored term has the same name; choose a distinct scenario name or edit the existing definition')
+        keep = {e['term'] for e in entries}
+        for term, identity in managed.items():
+            if term not in keep and (reviewed_terms is None or term in reviewed_terms):
+                conn.execute('DELETE FROM business_ontology WHERE id = ? AND domain_id = ?', [identity, domain_id])
+        for entry in entries:
+            tags = json.dumps(list(dict.fromkeys([*entry.get('tags', []), marker])))
+            now = _now()
+            conn.execute(
+                'INSERT INTO business_ontology(domain_id,term,definition,sql_hint,tags,created_at,updated_at) VALUES(?,?,?,?,?,?,?) '
+                'ON CONFLICT(domain_id,term) DO UPDATE SET definition=excluded.definition,sql_hint=excluded.sql_hint,tags=excluded.tags,updated_at=excluded.updated_at',
+                [domain_id, entry['term'], entry['definition'], entry.get('sql_hint'), tags, now, now],
+            )
+        conn.execute('COMMIT')
+    except BaseException:
+        conn.execute('ROLLBACK')
+        raise
+    finally:
+        conn.close()

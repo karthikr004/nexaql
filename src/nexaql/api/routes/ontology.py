@@ -130,9 +130,11 @@ async def delete_domain(domain: str) -> JSONResponse:
     existing = bs.get_domain(domain)
     if not existing:
         return JSONResponse({"error": f"Domain '{domain}' not found"}, status_code=404)
-    for s in bs.list_schemas(domain):
-        bs.delete_schema(domain, s["name"])
-    bs.delete_domain(domain)
+    try:
+        bs.delete_domain(domain)
+    except ValueError as exc:
+        return JSONResponse({"error": str(exc)}, status_code=409)
+    invalidate_ontology_cache(domain)
     return JSONResponse({"status": "deleted", "domain": domain})
 
 
