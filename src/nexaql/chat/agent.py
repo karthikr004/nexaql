@@ -37,15 +37,9 @@ from nexaql.chat.prompts import (
     extract_nexaql_query,
 )
 from nexaql.config import LLMConfig
-from nexaql.engine.parser import ParseError, parse
-from nexaql.engine.transforms import auto_require_edges
 from nexaql.engine.types import ColumnMeta, NodeShape
-from nexaql.engine.validator import validate
-from nexaql.federation import detect_cross_datasource, execute_federated
 from nexaql.ontology import Ontology
 from nexaql.policy.context import UserContext
-from nexaql.policy.enforcer import enforce_access
-from nexaql.policy.masking import mask_results
 
 logger = logging.getLogger(__name__)
 
@@ -219,46 +213,13 @@ async def _try_execute(
 
     Returns ``(result, error)``.
     """
-    try:
-        ast = parse(query_text)
-    except ParseError as e:
-        return None, f"Parse error: {e}"
-
-    ast = auto_require_edges(ast)
-
-    if user is not None:
-        enforcement = enforce_access(ast, ontology, user)
-        if enforcement.denied:
-            return None, f"Access denied: {enforcement.denied_reason}"
-        ast = enforcement.ast
-    else:
-        enforcement = None
-
-    validation = validate(ast, ontology)
-    if not validation.valid:
-        error_msgs = "; ".join(err.message for err in validation.errors)
-        return None, f"Validation failed: {error_msgs}"
+    from nexaql.engine.execution import prepare_query, execute_prepared
 
     try:
-        is_cross, connector_to_nodes = detect_cross_datasource(ast, ontology)
-        if is_cross:
-            adapter_map = {}
-            for connector_id in connector_to_nodes:
-                adapter_map[connector_id] = get_adapter_for_connector(connector_id)
-            result = await execute_federated(ast, ontology, adapter_map)
-        else:
-            node_to_connector = getattr(ontology, "node_to_connector", None) or {}
-            root_connector_id = node_to_connector.get(ast.body.name)
-            if root_connector_id is not None:
-                resolved_adapter = get_adapter_for_connector(root_connector_id)
-            else:
-                resolved_adapter = adapter
-            result = await resolved_adapter.execute(ast, ontology)
-        if enforcement and enforcement.masked_fields:
-            result.rows = mask_results(result.rows, enforcement.masked_fields)
-        return result, None
-    except Exception as e:
-        return None, str(e)
+        prepared = prepare_query(query_text, ontology, user)
+        return await execute_prepared(prepared, adapter, get_adapter_for_connector), None
+    except Exception as exc:
+        return None, str(exc)
 
 
 async def execute_with_retry_intent(
