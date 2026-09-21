@@ -1,7 +1,5 @@
 # Copyright (c) 2026-present NexaQL Contributors
-"""Prompt builders for the NexaQL chat agent.
-
-"""
+"""Prompt builders for the NexaQL chat agent."""
 
 from __future__ import annotations
 
@@ -17,6 +15,7 @@ from nexaql.ontology import Ontology, ontology_to_agent_prompt
 
 def _current_date_context() -> tuple[str, int]:
     from datetime import date
+
     today = date.today()
     text = f"Today's date is {today.isoformat()} ({today.strftime('%A, %B %d, %Y')}). The current year is {today.year}."
     return text, today.year
@@ -238,7 +237,7 @@ def build_summary_prompt(
     if row_count is None:
         row_count = len(rows)
 
-    sample = rows[:20]
+    sample = rows[:9]
 
     # Build column name list
     col_names = []
@@ -259,7 +258,7 @@ def build_summary_prompt(
         data_rows.append(" | ".join(cells))
 
     table_str = "\n".join([header, separator] + data_rows)
-    shown = min(row_count, 20)
+    shown = len(sample)
 
     return f"""The user asked: "{question}"
 
@@ -268,7 +267,11 @@ I ran this NexaQL query:
 {query}
 ```
 
-It returned {row_count} row(s). Here are the results (first {shown}):
+It returned {row_count} row(s). Here are {shown} preview rows:
+The count describes query rows, not necessarily distinct business entities.
+Do not invent a currency symbol when currency was not returned. Observations from
+preview rows apply only to that preview; do not generalize them to the whole result.
+Do not call repeated records duplicates or recommend financial action without evidence.
 
 {table_str}
 
@@ -320,12 +323,12 @@ def _build_dynamic_examples(ontology: Ontology) -> str:
         edge_name = next(iter(edges))
         examples.append(
             f'Q: "{node_name}s with their {edge_name} count"\n'
-            f'```json\n'
+            f"```json\n"
             f'{{"node": "{node_name}", "fields": {display_fields}, '
             f'"edges": [{{"name": "{edge_name}", "aggregations": '
             f'[{{"alias": "{edge_name}_count", "func": "count"}}]}}], '
             f'"order_by": [{{"field": "{edge_name}_count", "direction": "DESC"}}]}}\n'
-            f'```'
+            f"```"
         )
         break
 
@@ -334,10 +337,7 @@ def _build_dynamic_examples(ontology: Ontology) -> str:
     field_names = list(node_def.fields.keys())
     display_fields = field_names[:3]
     examples.append(
-        f'Q: "top 10 {node_name}s"\n'
-        f'```json\n'
-        f'{{"node": "{node_name}", "fields": {display_fields}, "limit": 10}}\n'
-        f'```'
+        f'Q: "top 10 {node_name}s"\n```json\n{{"node": "{node_name}", "fields": {display_fields}, "limit": 10}}\n```'
     )
 
     return "\n\n".join(examples)
@@ -351,9 +351,12 @@ def _format_business_context(entries: list[dict]) -> str:
     for e in entries:
         line = f'- "{e["term"]}": {e["definition"]}'
         if e.get("sql_hint"):
-            line += f'  [SQL hint: {e["sql_hint"]}]'
+            line += f"  [SQL hint: {e['sql_hint']}]"
         lines.append(line)
-    return "\n\nBUSINESS CONTEXT (domain-specific terminology and rules — use these to interpret the user's question):\n" + "\n".join(lines)
+    return (
+        "\n\nBUSINESS CONTEXT (domain-specific terminology and rules — use these to interpret the user's question):\n"
+        + "\n".join(lines)
+    )
 
 
 def build_intent_system_prompt(ontology: Ontology, business_context: list[dict] | None = None) -> str:
@@ -411,6 +414,7 @@ OUTPUT FORMAT — respond with ONLY a JSON object in a ```json code block:
   "order_by": [{{"field": "amount", "direction": "DESC"}}],
   "limit": 10,
   "distinct": false,
+  "output_grain": {{"path": [], "fields": []}},
   "visualization": {{
     "chart_type": "bar",
     "x_field": "category",
@@ -420,6 +424,19 @@ OUTPUT FORMAT — respond with ONLY a JSON object in a ```json code block:
 ```
 
 RULES:
+For "no related records" / "without any" questions, use "missing_relationship":
+"exact_edge_name" on the entity to return. E.g. supplier as node and purchase_orders
+as missing_relationship. Do not use cumulative_comparison, zero monetary totals,
+or credit limits for absence. The compiler builds the LEFT JOIN/IS NULL check.
+For cumulative-sum comparisons against a referenced entity, use the typed field:
+"cumulative_comparison": {{"operation":"sum", "measure":"amount", "reference":"EXACT_EDGE_NAME", "threshold":"amount", "operator":"gt"}}.
+This replaces calcs, aggregations and calc_filters for that comparison: omit those.
+Use the contributing-detail node as root. The compiler derives the partition key
+from the referenced entity primary key, validates many-to-one relationships, and
+builds the window filter. Always include output_grain with the requested entity
+path and useful declared fields. For POs this may be two edges; for invoices one.
+Do not write SQL expressions for this supported operation. Keep unrelated filters
+only when explicitly required by the question or applicable business definition.
 1. "node" — REQUIRED. Must be an exact node name from the ontology.
 2. "fields" — List of scalar field names to return. Use exact names from the ontology. Omit if only aggregating.
 3. "aggregations" — For count/sum/avg/min/max. "field" is null for count(). "alias" is the output column name.
@@ -444,11 +461,36 @@ RULES:
      If the user's input is ambiguous (e.g. "US" could match "US-EAST" and "US-WEST"), use "in" with all matching values.
    - String values must match exact case from ontology.
 6. "calc_filters" — Filters on computed expressions, e.g. "days until expiry < 30".
+   To return individual rows whose group total exceeds a referenced allowance, use a window calc:
+   SUM(amount) OVER (PARTITION BY referenced_id) - direct_edge.amount, filtered gt 0.
+   This computes the group total while preserving individual rows; the engine filters AFTER the window.
+   Also select the window total as a calc for auditability. Use exact schema fields/edges.
+   Do not GROUP BY the individual row ID to compute a multi-row total. Do not traverse a header
+   to all of its lines when the request specifies a directly referenced line. Joining other one-to-many
+   edges before the window multiplies rows and changes the sum; avoid such joins.
+   Do not add quantity checks or status exclusions unless requested or established in business context.
+   For requests for ALL matching rows, omit limit: pagination is handled on stored results.
 7. "special_filters" — Pre-defined filters from the ontology. Use exact names and appropriate values.
 8. "edges" — Nested related data. Each edge can have its own fields, filters, aggregations, limit, and sub-edges.
    Only include edges the user actually asked about — do NOT add lines, payments, or other sub-entities unless requested.
 9. "order_by" — Sort results. "direction" is "ASC" or "DESC". Can reference aggregation aliases (including those from edges).
 10. "limit" / "distinct" — Optional. Omit if not needed.
+Computed-expression references must resolve to declared ontology fields. Never use
+an aggregation alias as edge.alias in a calc filter: that alias is not a source field.
+For filtering groups while returning a related entity, prefer a window expression
+at the contributing-detail node: SUM(measure) OVER (PARTITION BY reference.key).
+The filter is applied after the window calculation, then output_grain deduplicates.
+Do not aggregate again at the output entity or sum a group excess across its members.
+11. Separate calculation grain from requested output grain. For entity-list questions,
+include "output_grain": {{"path": [], "fields": ["declared_field"]}} for the root,
+or {{"path": ["edge_name"], "fields": ["declared_field"]}} for a related entity. Multi-hop paths are ordered ontology edge names, e.g. ["purchase_order_line", "purchase_order"].
+"Find all invoices" means one row per invoice, not per invoice line or PO line.
+For cumulative invoice-line comparisons, calculate/filter at invoice-line root using
+SUM(amount) OVER (PARTITION BY the referenced PO-line key), but choose the invoice
+edge as output_grain. Do not project PO-line excess as an invoice-level amount.
+For PO-line output choose the PO-line edge. For invoice-line output choose the root.
+The builder includes the output entity primary key and deduplicates after filtering.
+Omit output_grain for aggregate reports or when explicitly requesting mixed detail.
 11. Only include keys that are needed. Omit empty arrays and null values.
 12. "visualization" — Suggest how to display the results:
     - chart_type: "bar" (comparisons, rankings, top-N), "line" (trends over time), "pie" (proportions with ≤6 categories), "stat" (single aggregate value like totals/averages), "table" (raw listings)

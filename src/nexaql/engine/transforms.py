@@ -26,7 +26,7 @@ def _collect_required_edge_names(node: NodeSelection) -> set[str]:
             required |= extract_required_edges(f.expr)
 
     for filt in node.filters:
-        if filt.calc_expr:
+        if filt.calc_expr and getattr(filt.op, "value", filt.op) not in ("is_null", "null"):
             required |= extract_required_edges(filt.calc_expr)
 
     return required
@@ -68,16 +68,18 @@ def _promote_required(node: NodeSelection) -> NodeSelection:
             new_fields.append(f)
 
     for edge_name in required_edges - existing_edge_names:
-        new_fields.append(EdgeField(
-            kind="edge",
-            node=NodeSelection(
-                kind="node",
-                name=edge_name,
-                filters=[],
-                directives=[RequiredDirective(type="required")],
-                fields=[],
-            ),
-        ))
+        new_fields.append(
+            EdgeField(
+                kind="edge",
+                node=NodeSelection(
+                    kind="node",
+                    name=edge_name,
+                    filters=[],
+                    directives=[RequiredDirective(type="required")],
+                    fields=[],
+                ),
+            )
+        )
 
     return NodeSelection(
         kind=node.kind,

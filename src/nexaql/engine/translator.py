@@ -13,7 +13,6 @@ from nexaql.engine.types import (
     CalcField,
     EdgeField,
     Filter,
-    FilterValue,
     NodeSelection,
     NodeShape,
     QueryAST,
@@ -101,6 +100,7 @@ class TranslatorContext:
     joins: Dict[str, _JoinEntry] = field(default_factory=dict)  # alias_key -> JOIN clause
     selects: List[str] = field(default_factory=list)
     wheres: List[str] = field(default_factory=list)
+    window_filters: List[str] = field(default_factory=list)
     group_bys: List[str] = field(default_factory=list)
     order_bys: List[str] = field(default_factory=list)
     limit: Optional[int] = None
@@ -137,21 +137,18 @@ def _get_or_create_alias(alias_key: str, ctx: TranslatorContext) -> str:
 
 def _resolve_condition(condition: str, ctx: TranslatorContext) -> str:
     """Replace {alias_key} placeholders with actual SQL aliases."""
+
     def _replacer(m: re.Match) -> str:
         key = m.group(1)
         alias = ctx.aliases.get(key)
         if alias is None:
-            raise TranslateError(
-                f"Cannot resolve alias for '{key}' -- ensure join order is correct"
-            )
+            raise TranslateError(f"Cannot resolve alias for '{key}' -- ensure join order is correct")
         return alias
 
     return re.sub(r"\{([^}]+)\}", _replacer, condition)
 
 
-def _resolve_derived_expr(
-    sql_expr: str, node_alias: str, ctx: TranslatorContext
-) -> str:
+def _resolve_derived_expr(sql_expr: str, node_alias: str, ctx: TranslatorContext) -> str:
     """
     Resolves a derived field's sql_expr template.
     Replaces {node} with the current table alias.
@@ -163,9 +160,7 @@ def _resolve_derived_expr(
         key = m.group(1)
         alias = ctx.aliases.get(key)
         if alias is None:
-            raise TranslateError(
-                f"Derived field references alias '{key}' which is not yet joined"
-            )
+            raise TranslateError(f"Derived field references alias '{key}' which is not yet joined")
         return alias
 
     return re.sub(r"\{([^}]+)\}", _replacer, out)
@@ -215,8 +210,7 @@ def _expand_calc_expr(
             target_fields: Dict[str, Any] = getattr(target_node_def, "fields", {}) or {} if target_node_def else {}
             if not target_fields.get(field_name):
                 raise TranslateError(
-                    f"Field '{field_name}' not found on edge target '{target_node_name}' "
-                    f"(via edge '{edge_name}')"
+                    f"Field '{field_name}' not found on edge target '{target_node_name}' (via edge '{edge_name}')"
                 )
 
             # Auto-join via edge's join_steps (deduplication handled by _process_join_steps)
@@ -225,11 +219,11 @@ def _expand_calc_expr(
             _process_join_steps(join_steps, join_type, ctx)
 
             # Resolve to the edge target's alias
-            edge_alias = ctx.aliases.get(edge_name)
+            edge_alias = ctx.aliases.get(edge_name) or (
+                ctx.aliases.get(join_steps[-1].alias_key) if join_steps else None
+            )
             if edge_alias is None:
-                raise TranslateError(
-                    f"Cannot resolve alias for edge '{edge_name}' after join"
-                )
+                raise TranslateError(f"Cannot resolve alias for edge '{edge_name}' after join")
             return f"{edge_alias}.{field_name}"
 
         expanded = re.sub(
@@ -240,6 +234,7 @@ def _expand_calc_expr(
 
     # Step 2: qualify local field references
     if node_def:
+
         def _replace_local(m: re.Match) -> str:
             ident = m.group(0)
             if ident in fields_map:
@@ -268,16 +263,18 @@ def _join_keyword(join_type: str) -> str:
     return "JOIN"
 
 
-def _process_join_steps(
-    steps: List[Any], join_type: str, ctx: TranslatorContext
-) -> None:
+def _process_join_steps(steps: List[Any], join_type: str, ctx: TranslatorContext) -> None:
     for step in steps:
-        alias_key = getattr(step, "alias_key", None) or step.get("alias_key") if isinstance(step, dict) else step.alias_key
+        alias_key = (
+            getattr(step, "alias_key", None) or step.get("alias_key") if isinstance(step, dict) else step.alias_key
+        )
         if alias_key in ctx.joins:
             existing = ctx.joins[alias_key]
             if join_type.upper() == "JOIN" and existing.join_type.upper() != "JOIN":
                 table = getattr(step, "table", None) or (step.get("table") if isinstance(step, dict) else None)
-                condition = getattr(step, "condition", None) or (step.get("condition") if isinstance(step, dict) else None)
+                condition = getattr(step, "condition", None) or (
+                    step.get("condition") if isinstance(step, dict) else None
+                )
                 alias = ctx.aliases[alias_key]
                 on_clause = _resolve_condition(condition, ctx)
                 ctx.joins[alias_key] = _JoinEntry(
@@ -337,14 +334,16 @@ def _filter_to_sql(
         # e.g. "region = 'EU'" → "c0.region = 'EU'"
         # e.g. "customer_id IN (SELECT ...)" → "o0.customer_id IN (SELECT ...)"
         import re as _re
+
         def _qualify_leading_field(m: _re.Match) -> str:
             field_name = m.group(1)
             if field_name in fields_map:
                 return f"{table_alias}.{field_name}"
             return field_name
+
         # Match leading identifier before an operator or IN/NOT
         qualified = _re.sub(
-            r'^([a-zA-Z_]\w*)',
+            r"^([a-zA-Z_]\w*)",
             _qualify_leading_field,
             raw_condition.strip(),
         )
@@ -360,8 +359,13 @@ def _filter_to_sql(
         if op == "not_null":
             return f"({col}) IS NOT NULL"
         op_map = {
-            "eq": "=", "ne": "!=", "gt": ">", "gte": ">=",
-            "lt": "<", "lte": "<=", "like": "ILIKE",
+            "eq": "=",
+            "ne": "!=",
+            "gt": ">",
+            "gte": ">=",
+            "lt": "<",
+            "lte": "<=",
+            "like": "ILIKE",
         }
         if op in op_map:
             return f"({col}) {op_map[op]} {val}"
@@ -402,8 +406,13 @@ def _filter_to_sql(
 
     val = _sql_literal(filt.value, node_def)
     op_map = {
-        "eq": "=", "ne": "!=", "gt": ">", "gte": ">=",
-        "lt": "<", "lte": "<=", "like": "ILIKE",
+        "eq": "=",
+        "ne": "!=",
+        "gt": ">",
+        "gte": ">=",
+        "lt": "<",
+        "lte": "<=",
+        "like": "ILIKE",
     }
     if op in op_map:
         return f"{col} {op_map[op]} {val}"
@@ -446,7 +455,11 @@ def _process_node(
 
     # -- Filters ---------------------------------------------------------------
     for filt in node.filters:
-        ctx.wheres.append(_filter_to_sql(filt, table_alias, node_def, ctx))
+        condition = _filter_to_sql(filt, table_alias, node_def, ctx)
+        if filt.calc_expr and re.search(r"\bOVER\s*\(", filt.calc_expr, re.I):
+            ctx.window_filters.append(condition)
+        else:
+            ctx.wheres.append(condition)
 
     # -- Directives (root only) ------------------------------------------------
     if is_root:
@@ -490,9 +503,7 @@ def _process_node(
             ef: EdgeField = f  # type: ignore[assignment]
             edge_def = edges_map.get(ef.node.name)
             if edge_def is None:
-                raise TranslateError(
-                    f"Edge '{ef.node.name}' not defined on '{node.name}'"
-                )
+                raise TranslateError(f"Edge '{ef.node.name}' not defined on '{node.name}'")
             # Resolve edge name → target node name (e.g. "items" → "order_item")
             target_node_name = getattr(edge_def, "node", None) or (
                 edge_def.get("node") if isinstance(edge_def, dict) else ef.node.name
@@ -500,12 +511,11 @@ def _process_node(
             if target_node_name in current_ancestors:
                 continue
             join_steps = getattr(edge_def, "join_steps", []) or []
-            has_required = any(
-                getattr(d, "type", None) == "required"
-                for d in (ef.node.directives or [])
-            )
+            has_required = any(getattr(d, "type", None) == "required" for d in (ef.node.directives or []))
             join_type = "JOIN" if has_required else "LEFT"
             _process_join_steps(join_steps, join_type, ctx)
+            if join_steps:
+                ctx.aliases[target_node_name] = ctx.aliases[join_steps[-1].alias_key]
             resolved_child = NodeSelection(
                 kind=ef.node.kind,
                 name=target_node_name,
@@ -616,6 +626,7 @@ def translate(ast: QueryAST, ontology: Any) -> TranslateResult:
         agg_col_to_alias: Dict[str, str] = {}
         for sel in ctx.selects:
             import re as _re
+
             m = _re.match(r"(\w+)\(([^)]+)\)\s+AS\s+(\w+)", sel)
             if m:
                 agg_col_to_alias[m.group(2).strip()] = m.group(3)
@@ -635,7 +646,8 @@ def translate(ast: QueryAST, ontology: Any) -> TranslateResult:
     lines: List[str] = []
     lines.append(select_keyword)
     select_sep = ",\n  "
-    lines.append("  " + select_sep.join(ctx.selects))
+    hidden = [f"({predicate}) AS __nexaql_window_filter_{i}" for i, predicate in enumerate(ctx.window_filters)]
+    lines.append("  " + select_sep.join(ctx.selects + hidden))
 
     root_table = getattr(root_def, "table", None) or root_node.name
     lines.append(f"FROM {root_table} {root_alias}")
@@ -652,6 +664,24 @@ def translate(ast: QueryAST, ontology: Any) -> TranslateResult:
         gb_sep = ",\n  "
         lines.append("GROUP BY")
         lines.append("  " + gb_sep.join(ctx.group_bys))
+
+    if ctx.window_filters:
+        if ctx.has_agg:
+            raise TranslateError("Window filters cannot be combined with grouped aggregations")
+        from nexaql.engine.window_filters import wrap_window_filter
+
+        return TranslateResult(
+            sql=wrap_window_filter(
+                "\n".join(lines),
+                ctx.selects,
+                ctx.order_bys,
+                len(ctx.window_filters),
+                ctx.limit,
+                ctx.offset,
+                distinct=is_distinct,
+            ),
+            shape=shape,
+        )
 
     if ctx.order_bys:
         lines.append(f"ORDER BY {', '.join(ctx.order_bys)}")

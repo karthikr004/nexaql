@@ -23,6 +23,7 @@ from typing import Any, Literal, Optional
 @dataclass
 class IntentFilter:
     """A single filter condition."""
+
     field: str
     op: Literal["eq", "ne", "gt", "gte", "lt", "lte", "like", "in", "not_in", "null", "not_null"]
     value: Any  # str, int, float, bool, list, or None
@@ -31,6 +32,7 @@ class IntentFilter:
 @dataclass
 class IntentCalcFilter:
     """A filter on a computed expression: calc(expr) op value."""
+
     expr: str
     op: Literal["eq", "ne", "gt", "gte", "lt", "lte"]
     value: Any
@@ -39,6 +41,7 @@ class IntentCalcFilter:
 @dataclass
 class IntentAggregation:
     """An aggregation field: alias: func(field)."""
+
     alias: str
     func: Literal["count", "sum", "avg", "min", "max"]
     field: Optional[str] = None  # None for count()
@@ -47,6 +50,7 @@ class IntentAggregation:
 @dataclass
 class IntentCalc:
     """An inline computed field: alias: calc(expr)."""
+
     alias: str
     expr: str
 
@@ -54,6 +58,7 @@ class IntentCalc:
 @dataclass
 class IntentOrderBy:
     """Sort directive."""
+
     field: str
     direction: Literal["ASC", "DESC"] = "ASC"
 
@@ -61,6 +66,7 @@ class IntentOrderBy:
 @dataclass
 class IntentVisualization:
     """LLM-suggested visualization for query results."""
+
     chart_type: Literal["bar", "line", "pie", "stat", "table"]
     x_field: str | None = None
     y_fields: list[str] = field(default_factory=list)
@@ -70,6 +76,7 @@ class IntentVisualization:
 @dataclass
 class IntentEdge:
     """A nested edge traversal."""
+
     name: str
     fields: list[str] = field(default_factory=list)
     aggregations: list[IntentAggregation] = field(default_factory=list)
@@ -85,6 +92,7 @@ class IntentEdge:
 @dataclass
 class QueryIntent:
     """Complete structured intent for a NexaQL query."""
+
     node: str
     fields: list[str] = field(default_factory=list)
     aggregations: list[IntentAggregation] = field(default_factory=list)
@@ -97,6 +105,9 @@ class QueryIntent:
     limit: Optional[int] = None
     offset: Optional[int] = None
     distinct: bool = False
+    missing_relationship: Optional[str] = None
+    cumulative_comparison: Optional[dict[str, Any]] = None
+    output_grain: Optional[dict[str, Any]] = None
     query_name: Optional[str] = None  # auto-generated if not provided
     visualization: Optional[IntentVisualization] = None
 
@@ -162,6 +173,9 @@ def parse_intent(data: dict[str, Any]) -> QueryIntent:
 
     return QueryIntent(
         node=data["node"],
+        output_grain=data.get("output_grain"),
+        cumulative_comparison=data.get("cumulative_comparison"),
+        missing_relationship=data.get("missing_relationship"),
         fields=data.get("fields", []),
         aggregations=[_parse_agg(a) for a in data.get("aggregations", [])],
         calcs=[_parse_calc(c) for c in data.get("calcs", [])],
@@ -368,7 +382,7 @@ def _collect_required_edge_names(intent: QueryIntent) -> set[str]:
 
     edges: set[str] = set()
     exprs: list[str] = [c.expr for c in intent.calcs]
-    exprs.extend(f.expr for f in intent.calc_filters)
+    exprs.extend(f.expr for f in intent.calc_filters if f.op not in ("null", "is_null"))
     for expr in exprs:
         edges |= extract_required_edges(expr)
     return edges
@@ -404,6 +418,9 @@ def auto_require_intent(intent: QueryIntent) -> QueryIntent:
 
     return QueryIntent(
         node=intent.node,
+        cumulative_comparison=intent.cumulative_comparison,
+        missing_relationship=intent.missing_relationship,
+        output_grain=intent.output_grain,
         fields=intent.fields,
         aggregations=intent.aggregations,
         calcs=intent.calcs,
@@ -582,6 +599,9 @@ def restructure_edges(intent: QueryIntent, ontology: Any) -> QueryIntent:
 
     return QueryIntent(
         node=intent.node,
+        cumulative_comparison=intent.cumulative_comparison,
+        missing_relationship=intent.missing_relationship,
+        output_grain=intent.output_grain,
         fields=intent.fields,
         aggregations=intent.aggregations,
         calcs=intent.calcs,
@@ -608,18 +628,42 @@ def _count_leaf_edges(edges: list[IntentEdge]) -> int:
     Edges that only carry filters (no fields, no aggregations) act as
     query-wide constraints and don't contribute to fan-out either.
     """
-    return sum(
-        1 for e in edges
-        if not e.edges and (e.fields or e.aggregations or e.calcs)
-    )
+    return sum(1 for e in edges if not e.edges and (e.fields or e.aggregations or e.calcs))
 
 
-def needs_decomposition(intent: QueryIntent) -> bool:
+def needs_decomposition(intent: QueryIntent, ontology=None) -> bool:
     """Return True when a multi-edge intent would produce a cartesian product.
 
     Only flat sibling edges (no sub-edges) cause fan-out. Edges with nested
     sub-edges represent proper graph traversal and are kept together.
     """
+    # Expressions and row-level projections need one coherent joined result.
+    # Splitting them loses dependencies and changes the requested output grain.
+    if intent.calcs or intent.calc_filters or not (intent.aggregations or any(e.aggregations for e in intent.edges)):
+        return False
+    if ontology is not None:
+        import re
+
+        node = ontology.nodes.get(intent.node)
+        fanouts = 0
+        for selected in intent.edges:
+            edge = node.edges.get(selected.name) if node else None
+            target = ontology.nodes.get(edge.node) if edge else None
+            steps = edge.join_steps if edge else []
+            # Only infer to-one for a single equality join to the target PK.
+            to_one = False
+            if target and target.primary_key and len(steps) == 1:
+                step = steps[0]
+                target_ref = "{" + step.alias_key + "}." + target.primary_key
+                parts = [part.strip() for part in step.condition.split("=")]
+                to_one = (
+                    len(parts) == 2
+                    and target_ref in parts
+                    and all(re.fullmatch(r"\{\w+\}\.\w+", part) for part in parts)
+                )
+            if not to_one:
+                fanouts += 1
+        return fanouts >= 2
     return _count_leaf_edges(intent.edges) >= 2
 
 
@@ -650,6 +694,9 @@ def decompose_intent(intent: QueryIntent) -> list[QueryIntent]:
     for edge in data_edges:
         sub = QueryIntent(
             node=intent.node,
+            cumulative_comparison=intent.cumulative_comparison,
+            missing_relationship=intent.missing_relationship,
+            output_grain=intent.output_grain,
             fields=list(intent.fields),
             aggregations=list(intent.aggregations),
             calcs=list(intent.calcs),

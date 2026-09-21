@@ -6,6 +6,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Any, Dict, List, Optional, Protocol
 
 from nexaql.engine.system_functions import find_unknown_functions
+from nexaql.engine.expression_validation import expression_errors
 from nexaql.engine.types import (
     QueryAST,
     NodeSelection,
@@ -90,9 +91,7 @@ def _validate_node(
     node_def = ontology.nodes.get(node.name) if isinstance(ontology.nodes, dict) else None
     if node_def is None:
         available = ", ".join(ontology.nodes.keys()) if isinstance(ontology.nodes, dict) else ""
-        errors.append(
-            ValidationError(message=f"Unknown node '{node.name}'. Available nodes: {available}")
-        )
+        errors.append(ValidationError(message=f"Unknown node '{node.name}'. Available nodes: {available}"))
         return
 
     fields_map: Dict[str, Any] = getattr(node_def, "fields", {}) or {}
@@ -105,14 +104,13 @@ def _validate_node(
         if filt.field == "__rls":
             continue
 
-        # calc(expr) filters use the pseudo-field "__calc" -- skip schema validation,
-        # but warn on unknown SQL functions in the expression.
+        # Calculated filters must resolve references before database execution.
         if filt.calc_expr is not None:
+            errors.extend(ValidationError(message=m) for m in expression_errors(filt.calc_expr, node_def, ontology))
             unknown_fns = find_unknown_functions(filt.calc_expr)
             for fn in unknown_fns:
                 warnings.append(
-                    f"calc() filter references unknown function '{fn}' "
-                    "-- check the system-functions registry"
+                    f"calc() filter references unknown function '{fn}' -- check the system-functions registry"
                 )
             continue
 
@@ -120,15 +118,9 @@ def _validate_node(
         if not is_special:
             field_def = fields_map.get(filt.field)
             if field_def is None:
-                errors.append(
-                    ValidationError(
-                        message=f"Field '{filt.field}' does not exist on node '{node.name}'"
-                    )
-                )
+                errors.append(ValidationError(message=f"Field '{filt.field}' does not exist on node '{node.name}'"))
             elif not getattr(field_def, "filterable", False):
-                warnings.append(
-                    f"Field '{filt.field}' on '{node.name}' is not marked as filterable"
-                )
+                warnings.append(f"Field '{filt.field}' on '{node.name}' is not marked as filterable")
 
     # -- Validate directives ---------------------------------------------------
     for directive in node.directives:
@@ -151,26 +143,25 @@ def _validate_node(
                 field_def = fields_map.get(field.argument)
                 if field_def is None:
                     errors.append(
-                        ValidationError(
-                            message=f"Aggregation argument '{field.argument}' not found on '{node.name}'"
-                        )
+                        ValidationError(message=f"Aggregation argument '{field.argument}' not found on '{node.name}'")
                     )
         elif field.kind == "scalar":
             field_def = fields_map.get(field.name)
             if field_def is None:
-                errors.append(
-                    ValidationError(
-                        message=f"Field '{field.name}' does not exist on node '{node.name}'"
-                    )
-                )
+                errors.append(ValidationError(message=f"Field '{field.name}' does not exist on node '{node.name}'"))
             # Derived fields with sql_expr are valid -- translator handles expression expansion
-            if field_def is not None and getattr(field_def, "derived", False) and not getattr(field_def, "sql_expr", None):
+            if (
+                field_def is not None
+                and getattr(field_def, "derived", False)
+                and not getattr(field_def, "sql_expr", None)
+            ):
                 errors.append(
                     ValidationError(
                         message=f"Derived field '{field.name}' on '{node.name}' is missing sql_expr in ontology"
                     )
                 )
         elif field.kind == "calc":
+            errors.extend(ValidationError(message=m) for m in expression_errors(field.expr, node_def, ontology))
             # calc(expr) fields are runtime-computed -- validate alias and function names.
             if not getattr(field, "alias", None):
                 errors.append(ValidationError(message="calc() field is missing an alias"))
@@ -187,8 +178,7 @@ def _validate_node(
                 errors.append(
                     ValidationError(
                         message=(
-                            f"Edge '{field.node.name}' not defined on node '{node.name}'. "
-                            f"Available edges: {available}"
+                            f"Edge '{field.node.name}' not defined on node '{node.name}'. Available edges: {available}"
                         )
                     )
                 )

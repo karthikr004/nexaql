@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Optional
 
 from .lexer import tokenize
 from .types import (
@@ -78,6 +78,7 @@ AGG_FUNCS: set[str] = {"sum", "avg", "min", "max", "count"}
 # ParseError
 # ---------------------------------------------------------------------------
 
+
 class ParseError(Exception):
     """Raised when the parser encounters an unexpected token."""
 
@@ -90,6 +91,7 @@ class ParseError(Exception):
 # ---------------------------------------------------------------------------
 # Parser
 # ---------------------------------------------------------------------------
+
 
 class Parser:
     """Recursive-descent parser for the NexaQL query language."""
@@ -142,9 +144,7 @@ class Parser:
 
         if not self._at(TokenType.EOF):
             t = self._peek()
-            raise ParseError(
-                f"Unexpected token '{t.value}' after query", t.line, t.col
-            )
+            raise ParseError(f"Unexpected token '{t.value}' after query", t.line, t.col)
 
         return QueryAST(kind="query", body=body, name=name)
 
@@ -183,7 +183,7 @@ class Parser:
                 if self._at(TokenType.LBRACE):
                     self._advance()  # {
                     while not self._at(TokenType.RBRACE) and not self._at(TokenType.EOF):
-                        op_token = self._eat(TokenType.IDENT)
+                        op_token = self._advance() if self._at(TokenType.NULL) else self._eat(TokenType.IDENT)
                         self._eat(TokenType.COLON)
                         op_value = self.parseValue()
                         suffix = OBJ_OP_ALIASES.get(op_token.value, f"_{op_token.value}")
@@ -213,13 +213,11 @@ class Parser:
                 # -- Object-style filters: field: { lt: 7, gte: 0, ... } -----
                 self._advance()  # consume {
                 while not self._at(TokenType.RBRACE) and not self._at(TokenType.EOF):
-                    op_token = self._eat(TokenType.IDENT)
+                    op_token = self._advance() if self._at(TokenType.NULL) else self._eat(TokenType.IDENT)
                     self._eat(TokenType.COLON)
                     op_value = self.parseValue()
                     suffix = OBJ_OP_ALIASES.get(op_token.value, f"_{op_token.value}")
-                    filters.append(
-                        parseFilterArg(f"{key_token.value}{suffix}", op_value)
-                    )
+                    filters.append(parseFilterArg(f"{key_token.value}{suffix}", op_value))
                     if self._at(TokenType.COMMA):
                         self._advance()
                 self._eat(TokenType.RBRACE)
@@ -357,9 +355,7 @@ class Parser:
         if self._at(TokenType.RPAREN):
             # count() with no arguments
             argument = "*"
-        elif self._at(TokenType.AT) or (
-            self._at(TokenType.IDENT) and self._peek().value == "*"
-        ):
+        elif self._at(TokenType.AT) or (self._at(TokenType.IDENT) and self._peek().value == "*"):
             argument = "*"
             self._advance()
         elif self._at(TokenType.STAR):
@@ -410,11 +406,15 @@ class Parser:
                 continue
 
             if t.type == TokenType.IDENT:
+                if parts and (parts[-1][-1:].isalnum() or parts[-1].endswith("_")):
+                    parts.append(" ")
                 parts.append(t.value)
                 self._advance()
                 continue
 
             if t.type == TokenType.KEYWORD:
+                if parts and (parts[-1][-1:].isalnum() or parts[-1].endswith("_")):
+                    parts.append(" ")
                 parts.append(t.value)
                 self._advance()
                 continue
@@ -514,14 +514,13 @@ class Parser:
             self._eat(TokenType.RBRACKET)
             return items
 
-        raise ParseError(
-            f"Expected a value, got '{t.value}' ({t.type.value})", t.line, t.col
-        )
+        raise ParseError(f"Expected a value, got '{t.value}' ({t.type.value})", t.line, t.col)
 
 
 # ---------------------------------------------------------------------------
 # Module-level helpers
 # ---------------------------------------------------------------------------
+
 
 def parseFilterArg(key: str, value: FilterValue) -> Filter:
     """Parse a filter key like ``"status"``, ``"amount_gt"``, ``"status_in"`` into a Filter."""

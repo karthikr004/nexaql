@@ -15,7 +15,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 from nexaql.adapters.base import AdapterResult, QueryAdapter
 from nexaql.api.deps import get_adapter_for_connector
@@ -29,6 +29,8 @@ from nexaql.chat.intent import (
     parse_intent,
     restructure_edges,
 )
+from nexaql.chat.context import AdditionalContext
+from nexaql.chat.repair import execute_repair_loop, recoverable_query_error
 from nexaql.chat.llm import chat_completion
 from nexaql.chat.prompts import (
     build_intent_system_prompt,
@@ -87,12 +89,11 @@ def _auto_inject_edge_filters(intent: QueryIntent, ontology: Ontology) -> None:
                 if isinstance(fields_dict, dict) and fk_field in fields_dict:
                     filt_attr = getattr(fields_dict[fk_field], "filterable", False)
                     if filt_attr and fk_field not in existing_filter_fields:
-                        intent.filters.append(
-                            IntentFilter(field=fk_field, op="not_null", value=True)
-                        )
+                        intent.filters.append(IntentFilter(field=fk_field, op="not_null", value=True))
                         logger.info(
                             "Auto-injected not_null filter on %s for LEFT JOIN edge %s",
-                            fk_field, edge.name,
+                            fk_field,
+                            edge.name,
                         )
                 break
 
@@ -157,14 +158,31 @@ async def generate_query_via_intent(
 
     try:
         intent = parse_intent(intent_data)
+        if intent.cumulative_comparison is None:
+            import re
+
+            if any(re.search(r"SUM\s*\(.*\)\s*OVER\s*\(", f.expr, re.I) for f in intent.calc_filters):
+                raise ValueError(
+                    "Use cumulative_comparison for cumulative SUM comparisons: root must be the contributing detail entity, reference its parent edge, and use output_grain for the requested entity. Do not author a window expression."
+                )
+        from nexaql.chat.output_grain import apply_output_grain
+        from nexaql.chat.analytical_intent import compile_comparison
+
+        intent = compile_comparison(intent, ontology)
+        from nexaql.chat.relationship_intent import compile_missing_relationship
+
+        intent = compile_missing_relationship(intent, ontology)
+        intent = apply_output_grain(intent, ontology)
         intent = auto_require_intent(intent)
         _auto_inject_edge_filters(intent, ontology)
         query_text = build_nexaql(intent)
         logger.info(f"Intent builder generated query: {query_text[:200]}")
-        return query_text, response_text, intent_data
+        import dataclasses
+
+        return query_text, response_text, dataclasses.asdict(intent)
     except (KeyError, TypeError, ValueError) as e:
         logger.warning(f"Failed to build query from intent: {e}")
-        return None, response_text, intent_data
+        return None, response_text + "\nGeneration validation failed: " + str(e), intent_data
 
 
 # ── Step 1b: Generate via raw NexaQL (Option A, legacy) ─────────────────────
@@ -232,68 +250,53 @@ async def execute_with_retry_intent(
     original_response: str,
     intent_data: dict[str, Any] | None,
     user: UserContext | None = None,
+    business_context: list[dict] | None = None,
 ) -> tuple[AdapterResult | None, str | None, str, dict[str, Any] | None]:
     """Execute a query built from intent, retrying with corrected intent on failure.
 
     Returns ``(result, error, final_query_text, final_intent)``.
     """
-    result, error = await _try_execute(query_text, ontology, adapter, user)
-    if result is not None:
-        return result, None, query_text, intent_data
+    current_intent = intent_data
+    review_trace = []
 
-    if error and not error.startswith(("Parse error:", "Validation failed:")):
-        return None, error, query_text, intent_data
+    async def execute(query):
+        from nexaql.engine.execution import prepare_query
+        from nexaql.chat.query_review import review_query
+        from nexaql.chat.intent_contract import repair_contract_errors
 
-    # Retry: ask LLM to fix the intent JSON
-    try:
-        system_prompt = build_intent_system_prompt(ontology)
-
-        retry_messages: list[dict[str, str]] = []
-        for m in history:
-            retry_messages.append({"role": m["role"], "content": m["content"]})
-        retry_messages.append({"role": "user", "content": question})
-        retry_messages.append({"role": "assistant", "content": original_response})
-        retry_messages.append({
-            "role": "user",
-            "content": (
-                f"The query built from your intent failed with this error:\n\n{error}\n\n"
-                "Please fix the JSON intent. Common issues:\n"
-                "- Use exact field names from the ontology\n"
-                "- Use exact node names from the ontology\n"
-                "- Only filter on fields marked as filterable\n"
-                "- Enum values must be UPPERCASE and match exactly\n"
-                + (
-                    "- AGGREGATION PLACEMENT: The field in an aggregation MUST exist on the node where the aggregation appears. "
-                    "If the field belongs to a related node, move the aggregation INSIDE that edge. "
-                    "Example: to sum(quantity) where quantity is on order_items, place the aggregation inside the order_items edge, NOT at the top-level node.\n"
-                    if "not found on" in str(error).lower() or "unknown field" in str(error).lower()
-                    else ""
-                )
-                + "Respond with the corrected JSON only."
-            ),
-        })
-
-        retry_text = chat_completion(
+        violations = repair_contract_errors(intent_data, current_intent)
+        if violations:
+            return None, "Validation failed: " + "; ".join(violations)
+        try:
+            prepare_query(query, ontology, user)
+        except (ValueError, PermissionError) as exc:
+            return None, str(exc)
+        review = review_query(
+            question,
+            query,
+            current_intent,
+            ontology,
+            business_context,
             llm_config,
-            system=system_prompt,
-            messages=retry_messages,
-            max_tokens=llm_config.max_tokens,
+            required_intent=intent_data,
         )
+        review_trace.append(review)
+        if not review["approved"]:
+            return None, "Validation failed: semantic review: " + "; ".join(review["issues"])
+        return await _try_execute(query, ontology, adapter, user)
 
-        retry_intent_data = extract_intent_json(retry_text)
-        if retry_intent_data:
-            retry_intent = parse_intent(retry_intent_data)
-            _auto_inject_edge_filters(retry_intent, ontology)
-            retry_query = build_nexaql(retry_intent)
+    async def generate(turns):
+        nonlocal current_intent
+        query, response, corrected = await generate_query_via_intent(
+            question, turns, ontology, llm_config, business_context
+        )
+        current_intent = corrected
+        return query, response, corrected
 
-            result2, error2 = await _try_execute(retry_query, ontology, adapter, user)
-            if result2 is not None:
-                return result2, None, retry_query, retry_intent_data
-            return None, error2, retry_query, retry_intent_data
-    except Exception:
-        pass  # keep original error
-
-    return None, error, query_text, intent_data
+    result, error, query, final_intent = await execute_repair_loop(
+        query_text, intent_data, original_response, history, execute, generate
+    )
+    return result, error, query, {**(final_intent or {}), "query_review": review_trace}
 
 
 async def execute_with_retry_raw(
@@ -305,58 +308,22 @@ async def execute_with_retry_raw(
     question: str,
     explanation: str,
     user: UserContext | None = None,
+    business_context: list[dict] | None = None,
 ) -> tuple[AdapterResult | None, str | None, str]:
     """Execute a query, retrying once with the LLM if it fails (legacy mode).
 
     Returns ``(result, error, final_query_text)``.
     """
-    result, error = await _try_execute(query_text, ontology, adapter, user)
-    if result is not None:
-        return result, None, query_text
 
-    if error and not error.startswith(("Parse error:", "Validation failed:")):
-        return None, error, query_text
+    async def execute(query):
+        return await _try_execute(query, ontology, adapter, user)
 
-    # Retry: ask LLM to fix the query
-    try:
-        system_prompt = build_system_prompt(ontology)
+    async def generate(turns):
+        query, response = await generate_query_raw(question, turns, ontology, llm_config, business_context)
+        return query, response, None
 
-        retry_messages: list[dict[str, str]] = []
-        for m in history:
-            retry_messages.append({"role": m["role"], "content": m["content"]})
-        retry_messages.append({"role": "user", "content": question})
-        retry_messages.append({"role": "assistant", "content": explanation})
-        retry_messages.append({
-            "role": "user",
-            "content": (
-                f"The query you generated failed with this error:\n\n{error}\n\n"
-                "Common mistakes to fix:\n"
-                "- NEVER use dot notation (node.field). Use edges instead: edge_name {{ field }}\n"
-                "- Filters use COLON syntax (field: value), NEVER equals (=)\n"
-                "- Aggregation arguments are BARE field names: sum(amount), NOT sum(node.amount)\n"
-                "- String values must be double-quoted\n"
-                "Please provide a corrected NexaQL query."
-            ),
-        })
-
-        retry_text = chat_completion(
-            llm_config,
-            system=system_prompt,
-            messages=retry_messages,
-            max_tokens=llm_config.max_tokens,
-        )
-
-        retry_query = extract_nexaql_query(retry_text)
-
-        if retry_query:
-            result2, error2 = await _try_execute(retry_query, ontology, adapter, user)
-            if result2 is not None:
-                return result2, None, retry_query
-            return None, error2, retry_query
-    except Exception:
-        pass  # keep original error
-
-    return None, error, query_text
+    result, error, query, _ = await execute_repair_loop(query_text, None, explanation, history, execute, generate)
+    return result, error, query
 
 
 # ── Step 3: Summarize results ───────────────────────────────────────────────
@@ -369,9 +336,17 @@ async def summarize_results(
     columns: list[ColumnMeta],
     row_count: int,
     llm_config: LLMConfig,
+    result_entity: str | None = None,
 ) -> str:
     """Produce a natural-language summary of query results."""
+    from nexaql.chat.currency_summary import mixed_currency_summary
+
+    currency_summary = mixed_currency_summary(rows, row_count)
+    if currency_summary is not None:
+        return currency_summary
     prompt = build_summary_prompt(question, query, rows, columns, row_count)
+    if result_entity:
+        prompt += f"\nVerified output grain: one row per {result_entity}. The total is {row_count} distinct {result_entity} records, not source/calculation rows."
 
     return chat_completion(
         llm_config,
@@ -402,6 +377,8 @@ async def ask(
     llm_config: LLMConfig,
     user: UserContext | None = None,
     business_context: list[dict] | None = None,
+    *,
+    additional_context: AdditionalContext | None = None,
 ) -> ChatResponse:
     """Run the full chat pipeline: generate -> execute -> summarize.
 
@@ -422,11 +399,18 @@ async def ask(
     business_context:
         Relevant business ontology entries for the current query.
 
+    additional_context:
+        Optional caller business definitions and skill instructions. Existing
+        history and business_context parameters remain supported unchanged.
+
     Returns
     -------
     ChatResponse
         The complete response including query, results, and summary.
     """
+    if additional_context is not None:
+        business_context = [*(business_context or []), *additional_context.entries()]
+
     mode = _get_generation_mode(llm_config)
 
     if mode == "intent":
@@ -452,10 +436,28 @@ async def _ask_intent(
     )
 
     if query_text is None:
-        logger.warning("Intent extraction failed, falling back to raw mode")
-        response = await _ask_raw(question, history, ontology, adapter, llm_config, user, business_context)
-        response.generation_mode = "raw_fallback"
-        return response
+        # Give structured generation one correction before the existing raw fallback.
+        from nexaql.chat.repair import correction_message
+
+        query_text, llm_response, intent_data = await generate_query_via_intent(
+            question,
+            [
+                *history,
+                {"role": "assistant", "content": llm_response},
+                correction_message("", "Generation failed: return a valid structured intent"),
+            ],
+            ontology,
+            llm_config,
+            business_context,
+        )
+
+    if query_text is None:
+        return ChatResponse(
+            error="Generation failed: could not construct a valid structured query without changing the request",
+            summary="The query could not be generated reliably. No results were produced.",
+            intent=intent_data,
+            generation_mode="intent",
+        )
 
     # Step 1.5: Restructure flat sibling edges into chain traversal using ontology
     restructured_intent: QueryIntent | None = None
@@ -465,8 +467,12 @@ async def _ask_intent(
             restructured_intent = restructure_edges(parsed, ontology)
             if len(restructured_intent.edges) < len(parsed.edges):
                 query_text = build_nexaql(restructured_intent)
-                logger.info("Restructured %d flat edges into %d chained: %s",
-                            len(parsed.edges), len(restructured_intent.edges), query_text[:200])
+                logger.info(
+                    "Restructured %d flat edges into %d chained: %s",
+                    len(parsed.edges),
+                    len(restructured_intent.edges),
+                    query_text[:200],
+                )
         except Exception:
             logger.debug("Edge restructuring skipped", exc_info=True)
 
@@ -474,7 +480,7 @@ async def _ask_intent(
         return ChatResponse(
             explanation=llm_response,
             nexaql_query=query_text,
-            summary=f"Generated query from intent (no datasource to execute).",
+            summary="Generated query from intent (no datasource to execute).",
             intent=intent_data,
             generation_mode="intent",
             error="No datasource configured -- cannot execute query",
@@ -483,7 +489,7 @@ async def _ask_intent(
 
     # Step 1.6: Decompose remaining flat sibling edges to prevent cartesian products
     check_intent = restructured_intent or (parse_intent(intent_data) if intent_data else None)
-    if check_intent and needs_decomposition(check_intent):
+    if check_intent and needs_decomposition(check_intent, ontology):
         return await _ask_intent_decomposed(
             question=question,
             history=history,
@@ -493,6 +499,7 @@ async def _ask_intent(
             llm_response=llm_response,
             intent_data=intent_data,
             user=user,
+            business_context=business_context,
         )
 
     # Step 2: Execute (with retry)
@@ -506,6 +513,7 @@ async def _ask_intent(
         original_response=llm_response,
         intent_data=intent_data,
         user=user,
+        business_context=business_context,
     )
 
     # Access denied — return a clear, non-technical message
@@ -521,7 +529,7 @@ async def _ask_intent(
         )
 
     # System/runtime errors — don't expose raw stack traces
-    if exec_error and not exec_error.startswith(("Parse error:", "Validation failed:")):
+    if exec_error and not recoverable_query_error(exec_error):
         return ChatResponse(
             explanation=llm_response,
             nexaql_query=final_query,
@@ -532,7 +540,9 @@ async def _ask_intent(
         )
 
     # Step 3: Summarize
-    summary = llm_response
+    summary = (
+        "The query could not be completed reliably. No verified result was produced." if exec_error else llm_response
+    )
     if exec_result is not None and exec_error is None:
         try:
             summary = await summarize_results(
@@ -542,6 +552,7 @@ async def _ask_intent(
                 columns=exec_result.columns,
                 row_count=exec_result.row_count,
                 llm_config=llm_config,
+                result_entity=_result_entity(final_intent),
             )
         except Exception:
             pass
@@ -574,6 +585,7 @@ async def _ask_intent_decomposed(
     llm_response: str,
     intent_data: dict[str, Any],
     user: UserContext | None = None,
+    business_context: list[dict] | None = None,
 ) -> ChatResponse:
     """Execute a multi-edge intent as separate per-edge queries to prevent fan-out.
 
@@ -584,7 +596,8 @@ async def _ask_intent_decomposed(
     sub_intents = decompose_intent(intent)
     logger.info(
         "Decomposing %d-edge intent into %d sub-queries to prevent cartesian product",
-        len(intent.edges), len(sub_intents),
+        len(intent.edges),
+        len(sub_intents),
     )
 
     all_rows: list[dict[str, Any]] = []
@@ -601,7 +614,21 @@ async def _ask_intent_decomposed(
         sub_query = build_nexaql(sub)
         all_queries.append(sub_query)
 
-        result, error = await _try_execute(sub_query, ontology, adapter, user)
+        import dataclasses
+
+        result, error, final_query, _ = await execute_with_retry_intent(
+            sub_query,
+            ontology,
+            adapter,
+            llm_config,
+            history,
+            question,
+            llm_response,
+            dataclasses.asdict(sub),
+            user,
+            business_context,
+        )
+        all_queries[-1] = final_query
 
         if error:
             if error.startswith("Access denied:"):
@@ -658,8 +685,6 @@ async def _ask_intent_decomposed(
         except Exception:
             pass
 
-    viz = intent_data.get("visualization") if isinstance(intent_data, dict) else None
-
     return ChatResponse(
         explanation=llm_response,
         nexaql_query=combined_query,
@@ -688,9 +713,7 @@ async def _ask_raw(
     """Raw NexaQL pipeline (Option A, legacy): generate → execute → summarize."""
 
     # Step 1: Generate query
-    query_text, explanation = await generate_query_raw(
-        question, history, ontology, llm_config, business_context
-    )
+    query_text, explanation = await generate_query_raw(question, history, ontology, llm_config, business_context)
 
     if query_text is None:
         return ChatResponse(
@@ -719,6 +742,7 @@ async def _ask_raw(
         question=question,
         explanation=explanation,
         user=user,
+        business_context=business_context,
     )
 
     # Access denied — return a clear, non-technical message
@@ -733,7 +757,7 @@ async def _ask_raw(
         )
 
     # System/runtime errors — don't expose raw stack traces
-    if exec_error and not exec_error.startswith(("Parse error:", "Validation failed:")):
+    if exec_error and not recoverable_query_error(exec_error):
         return ChatResponse(
             explanation=explanation,
             nexaql_query=final_query,
@@ -770,3 +794,24 @@ async def _ask_raw(
         error=exec_error,
         generation_mode="raw",
     )
+
+
+def _result_entity(intent):
+    """Identify distinct entity projections for accurate count labels."""
+    if not intent or not intent.get("distinct"):
+        return None
+    grain = intent.get("output_grain")
+    if grain:
+        return ".".join(grain.get("path", [])) or intent["node"]
+    projections = []
+
+    def visit(selection, path):
+        if selection.get("fields") or selection.get("calcs") or selection.get("aggregations"):
+            projections.append(path)
+        for edge in selection.get("edges", []):
+            visit(edge, [*path, edge["name"]])
+
+    visit(intent, [])
+    if len(projections) == 1:
+        return ".".join(projections[0]) or intent["node"]
+    return None

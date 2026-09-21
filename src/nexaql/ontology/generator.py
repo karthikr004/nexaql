@@ -154,30 +154,69 @@ _TYPE_MAP: dict[str, str] = {
 
 # Patterns that suggest a column is PII
 _PII_PATTERNS = [
-    r"ssn", r"social_security", r"tax_id", r"national_id",
-    r"passport", r"driver_license", r"credit_card", r"card_number",
-    r"bank_account", r"routing_number", r"iban",
-    r"date_of_birth", r"dob", r"birth_date",
-    r"phone", r"mobile", r"cell",
-    r"email", r"e_mail",
-    r"address", r"street", r"zip_code", r"postal_code",
-    r"salary", r"compensation", r"wage",
-    r"password", r"secret", r"token",
+    r"ssn",
+    r"social_security",
+    r"tax_id",
+    r"national_id",
+    r"passport",
+    r"driver_license",
+    r"credit_card",
+    r"card_number",
+    r"bank_account",
+    r"routing_number",
+    r"iban",
+    r"date_of_birth",
+    r"dob",
+    r"birth_date",
+    r"phone",
+    r"mobile",
+    r"cell",
+    r"email",
+    r"e_mail",
+    r"address",
+    r"street",
+    r"zip_code",
+    r"postal_code",
+    r"salary",
+    r"compensation",
+    r"wage",
+    r"password",
+    r"secret",
+    r"token",
 ]
 
 # Patterns for common enum columns (low cardinality) — used as a boost
 # signal: these get a relaxed ratio threshold during enum detection.
 _ENUM_PATTERNS = [
-    r"status", r"state", r"type", r"category", r"priority",
-    r"severity", r"level", r"tier", r"grade", r"rating",
-    r"country_code", r"currency_code", r"language",
-    r"gender", r"role", r"department", r"region",
+    r"status",
+    r"state",
+    r"type",
+    r"category",
+    r"priority",
+    r"severity",
+    r"level",
+    r"tier",
+    r"grade",
+    r"rating",
+    r"country_code",
+    r"currency_code",
+    r"language",
+    r"gender",
+    r"role",
+    r"department",
+    r"region",
 ]
 
 # Columns to exclude from the ontology (system columns)
 _SYSTEM_COLUMNS = {
-    "created_at", "updated_at", "deleted_at", "created_by", "updated_by",
-    "version", "row_version", "last_modified",
+    "created_at",
+    "updated_at",
+    "deleted_at",
+    "created_by",
+    "updated_by",
+    "version",
+    "row_version",
+    "last_modified",
 }
 
 
@@ -212,7 +251,7 @@ def _table_to_node_name(table_name: str) -> str:
     name = table_name.lower()
     for prefix in ("tbl_", "t_", "tb_"):
         if name.startswith(prefix):
-            name = name[len(prefix):]
+            name = name[len(prefix) :]
     return name
 
 
@@ -265,9 +304,9 @@ class OntologyGenerator:
 
     # ── Introspection ────────────────────────────────────────────────
 
-    async def introspect(self, schema: str = "public",
-                         exclude_tables: list[str] | None = None,
-                         include_tables: list[str] | None = None) -> tuple[list[TableInfo], list[ForeignKey]]:
+    async def introspect(
+        self, schema: str = "public", exclude_tables: list[str] | None = None, include_tables: list[str] | None = None
+    ) -> tuple[list[TableInfo], list[ForeignKey]]:
         """Introspect the database schema.
 
         Returns (tables, foreign_keys).
@@ -282,7 +321,8 @@ class OntologyGenerator:
             raise ValueError(f"Unsupported DB type: {self._db_type}")
 
     async def _introspect_postgresql(
-        self, schema: str,
+        self,
+        schema: str,
         exclude_tables: list[str] | None,
         include_tables: list[str] | None,
     ) -> tuple[list[TableInfo], list[ForeignKey]]:
@@ -294,10 +334,10 @@ class OntologyGenerator:
             table_filter = ""
             params: list[Any] = [schema]
             if include_tables:
-                table_filter = f" AND t.table_name = ANY($2)"
+                table_filter = " AND t.table_name = ANY($2)"
                 params.append(include_tables)
             elif exclude_tables:
-                table_filter = f" AND t.table_name != ALL($2)"
+                table_filter = " AND t.table_name != ALL($2)"
                 params.append(exclude_tables)
 
             # Use pg_catalog instead of information_schema to avoid permission issues
@@ -309,7 +349,7 @@ class OntologyGenerator:
                 WHERE n.nspname = $1
                 AND c.relkind = 'r'
                 AND c.relname NOT LIKE 'pg_%%'
-                {table_filter.replace('t.table_name', 'c.relname')}
+                {table_filter.replace("t.table_name", "c.relname")}
                 ORDER BY c.relname
             """
             table_rows = await conn.fetch(tables_sql, *params)
@@ -353,28 +393,32 @@ class OntologyGenerator:
 
                 columns = []
                 for cr in col_rows:
-                    columns.append(ColumnInfo(
-                        name=cr["column_name"],
-                        data_type=cr["data_type"],
-                        is_nullable=bool(cr["is_nullable"]),
-                        column_default=cr["column_default"],
-                        character_maximum_length=None,
-                        is_primary_key=cr["column_name"] == pk_name,
-                        ordinal_position=cr["ordinal_position"],
-                    ))
+                    columns.append(
+                        ColumnInfo(
+                            name=cr["column_name"],
+                            data_type=cr["data_type"],
+                            is_nullable=bool(cr["is_nullable"]),
+                            column_default=cr["column_default"],
+                            character_maximum_length=None,
+                            is_primary_key=cr["column_name"] == pk_name,
+                            ordinal_position=cr["ordinal_position"],
+                        )
+                    )
 
                 # Row count estimate
-                count_sql = f"SELECT reltuples::bigint FROM pg_class WHERE relname = $1"
+                count_sql = "SELECT reltuples::bigint FROM pg_class WHERE relname = $1"
                 count_row = await conn.fetchval(count_sql, tname)
 
-                tables.append(TableInfo(
-                    name=tname,
-                    schema_name=schema,
-                    columns=columns,
-                    primary_key=pk_name,
-                    row_count_estimate=int(count_row) if count_row else None,
-                    comment=tr["comment"],
-                ))
+                tables.append(
+                    TableInfo(
+                        name=tname,
+                        schema_name=schema,
+                        columns=columns,
+                        primary_key=pk_name,
+                        row_count_estimate=int(count_row) if count_row else None,
+                        comment=tr["comment"],
+                    )
+                )
 
             # Get foreign keys using pg_catalog (avoids permission issues)
             fk_sql = """
@@ -410,7 +454,8 @@ class OntologyGenerator:
             await conn.close()
 
     async def _introspect_duckdb(
-        self, schema: str,
+        self,
+        schema: str,
         exclude_tables: list[str] | None,
         include_tables: list[str] | None,
     ) -> tuple[list[TableInfo], list[ForeignKey]]:
@@ -450,15 +495,17 @@ class OntologyGenerator:
                     is_pk = col_name.lower() == "id" or (ordinal == 1 and col_name.lower().endswith("_id"))
                     if is_pk and pk_name is None:
                         pk_name = col_name
-                    columns.append(ColumnInfo(
-                        name=col_name,
-                        data_type=str(data_type),
-                        is_nullable=nullable == "YES",
-                        column_default=default,
-                        character_maximum_length=max_len,
-                        is_primary_key=is_pk,
-                        ordinal_position=ordinal,
-                    ))
+                    columns.append(
+                        ColumnInfo(
+                            name=col_name,
+                            data_type=str(data_type),
+                            is_nullable=nullable == "YES",
+                            column_default=default,
+                            character_maximum_length=max_len,
+                            is_primary_key=is_pk,
+                            ordinal_position=ordinal,
+                        )
+                    )
 
                 # Row count
                 try:
@@ -467,13 +514,15 @@ class OntologyGenerator:
                 except Exception:
                     row_count = None
 
-                tables.append(TableInfo(
-                    name=tname,
-                    schema_name=schema,
-                    columns=columns,
-                    primary_key=pk_name,
-                    row_count_estimate=row_count,
-                ))
+                tables.append(
+                    TableInfo(
+                        name=tname,
+                        schema_name=schema,
+                        columns=columns,
+                        primary_key=pk_name,
+                        row_count_estimate=row_count,
+                    )
+                )
 
             # Foreign keys via duckdb_constraints()
             fks: list[ForeignKey] = []
@@ -488,13 +537,15 @@ class OntologyGenerator:
                     tname, from_cols, cname, ref_table, ref_cols = row
                     if from_cols and ref_cols:
                         for fc, rc in zip(from_cols, ref_cols):
-                            fks.append(ForeignKey(
-                                from_table=tname,
-                                from_column=fc,
-                                to_table=ref_table,
-                                to_column=rc,
-                                constraint_name=cname or f"{tname}_{fc}_fkey",
-                            ))
+                            fks.append(
+                                ForeignKey(
+                                    from_table=tname,
+                                    from_column=fc,
+                                    to_table=ref_table,
+                                    to_column=rc,
+                                    constraint_name=cname or f"{tname}_{fc}_fkey",
+                                )
+                            )
             except Exception:
                 pass
 
@@ -503,7 +554,8 @@ class OntologyGenerator:
             conn.close()
 
     async def _introspect_mysql(
-        self, schema: str,
+        self,
+        schema: str,
         exclude_tables: list[str] | None,
         include_tables: list[str] | None,
     ) -> tuple[list[TableInfo], list[ForeignKey]]:
@@ -516,6 +568,7 @@ class OntologyGenerator:
         # Parse MySQL URL
         # mysql://user:pass@host:port/dbname
         from urllib.parse import urlparse
+
         parsed = urlparse(self._url)
         conn = await aiomysql.connect(
             host=parsed.hostname or "localhost",
@@ -540,7 +593,7 @@ class OntologyGenerator:
                 await cur.execute(
                     f"SELECT TABLE_NAME, TABLE_COMMENT FROM information_schema.TABLES "
                     f"WHERE TABLE_SCHEMA = %s AND TABLE_TYPE = 'BASE TABLE'{where_extra}",
-                    (db_name,)
+                    (db_name,),
                 )
                 table_rows = await cur.fetchall()
 
@@ -553,7 +606,7 @@ class OntologyGenerator:
                         "CHARACTER_MAXIMUM_LENGTH, ORDINAL_POSITION, COLUMN_KEY "
                         "FROM information_schema.COLUMNS "
                         "WHERE TABLE_SCHEMA = %s AND TABLE_NAME = %s ORDER BY ORDINAL_POSITION",
-                        (db_name, tname)
+                        (db_name, tname),
                     )
                     col_rows = await cur.fetchall()
 
@@ -563,23 +616,27 @@ class OntologyGenerator:
                         is_pk = cr["COLUMN_KEY"] == "PRI"
                         if is_pk and pk_name is None:
                             pk_name = cr["COLUMN_NAME"]
-                        columns.append(ColumnInfo(
-                            name=cr["COLUMN_NAME"],
-                            data_type=cr["DATA_TYPE"],
-                            is_nullable=cr["IS_NULLABLE"] == "YES",
-                            column_default=cr["COLUMN_DEFAULT"],
-                            character_maximum_length=cr["CHARACTER_MAXIMUM_LENGTH"],
-                            is_primary_key=is_pk,
-                            ordinal_position=cr["ORDINAL_POSITION"],
-                        ))
+                        columns.append(
+                            ColumnInfo(
+                                name=cr["COLUMN_NAME"],
+                                data_type=cr["DATA_TYPE"],
+                                is_nullable=cr["IS_NULLABLE"] == "YES",
+                                column_default=cr["COLUMN_DEFAULT"],
+                                character_maximum_length=cr["CHARACTER_MAXIMUM_LENGTH"],
+                                is_primary_key=is_pk,
+                                ordinal_position=cr["ORDINAL_POSITION"],
+                            )
+                        )
 
-                    tables.append(TableInfo(
-                        name=tname,
-                        schema_name=db_name,
-                        columns=columns,
-                        primary_key=pk_name,
-                        comment=tr["TABLE_COMMENT"] or None,
-                    ))
+                    tables.append(
+                        TableInfo(
+                            name=tname,
+                            schema_name=db_name,
+                            columns=columns,
+                            primary_key=pk_name,
+                            comment=tr["TABLE_COMMENT"] or None,
+                        )
+                    )
 
                 # Get foreign keys
                 await cur.execute(
@@ -587,7 +644,7 @@ class OntologyGenerator:
                     "REFERENCED_COLUMN_NAME, CONSTRAINT_NAME "
                     "FROM information_schema.KEY_COLUMN_USAGE "
                     "WHERE TABLE_SCHEMA = %s AND REFERENCED_TABLE_NAME IS NOT NULL",
-                    (db_name,)
+                    (db_name,),
                 )
                 fk_rows = await cur.fetchall()
                 fks = [
@@ -607,9 +664,9 @@ class OntologyGenerator:
 
     # ── Enum detection ───────────────────────────────────────────────
 
-    async def _detect_enums(self, tables: list[TableInfo],
-                            max_cardinality: int = 25,
-                            min_rows: int = 10) -> dict[str, dict[str, list[str]]]:
+    async def _detect_enums(
+        self, tables: list[TableInfo], max_cardinality: int = 25, min_rows: int = 10
+    ) -> dict[str, dict[str, list[str]]]:
         """Detect enum-like columns by comparing distinct values to total rows.
 
         A column qualifies as enum when its values repeat significantly:
@@ -625,11 +682,13 @@ class OntologyGenerator:
 
         if self._db_type == "postgresql":
             import asyncpg
+
             conn = await asyncpg.connect(self._url)
             try:
                 for table in tables:
                     candidates = [
-                        c for c in table.columns
+                        c
+                        for c in table.columns
                         if _is_likely_enum(c.name) or c.data_type in ("character varying", "varchar", "text")
                     ]
                     if not candidates:
@@ -637,9 +696,7 @@ class OntologyGenerator:
 
                     total_rows = 0
                     try:
-                        count_row = await conn.fetchrow(
-                            f"SELECT COUNT(*) AS cnt FROM {table.schema_name}.{table.name}"
-                        )
+                        count_row = await conn.fetchrow(f"SELECT COUNT(*) AS cnt FROM {table.schema_name}.{table.name}")
                         total_rows = count_row["cnt"] if count_row else 0
                     except Exception:
                         pass
@@ -668,21 +725,19 @@ class OntologyGenerator:
 
         elif self._db_type == "duckdb":
             import duckdb
+
             conn = duckdb.connect(self._url)
             try:
                 for table in tables:
                     candidates = [
-                        c for c in table.columns
-                        if _is_likely_enum(c.name) or "varchar" in c.data_type.lower()
+                        c for c in table.columns if _is_likely_enum(c.name) or "varchar" in c.data_type.lower()
                     ]
                     if not candidates:
                         continue
 
                     total_rows = 0
                     try:
-                        count_result = conn.execute(
-                            f"SELECT COUNT(*) FROM {table.name}"
-                        ).fetchone()
+                        count_result = conn.execute(f"SELECT COUNT(*) FROM {table.name}").fetchone()
                         total_rows = count_result[0] if count_result else 0
                     except Exception:
                         pass
@@ -761,13 +816,10 @@ class OntologyGenerator:
         for table in tables:
             node_name = _table_to_node_name(table.name)
 
-            # Build fields (include all columns except PK and system columns)
+            # Build fields, including the declared primary key for queryable identities.
             fields: dict[str, FieldDef] = {}
             for col in table.columns:
-                if col.is_primary_key:
-                    continue
-
-                if not include_system_columns and col.name in _SYSTEM_COLUMNS:
+                if not col.is_primary_key and not include_system_columns and col.name in _SYSTEM_COLUMNS:
                     continue
 
                 field_type = _map_type(col.data_type)
@@ -775,7 +827,7 @@ class OntologyGenerator:
                 # Check for enum
                 values = None
                 table_enums = enum_values.get(table.name, {})
-                if col.name in table_enums:
+                if not col.is_primary_key and col.name in table_enums:
                     field_type = "enum"
                     values = table_enums[col.name]
 
@@ -826,6 +878,7 @@ class OntologyGenerator:
     def save(self, ontology: Ontology, path: str) -> None:
         """Save the generated ontology to a YAML file."""
         from nexaql.ontology.writer import save_ontology
+
         save_ontology(ontology, path)
 
     # ── LLM enrichment ───────────────────────────────────────────────
@@ -963,11 +1016,13 @@ def discover_edges(
                 node=to_node_name,
                 description=f"Related {to_node_name}",
                 join_type="JOIN",
-                join_steps=[JoinStep(
-                    table=fk.to_table,
-                    alias_key=to_node_name,
-                    condition=f"{{{from_node_name}}}.{fk.from_column} = {{{to_node_name}}}.{fk.to_column}",
-                )],
+                join_steps=[
+                    JoinStep(
+                        table=fk.to_table,
+                        alias_key=to_node_name,
+                        condition=f"{{{from_node_name}}}.{fk.from_column} = {{{to_node_name}}}.{fk.to_column}",
+                    )
+                ],
             )
             modified_nodes.add(from_node_name)
 
@@ -984,11 +1039,13 @@ def discover_edges(
                 node=from_node_name,
                 description=f"{from_node_name.replace('_', ' ').title()} referencing this {to_node_name}",
                 join_type="LEFT JOIN",
-                join_steps=[JoinStep(
-                    table=fk.from_table,
-                    alias_key=from_node_name,
-                    condition=f"{{{to_node_name}}}.{fk.to_column} = {{{from_node_name}}}.{fk.from_column}",
-                )],
+                join_steps=[
+                    JoinStep(
+                        table=fk.from_table,
+                        alias_key=from_node_name,
+                        condition=f"{{{to_node_name}}}.{fk.to_column} = {{{from_node_name}}}.{fk.from_column}",
+                    )
+                ],
             )
             modified_nodes.add(to_node_name)
             created_pairs.add((from_node_name, to_node_name, fk.from_column))
@@ -1029,11 +1086,13 @@ def discover_edges(
             node=target_name,
             description=f"Related {target_name}",
             join_type="JOIN",
-            join_steps=[JoinStep(
-                table=target_table,
-                alias_key=target_name,
-                condition=f"{{{source_node_name}}}.{field_name} = {{{target_name}}}.{target_pk}",
-            )],
+            join_steps=[
+                JoinStep(
+                    table=target_table,
+                    alias_key=target_name,
+                    condition=f"{{{source_node_name}}}.{field_name} = {{{target_name}}}.{target_pk}",
+                )
+            ],
         )
 
         # Inverse edge on target
@@ -1048,11 +1107,13 @@ def discover_edges(
             node=source_node_name,
             description=f"{source_node_name.replace('_', ' ').title()} referencing this {target_name}",
             join_type="LEFT JOIN",
-            join_steps=[JoinStep(
-                table=source_table,
-                alias_key=source_node_name,
-                condition=f"{{{target_name}}}.{target_pk} = {{{source_node_name}}}.{field_name}",
-            )],
+            join_steps=[
+                JoinStep(
+                    table=source_table,
+                    alias_key=source_node_name,
+                    condition=f"{{{target_name}}}.{target_pk} = {{{source_node_name}}}.{field_name}",
+                )
+            ],
         )
         modified_nodes.add(target_name)
         created_pairs.add((source_node_name, target_name, field_name))
@@ -1085,11 +1146,13 @@ def discover_edges(
                     node=source_node_name,
                     description=f"Related {source_node_name}",
                     join_type="JOIN",
-                    join_steps=[JoinStep(
-                        table=source_table,
-                        alias_key=source_node_name,
-                        condition=f"{{{other_name}}}.{field_name} = {{{source_node_name}}}.{source_pk}",
-                    )],
+                    join_steps=[
+                        JoinStep(
+                            table=source_table,
+                            alias_key=source_node_name,
+                            condition=f"{{{other_name}}}.{field_name} = {{{source_node_name}}}.{source_pk}",
+                        )
+                    ],
                 )
                 modified_nodes.add(other_name)
 
@@ -1106,11 +1169,13 @@ def discover_edges(
                     node=other_name,
                     description=f"{other_name.replace('_', ' ').title()} referencing this {source_node_name}",
                     join_type="LEFT JOIN",
-                    join_steps=[JoinStep(
-                        table=other_table,
-                        alias_key=other_name,
-                        condition=f"{{{source_node_name}}}.{source_pk} = {{{other_name}}}.{field_name}",
-                    )],
+                    join_steps=[
+                        JoinStep(
+                            table=other_table,
+                            alias_key=other_name,
+                            condition=f"{{{source_node_name}}}.{source_pk} = {{{other_name}}}.{field_name}",
+                        )
+                    ],
                 )
             created_pairs.add((other_name, source_node_name, field_name))
 

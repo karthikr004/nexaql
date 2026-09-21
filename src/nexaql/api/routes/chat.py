@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Optional
+from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
@@ -13,6 +13,7 @@ from nexaql.adapters import get_adapter
 from nexaql.api.deps import get_config, get_ontology
 from nexaql.api.middleware import get_user_context
 from nexaql.chat.agent import ChatResponse, ask
+from nexaql.chat.context import AdditionalContext
 
 router = APIRouter()
 
@@ -26,6 +27,7 @@ class ChatRequest(BaseModel):
     question: str
     history: list[ChatMessage] = []
     thread_id: int | None = None
+    additional_context: AdditionalContext | None = None
 
 
 class ChatResponseBody(BaseModel):
@@ -124,6 +126,7 @@ async def chat_endpoint(body: ChatRequest, request: Request) -> ChatResponseBody
             llm_config=cfg.llm,
             user=user,
             business_context=business_context or None,
+            additional_context=body.additional_context,
         )
     except Exception as e:
         return ChatResponseBody(error=str(e), threadId=thread_id)

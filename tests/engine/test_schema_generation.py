@@ -23,8 +23,8 @@ from nexaql.ontology.generator import (
 # Unit tests for helper functions
 # ---------------------------------------------------------------------------
 
-class TestMapType:
 
+class TestMapType:
     def test_integer_types(self):
         for t in ("integer", "int", "int4", "int8", "bigint", "smallint", "serial"):
             assert _map_type(t) == "integer", f"Failed for {t}"
@@ -56,7 +56,6 @@ class TestMapType:
 
 
 class TestIsLikelyEnum:
-
     def test_known_enum_patterns(self):
         assert _is_likely_enum("status") is True
         assert _is_likely_enum("order_status") is True
@@ -76,7 +75,6 @@ class TestIsLikelyEnum:
 
 
 class TestIsPii:
-
     def test_pii_columns(self):
         assert _is_pii("email") is True
         assert _is_pii("phone") is True
@@ -92,7 +90,6 @@ class TestIsPii:
 
 
 class TestTableToNodeName:
-
     def test_strips_prefix(self):
         assert _table_to_node_name("tbl_customers") == "customers"
         assert _table_to_node_name("t_orders") == "orders"
@@ -156,10 +153,10 @@ INSERT INTO tags VALUES (1, 'sale'), (2, 'new'), (3, 'featured'), (4, 'sale'), (
 
 
 class TestEnumDetection:
-
     @pytest_asyncio.fixture(scope="class")
     async def db_path(self, tmp_path_factory):
         import duckdb
+
         path = str(tmp_path_factory.mktemp("enum_test") / "test.db")
         conn = duckdb.connect(path)
         conn.execute(ENUM_TEST_SQL)
@@ -177,6 +174,7 @@ class TestEnumDetection:
     async def tables(self, db_path):
         from nexaql.ontology.generator import ColumnInfo, TableInfo
         import duckdb
+
         conn = duckdb.connect(db_path)
 
         result = []
@@ -187,17 +185,21 @@ class TestEnumDetection:
             ).fetchall()
             columns = []
             for col_name, col_type in cols_raw:
-                columns.append(ColumnInfo(
-                    name=col_name,
-                    data_type=col_type,
-                    is_nullable=True,
-                    ordinal_position=len(columns) + 1,
-                ))
-            result.append(TableInfo(
-                name=table_name,
-                schema_name="main",
-                columns=columns,
-            ))
+                columns.append(
+                    ColumnInfo(
+                        name=col_name,
+                        data_type=col_type,
+                        is_nullable=True,
+                        ordinal_position=len(columns) + 1,
+                    )
+                )
+            result.append(
+                TableInfo(
+                    name=table_name,
+                    schema_name="main",
+                    columns=columns,
+                )
+            )
         conn.close()
         return result
 
@@ -251,3 +253,31 @@ class TestEnumDetection:
         tags_table = [t for t in tables if t.name == "tags"]
         enums = await generator._detect_enums(tags_table)
         assert "tags" not in enums
+
+
+@pytest.mark.asyncio
+async def test_generated_primary_key_is_a_queryable_typed_field():
+    from unittest.mock import AsyncMock
+    from nexaql.ontology.generator import TableInfo, ColumnInfo
+
+    generator = OntologyGenerator(":memory:")
+    generator.introspect = AsyncMock(
+        return_value=(
+            [
+                TableInfo(
+                    name="orders",
+                    schema_name="public",
+                    primary_key="id",
+                    columns=[
+                        ColumnInfo(name="id", data_type="integer", is_nullable=False, is_primary_key=True),
+                        ColumnInfo(name="amount", data_type="numeric", is_nullable=True),
+                    ],
+                )
+            ],
+            [],
+        )
+    )
+    ontology = await generator.generate(detect_enums=False, detect_pii=False)
+    node = next(iter(ontology.nodes.values()))
+    assert node.primary_key in node.fields
+    assert node.fields[node.primary_key].type == "integer"
