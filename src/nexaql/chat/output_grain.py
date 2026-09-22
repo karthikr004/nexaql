@@ -30,19 +30,27 @@ def apply_output_grain(intent, ontology):
     fields = list(dict.fromkeys([key, *fields]))
     result = deepcopy(intent)
 
-    # Filter-only edges retain constraints, not lower-grain projections.
-    def clear_projection(selected):
+    # Remove lower-grain detail columns, retaining measures that aggregate into
+    # the selected entity. Dropping these measures silently changes the request.
+    def clear_detail_projection(selected):
         selected.fields = []
         selected.calcs = []
-        selected.aggregations = []
         for child in selected.edges:
-            clear_projection(child)
+            clear_detail_projection(child)
+
+    if not path:
+        # The requested entity already owns the result. Its calculated measures
+        # and descendant aggregates are outputs, not lower-grain detail rows.
+        result.fields = list(dict.fromkeys([*fields, *result.fields]))
+        for selected in result.edges:
+            clear_detail_projection(selected)
+        result.distinct = True
+        return result
 
     for selected in result.edges:
-        clear_projection(selected)
+        clear_detail_projection(selected)
     result.fields = fields if not path else []
     result.calcs = []
-    result.aggregations = []
     result.order_by = []
     result.distinct = True
     children = result.edges
