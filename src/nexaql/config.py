@@ -48,6 +48,7 @@ class LLMConfig(BaseModel):
     max_tokens: int = 4096
     summary_max_tokens: int = 2048  # extra headroom for thinking models (Qwen, etc.)
     generation_mode: str = "intent"  # "intent" (structured JSON→builder) or "raw" (LLM generates NexaQL)
+    reasoning_effort: str | None = None  # Optional OpenAI-compatible provider setting.
 
 
 class ServerConfig(BaseModel):

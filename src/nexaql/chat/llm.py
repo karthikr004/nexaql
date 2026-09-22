@@ -125,12 +125,18 @@ def chat_completion(
         full_messages.append({"role": "system", "content": system})
     full_messages.extend(messages)
 
+    options = {}
+    if llm_config.reasoning_effort is not None:
+        options["reasoning_effort"] = llm_config.reasoning_effort
     response = client.chat.completions.create(
         model=llm_config.model,
         max_tokens=tok,
         messages=full_messages,  # type: ignore[arg-type]
+        **options,
     )
 
+    if response.choices[0].finish_reason == "length":
+        raise RuntimeError("Model output limit reached before completion; reduce reasoning effort or increase the output token budget")
     text = response.choices[0].message.content or ""
     # Strip thinking tags from models like Qwen3 that emit <think>...</think>
     text = _THINK_RE.sub("", text).strip()
