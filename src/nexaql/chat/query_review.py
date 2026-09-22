@@ -51,7 +51,7 @@ def review_query(question, query, intent, ontology, business_context, llm_config
                 ),
             }
         ],
-        max_tokens=min(llm_config.max_tokens, 2000),
+        max_tokens=min(llm_config.max_tokens, llm_config.review_max_tokens),
     )
     result = extract_intent_json(response)
     if (
