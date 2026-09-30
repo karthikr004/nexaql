@@ -26,7 +26,7 @@ async def plan_query(question, history, ontology, llm_config, *, business_contex
         query = candidate or ""
         try:
             if not candidate:
-                raise ValueError("Could not generate a query")
+                raise ValueError(response if "Generation validation failed:" in response else "Could not generate a query")
             prepare_query(query, ontology)
             review = await asyncio.to_thread(review_query, question, query, intent, scoped, context, llm_config)
             trace.append({"attempt": attempt + 1, "review": review})

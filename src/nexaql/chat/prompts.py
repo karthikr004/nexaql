@@ -431,6 +431,11 @@ or credit limits for absence. The compiler builds the LEFT JOIN/IS NULL check.
 For cumulative-sum comparisons against a referenced entity, use the typed field:
 "cumulative_comparison": {{"operation":"sum", "measure":"amount", "reference":"EXACT_EDGE_NAME", "threshold":"amount", "operator":"gt"}}.
 This replaces calcs, aggregations and calc_filters for that comparison: omit those.
+If the request explicitly asks to DISPLAY the cumulative total or excess, set
+"total_alias": "total_invoiced_amount" and/or "excess_alias": "excess_amount"
+inside cumulative_comparison. These optional outputs are supported only at detail
+or referenced-entity grain. For a distinct list of parent POs/invoices, omit them:
+a PO-line total is not a PO/invoice total. Preserve the requested output entity.
 Use the contributing-detail node as root. The compiler derives the partition key
 from the referenced entity primary key, validates many-to-one relationships, and
 builds the window filter. Always include output_grain with the requested entity
@@ -461,13 +466,8 @@ only when explicitly required by the question or applicable business definition.
      If the user's input is ambiguous (e.g. "US" could match "US-EAST" and "US-WEST"), use "in" with all matching values.
    - String values must match exact case from ontology.
 6. "calc_filters" — Filters on computed expressions, e.g. "days until expiry < 30".
-   To return individual rows whose group total exceeds a referenced allowance, use a window calc:
-   SUM(amount) OVER (PARTITION BY referenced_id) - direct_edge.amount, filtered gt 0.
-   This computes the group total while preserving individual rows; the engine filters AFTER the window.
-   Also select the window total as a calc for auditability. Use exact schema fields/edges.
-   Do not GROUP BY the individual row ID to compute a multi-row total. Do not traverse a header
-   to all of its lines when the request specifies a directly referenced line. Joining other one-to-many
-   edges before the window multiplies rows and changes the sum; avoid such joins.
+   For cumulative comparisons use cumulative_comparison and its optional total_alias/excess_alias
+   outputs instead of authoring window expressions or referring to output aliases in filters.
    Do not add quantity checks or status exclusions unless requested or established in business context.
    For requests for ALL matching rows, omit limit: pagination is handled on stored results.
 7. "special_filters" — Pre-defined filters from the ontology. Use exact names and appropriate values.

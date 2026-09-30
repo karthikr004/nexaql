@@ -4,7 +4,7 @@ from copy import deepcopy
 import re
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class CumulativeComparison(BaseModel):
@@ -14,6 +14,8 @@ class CumulativeComparison(BaseModel):
     reference: str
     threshold: str
     operator: Literal["gt", "gte", "lt", "lte", "eq", "ne"]
+    total_alias: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
+    excess_alias: str | None = Field(default=None, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def to_one_target(node, edge_name, ontology):
@@ -36,7 +38,7 @@ def to_one_target(node, edge_name, ontology):
 def compile_comparison(intent, ontology):
     if intent.cumulative_comparison is None:
         return intent
-    from nexaql.chat.intent import IntentCalcFilter
+    from nexaql.chat.intent import IntentCalc, IntentCalcFilter
 
     spec = CumulativeComparison.model_validate(intent.cumulative_comparison)
     node = ontology.nodes[intent.node]
@@ -67,5 +69,19 @@ def compile_comparison(intent, ontology):
         raise ValueError("Typed comparison cannot be combined with independently authored calc filters")
     result = deepcopy(intent)
     result.calc_filters = [expected]
+    # A reference total is constant at detail/reference grain, but cannot be
+    # projected at a coarser entity grain without defining another aggregation.
+    if spec.total_alias or spec.excess_alias:
+        path = intent.output_grain.get("path", [])
+        if path not in ([], [spec.reference]):
+            raise ValueError("Comparison totals require detail or referenced-entity output grain; do not label a line total as a parent total")
+        aliases = [a for a in (spec.total_alias, spec.excess_alias) if a]
+        if len(set(aliases)) != len(aliases) or any(c.alias in aliases for c in result.calcs):
+            raise ValueError("Comparison output aliases must be unique")
+        total = f"SUM({spec.measure}) OVER (PARTITION BY {spec.reference}.{target.primary_key})"
+        if spec.total_alias:
+            result.calcs.append(IntentCalc(alias=spec.total_alias, expr=total))
+        if spec.excess_alias:
+            result.calcs.append(IntentCalc(alias=spec.excess_alias, expr=expr))
     result.cumulative_comparison = spec.model_dump()
     return result

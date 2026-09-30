@@ -47,10 +47,38 @@ def apply_output_grain(intent, ontology):
         result.distinct = True
         return result
 
-    for selected in result.edges:
-        clear_detail_projection(selected)
+    # Preserve the selected entity and its to-one display relationships. Those
+    # fields do not change the output grain (e.g. an order number for each line).
+    from nexaql.chat.analytical_intent import to_one_target
+
+    def project_edges(owner, edges, remaining):
+        for selected in edges:
+            edge_def = (owner.edges or {}).get(selected.name)
+            if not edge_def:
+                raise ValueError(f"Unknown relationship {selected.name}")
+            child = ontology.nodes[edge_def.node]
+            if remaining:
+                if selected.name == remaining[0]:
+                    if len(remaining) > 1:
+                        selected.fields = []
+                        selected.calcs = []
+                    project_edges(child, selected.edges, remaining[1:])
+                else:
+                    clear_detail_projection(selected)
+            else:
+                # Only retain fields functionally dependent on the output key.
+                try:
+                    to_one_target(owner, selected.name, ontology)
+                except ValueError:
+                    clear_detail_projection(selected)
+                else:
+                    project_edges(child, selected.edges, [])
+
+    project_edges(ontology.nodes[intent.node], result.edges, path)
     result.fields = fields if not path else []
-    result.calcs = []
+    comparison = result.cumulative_comparison or {}
+    comparison_aliases = {comparison.get("total_alias"), comparison.get("excess_alias")} - {None}
+    result.calcs = [calc for calc in result.calcs if calc.alias in comparison_aliases]
     result.order_by = []
     result.distinct = True
     children = result.edges
@@ -62,5 +90,5 @@ def apply_output_grain(intent, ontology):
         selected.required = True
         children = selected.edges
     if path:
-        selected.fields = fields
+        selected.fields = list(dict.fromkeys([*fields, *selected.fields]))
     return result

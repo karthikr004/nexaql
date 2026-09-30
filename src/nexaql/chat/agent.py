@@ -14,6 +14,7 @@ Ollama (local), OpenRouter (cloud), or any OpenAI-compatible endpoint.
 from __future__ import annotations
 
 import logging
+import asyncio
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -143,8 +144,8 @@ async def generate_query_via_intent(
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": question})
 
-    response_text = chat_completion(
-        llm_config,
+    response_text = await asyncio.to_thread(
+        chat_completion, llm_config,
         system=system_prompt,
         messages=messages,
         max_tokens=llm_config.max_tokens,
@@ -207,8 +208,8 @@ async def generate_query_raw(
         messages.append({"role": m["role"], "content": m["content"]})
     messages.append({"role": "user", "content": question})
 
-    response_text = chat_completion(
-        llm_config,
+    response_text = await asyncio.to_thread(
+        chat_completion, llm_config,
         system=system_prompt,
         messages=messages,
         max_tokens=llm_config.max_tokens,
@@ -271,8 +272,8 @@ async def execute_with_retry_intent(
             prepare_query(query, ontology, user)
         except (ValueError, PermissionError) as exc:
             return None, str(exc)
-        review = review_query(
-            question,
+        review = await asyncio.to_thread(
+            review_query, question,
             query,
             current_intent,
             ontology,
@@ -348,8 +349,8 @@ async def summarize_results(
     if result_entity:
         prompt += f"\nVerified output grain: one row per {result_entity}. The total is {row_count} distinct {result_entity} records, not source/calculation rows."
 
-    return chat_completion(
-        llm_config,
+    return await asyncio.to_thread(
+        chat_completion, llm_config,
         messages=[{"role": "user", "content": prompt}],
         max_tokens=llm_config.summary_max_tokens,
     )
